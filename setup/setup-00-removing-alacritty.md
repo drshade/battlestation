@@ -1,43 +1,23 @@
 # Removing alacritty (standardize on kitty)
 
-**Goal:** use a single terminal emulator — **kitty** — and remove alacritty.
+**Goal:** one terminal — kitty — with alacritty gone.
 
 ## Background
 
-A fresh CachyOS + Noctalia install ships with *two* terminals wired in:
+A fresh CachyOS + Noctalia install ships two terminals:
 
-- **kitty** — the main terminal. Hyprland sets `TERMINAL = "kitty"` in
-  `stow/home/hypr/.config/hypr/config/defaults.lua`, so Super+Return and the btop
-  shortcut launch kitty.
-- **alacritty** — used only by Noctalia's app launcher. The launcher's
-  `terminalCommand` setting wraps terminal apps (any `.desktop` with
-  `Terminal=true`, e.g. btop/htop/vim) as `alacritty -e <app>`.
+- **kitty** — the main terminal. Hyprland sets `TERMINAL = "kitty"`, so
+  Super+Return and the btop shortcut launch it.
+- **alacritty** — used only by Noctalia's app launcher, which wraps TUI apps
+  (any `.desktop` with `Terminal=true`) as `alacritty -e <app>`.
 
-So removing alacritty requires repointing Noctalia at kitty first, otherwise
-launching a TUI app from the Noctalia launcher would break.
+We standardized on kitty. The config that does this — Hyprland's `TERMINAL` and
+Noctalia's `appLauncher.terminalCommand = "kitty -e"` — is **already committed in
+this repo**, so stowing applies it automatically, and the repo carries no
+alacritty package. The one thing the dotfiles can't do is uninstall the system
+package.
 
-## Steps
-
-### 1. Point Noctalia's launcher at kitty
-
-In `stow/home/noctalia/.config/noctalia/settings.json`, under `appLauncher`:
-
-```diff
--        "terminalCommand": "alacritty -e",
-+        "terminalCommand": "kitty -e",
-```
-
-(Reload Noctalia, or log out/in, for it to pick up the change if it was running.)
-
-### 2. Remove the alacritty Stow package from this repo
-
-```sh
-cd ~/dev/cachyos-dotfiles
-( cd stow/home && stow --delete --target="$HOME" alacritty )  # removes ~/.config/alacritty symlink
-git rm -r stow/home/alacritty                                 # drop the config from the repo
-```
-
-### 3. Uninstall the alacritty system package (needs sudo)
+## Step (per machine)
 
 ```sh
 sudo pacman -Rns alacritty
@@ -46,13 +26,5 @@ sudo pacman -Rns alacritty
 ## Verify
 
 ```sh
-ls ~/.config/alacritty        # should be: No such file or directory
-pacman -Q alacritty           # should be: error: package 'alacritty' was not found
-grep terminalCommand ~/.config/noctalia/settings.json   # -> "kitty -e"
+pacman -Q alacritty   # -> error: package 'alacritty' was not found
 ```
-
-## Done when
-
-- Super+Return opens kitty (unchanged).
-- Launching a TUI app (e.g. btop) from the Noctalia launcher opens it in kitty.
-- alacritty is gone from the system and the repo.
