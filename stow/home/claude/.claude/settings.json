@@ -1,6 +1,7 @@
 {
   "tui": "fullscreen",
   "theme": "dark",
+  "preferredNotifChannel": "notifications_disabled",
   "enabledPlugins": {
     "clangd-lsp@claude-plugins-official": true
   },
