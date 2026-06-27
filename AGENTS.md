@@ -136,6 +136,10 @@ itself the grouped, ordered index — there is no separate list to maintain. See
   the symlink, and `readlink -f` it should resolve into this repo.
 - Before committing, sanity-check nothing secret was staged:
   `git ls-files | grep -iE 'token|secret|fish_variables'`.
+- **Avoid `git add -A`.** Apps like Noctalia rewrite their own tracked config at
+  runtime (see gotchas), so a blanket add silently bundles unrelated churn into
+  your commit. Stage explicit paths and review `git status` first; if churn lands
+  in the wrong commit, split it (unpushed history is safe to tidy).
 - System-level actions (`pacman -Rns`, `pacman -S`) need sudo — hand the user
   the exact command rather than running it, and record it in the relevant
   `setup/` note so it is reproducible.
