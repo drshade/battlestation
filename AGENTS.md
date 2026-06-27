@@ -17,9 +17,12 @@ structure as a first-class concern; do not build on a messy base.
    package set is the directory listing under `stow/<group>/`, not a table in a
    doc. (A hand-maintained package table once drifted and contradicted reality —
    don't reintroduce that class of bug.)
-3. **Separate namespaces.** Stowable content lives in `stow/`; repo meta (docs,
-   scripts, runbooks) lives outside it. Mixing the two is what forced the old
-   ignore-list.
+3. **Separate namespaces.** Stow only ever reads `stow/<group>/`, so packages —
+   the only stowable namespace — live there. The stow driver scripts live at the
+   `stow/` module root (co-located with the trees they deploy, but never inside a
+   group, so they are structurally un-stowable). Project meta (docs, runbooks)
+   lives at the repo root. Mixing packages with non-packages *inside a group* is
+   what forced the old ignore-list — don't.
 4. **Design before editing structure.** When a change affects layout or
    conventions, stop and think it through; then update the docs that describe it
    in the same change so nothing drifts.
@@ -37,26 +40,33 @@ version-controlled here and symlinked into place with **GNU Stow**.
 
 ## The Stow model
 
-- All stowable content lives under **`stow/`**, organized **by target root**:
-  `stow/<target-group>/<package>/`. The group name maps to a `stow --target`
-  (see `target_for()` in `stow-all.sh`): `home → $HOME`, `root → /`.
+- Stowable content lives under **`stow/`**, organized **by target root**:
+  `stow/<target-group>/<package>/`. Each group has a driver script
+  `stow/stow-<group>.sh` that stows that group into its target.
 - Each directory inside a target group is a **package** whose internal layout
   mirrors that target. Example: `stow/home/hypr/.config/hypr/` →
   `~/.config/hypr/`.
 - Everything inside a target group is a package, **by construction** — there is
-  no ignore-list. Repo meta (`README.md`, `AGENTS.md`, `setup/`, `stow-all.sh`)
-  lives *outside* `stow/`, so it can never be stowed by accident.
+  no ignore-list. The driver scripts sit at the `stow/` module root, never
+  inside a group, so they are never stowable. Project meta (`README.md`,
+  `AGENTS.md`, `setup/`) lives at the repo root.
 - **Why group by target.** The only axis that varies between dotfiles is the
   destination *root*. Everything under `$HOME` (`~/.config`, `~/.local`,
   `~/.bashrc`) is the same target and needs no split — a package just mirrors
   the deeper path. A genuinely different root (e.g. `/etc`) becomes a new group
-  `stow/root/`. Adding a target = add a case to `target_for()` **and** create
-  the matching `stow/<group>/` dir; the guard errors on any unregistered group,
-  so the two cannot drift.
+  `stow/root/` with its own `stow/stow-root.sh`.
+- **Why split scripts by target.** Home configs must be stowed as the normal
+  user; system configs need root. One combined script run under sudo would make
+  `~` symlinks root-owned. So `stow-home.sh` refuses to run as root and
+  `stow-root.sh` refuses to run as non-root — each enforces its own privilege.
+- Adding a target group = create `stow/<group>/` **and** a matching
+  `stow/stow-<group>.sh`; the script name mirrors the dir name, so the pairing
+  is self-evident.
 - After stowing, `~/.config/<app>` is a **symlink into this repo**. Editing the
   file in `~/.config` and editing it here are the same file — there is no copy
   step and no sync to run.
-- `./stow-all.sh` stows every package in every group into its mapped target.
+- Stow everything with `./stow/stow-home.sh` (and `sudo ./stow/stow-root.sh`
+  once `stow/root/` has packages).
 
 ### Source-of-truth rule (important)
 
@@ -65,7 +75,7 @@ version-controlled here and symlinked into place with **GNU Stow**.
 generic. We adopted this after the README's hand-maintained package table
 drifted out of sync with reality (it still listed `alacritty` after we had
 removed it). If you find yourself writing "the packages are: a, b, c" in a doc,
-stop — point at `stow/` or `stow-all.sh` instead.
+stop — point at `stow/<group>/` instead.
 
 Consequence: **adding or removing an app requires no doc edit.** The directory's
 presence (or absence) under its target group is the registration.

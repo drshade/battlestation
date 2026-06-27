@@ -6,32 +6,35 @@ Personal dotfiles for CachyOS (Hyprland + Noctalia), managed with [GNU Stow](htt
 
 ```
 cachyos-dotfiles/
-├── stow/              # all stowable content, grouped by target root
-│   └── home/          #   → stowed into $HOME
-│       ├── hypr/.config/hypr/
-│       ├── noctalia/.config/noctalia/
-│       └── ...
-│   # (future: stow/root/ → stowed into /  for system configs)
-├── setup/             # reproducible per-topic setup notes (never stowed)
-├── AGENTS.md          # how to work in this repo (read this first)
-├── stow-all.sh        # stow every package into its target
+├── stow/                  # the stow module: trees grouped by target + drivers
+│   ├── home/              #   packages stowed into $HOME
+│   │   ├── hypr/.config/hypr/
+│   │   ├── noctalia/.config/noctalia/
+│   │   └── ...
+│   ├── stow-home.sh       #   stow home/ into $HOME      (run as you)
+│   └── stow-root.sh       #   stow root/ into /          (run with sudo)
+│   # (future: stow/root/ → system configs like /etc/...)
+├── setup/                 # reproducible per-topic setup notes (never stowed)
+├── AGENTS.md              # how to work in this repo (read this first)
 └── README.md
 ```
 
-Packages are organized by **target root**: `stow/<target-group>/<package>/`. The
-group name maps to a `stow --target` (see `stow-all.sh`): `home → $HOME`. A
-package's internal layout mirrors that target, e.g. `stow/home/hypr/.config/hypr/`
-→ `~/.config/hypr/`.
+Packages are organized by **target root**: `stow/<target-group>/<package>/`, and
+each group has its own driver script `stow/stow-<group>.sh`. A package's internal
+layout mirrors its target, e.g. `stow/home/hypr/.config/hypr/` → `~/.config/hypr/`.
 
 Why the `home/` layer when there's only one target today? Because the only thing
 that varies between dotfiles is the *destination root* — everything under your
 home dir (`~/.config`, `~/.local`, `~/.bashrc`) is the **same** target and needs
-no split. A genuinely different root (e.g. `/etc`, which needs sudo) becomes
-`stow/root/` with zero refactor.
+no split. A genuinely different root (e.g. `/etc`) becomes `stow/root/` + a
+`stow-root.sh`, with no refactor.
+
+Why two scripts instead of one? Home configs must be stowed **as you**; system
+configs need **root**. Running everything under sudo would make your `~` symlinks
+root-owned. Keeping them separate keeps each at the correct privilege.
 
 The package set is **defined by the directories under `stow/<group>/`** — there
-is no hand-maintained list. Repo meta (docs, scripts) lives *outside* `stow/`, so
-there is nothing to exclude.
+is no hand-maintained list. Repo meta (docs) lives outside `stow/`.
 
 See [`setup/`](setup/) for reproducible per-topic notes on how this machine was
 configured — a runbook for rebuilds.
@@ -42,7 +45,8 @@ configured — a runbook for rebuilds.
 sudo pacman -S stow
 git clone <repo-url> ~/dev/cachyos-dotfiles
 cd ~/dev/cachyos-dotfiles
-./stow-all.sh
+./stow/stow-home.sh          # your configs -> $HOME
+sudo ./stow/stow-root.sh     # system configs -> /   (no-op until stow/root/ exists)
 ```
 
 ## Common commands
@@ -64,4 +68,5 @@ mv ~/.config/newapp stow/home/newapp/.config/newapp
 ```
 
 No README or list to update — the new directory under `stow/home/` *is* the
-registration. To add a new *target root*, see `stow-all.sh`'s `target_for()`.
+registration. To add a new *target root*, create `stow/<group>/` and a matching
+`stow/stow-<group>.sh`.
