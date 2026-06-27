@@ -2,6 +2,18 @@ local mainMod = "SUPER"
 local noctCall = "qs -c noctalia-shell ipc call "
 local launchPrefix = "uwsm app -- " -- if you are not using UWSM, make this empty (e.g. "")
 
+-- Universal copy/paste/cut: send Ctrl+Insert / Shift+Insert, honored by GUI apps
+-- AND terminals (and Ctrl+Insert avoids Ctrl+C = SIGINT). down -> 50ms -> up
+-- gives the synthetic press time to register.
+local function send_shortcut(mods, key)
+    return function()
+        hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "down", window = "activewindow" }))
+        hl.timer(function()
+            hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "up", window = "activewindow" }))
+        end, { timeout = 50, type = "oneshot" })
+    end
+end
+
 ---------------------------
 ---- WINDOW MANAGEMENT ----
 ---------------------------
@@ -41,11 +53,8 @@ hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize())
 hl.bind(mainMod .. " + Return",     hl.dsp.exec_cmd(launchPrefix .. TERMINAL))
 hl.bind(mainMod .. " + E",          hl.dsp.exec_cmd(launchPrefix .. FILE_MANAGER))
 hl.bind(mainMod .. " + T",          hl.dsp.exec_cmd(launchPrefix .. EDITOR))
-hl.bind(mainMod .. " + C",          hl.dsp.exec_cmd(launchPrefix .. CALCULATOR))
 hl.bind(mainMod .. " + W",          hl.dsp.exec_cmd(launchPrefix .. BROWSER))
 hl.bind("CONTROL + SHIFT + Escape", hl.dsp.exec_cmd(launchPrefix .. TERMINAL .. " -e btop"))
-hl.bind(mainMod .. " + Z",          hl.dsp.exec_cmd(noctCall .. "settings toggle"))
-hl.bind(mainMod .. " + X",          hl.dsp.exec_cmd(noctCall .. "controlCenter toggle"))
 hl.bind(mainMod .. " + Space",      hl.dsp.exec_cmd(noctCall .. "launcher toggle"))
 hl.bind(mainMod .. " + period",     hl.dsp.exec_cmd(noctCall .. "launcher emoji"))
 
@@ -82,8 +91,12 @@ hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolki
 -- Theming and Wallpaper
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd(noctCall .. " wallpaper toggle"))
 
--- Clipboard
-hl.bind(mainMod .. " + V", hl.dsp.exec_cmd(noctCall .. "launcher clipboard"))
+-- Editing: universal copy/paste/cut/undo (see send_shortcut helper) + clipboard history
+hl.bind(mainMod .. " + C",           send_shortcut("CTRL", "Insert"))   -- copy
+hl.bind(mainMod .. " + V",           send_shortcut("SHIFT", "Insert"))  -- paste
+hl.bind(mainMod .. " + X",           send_shortcut("CTRL", "X"))        -- cut
+hl.bind(mainMod .. " + Z",           send_shortcut("CTRL", "Z"))        -- undo
+hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipboard"))
 
 --------------------
 ---- WORKSPACES ----
