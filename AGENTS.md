@@ -94,24 +94,15 @@ git rm -r stow/home/oldapp                                  # drops it from the 
 
 ## The setup/ runbook
 
-`setup/` holds **reproducible, per-topic notes** — one `.md` per topic, named
-`<theme>-<order>-<description>.md` — documenting what changed, why, and the exact
-commands, so a fresh install can be rebuilt and past decisions are explained.
-The `<theme>` groups related notes and the two-digit `<order>` sequences them
-within a theme (`00` for standalone notes), so the sorted directory listing is
-itself the grouped, ordered index — there is no separate list to maintain. See
-`setup/README.md` for the full naming convention.
+`setup/` holds **reproducible, per-topic notes** so a fresh install can be
+rebuilt and past decisions explained. Filenames follow a
+`<theme>-<order>-<description>` convention documented in `setup/README.md`.
 
-- `setup/` lives **outside `stow/`**, so it is structurally not a stow package
-  and its markdown can never be symlinked into `~/.config`.
-- **A note documents only what stowing the repo does NOT already do** — i.e.
-  out-of-band system actions (`pacman -S/-Rns`, enabling a service). Config
-  changes are applied by `stow`, so they live in the tracked files + git history,
-  never as runbook steps. (The first `removing-alacritty` note wrongly listed
-  "edit settings.json" and "git rm the package" — both already reproduced by the
-  repo — leaving only `pacman -Rns alacritty` as a real step.)
-- Keep dotfiles themselves free of transient/setup notes — that knowledge goes
-  in `setup/`, not in config-file comments.
+- `setup/` lives **outside `stow/`**, so its markdown can never be stowed.
+- **A note documents only what stowing can't reproduce** — out-of-band system
+  actions (`pacman`, enabling a service). Config changes are applied by `stow`
+  and live in the tracked files + git history, never as runbook steps.
+- Config-file comments are for code; setup knowledge goes in `setup/`.
 - It is a **runbook, not a changelog.** If a decision is reversed, update or
   delete the relevant note rather than appending contradictions. Then check
   whether README / other notes need the same correction (see the alacritty
