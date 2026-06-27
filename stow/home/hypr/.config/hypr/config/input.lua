@@ -3,6 +3,7 @@
 hl.config({
     input = {
         accel_profile = "flat",
+        kb_options = "caps:hyper",
     },
 })
 
