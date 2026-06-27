@@ -2,7 +2,7 @@
 
 hl.monitor({
     output    = "",
-    mode      = "preferred",
+    mode      = "highrr",  -- highest refresh rate; "preferred" can cap at 60Hz
     position  = "auto",
     scale     = "auto",
 })
