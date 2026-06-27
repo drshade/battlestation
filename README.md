@@ -68,3 +68,8 @@ mv ~/.config/newapp stow/home/newapp/.config/newapp
 No README or list to update — the new directory under `stow/home/` *is* the
 registration. To add a new *target root*, create `stow/<group>/` and a matching
 `stow/stow-<group>.sh`.
+
+# TODO
+[ ] stuff installed by flatpak doesn't automatically add to the launcher
+[ ] designing and setting up a great keymap (cmd for common, caps for window management maybe?)
+[ ] keyboard repeat and delay are too slow

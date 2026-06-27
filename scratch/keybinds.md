@@ -12,7 +12,7 @@ Mark edits however you like (strike, ADD:, CHANGE:, ?).
 | SUPER ALT Space         | Toggle floating                              |
 | SUPER D                 | Maximize (fullscreen mode 1, keeps bar/gaps) |
 | SUPER F                 | Fullscreen (true)                            |
-| SUPER J                 | Toggle split direction                       |
+| SUPER J                 | Toggle split direction                |
 | SUPER L                 | Lock screen                                  |
 | SUPER ALT C             | Session menu                                 |
 | SUPER ←/→/↑/↓           | Focus left/right/up/down                     |
