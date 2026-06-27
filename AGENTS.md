@@ -126,7 +126,7 @@ live in `setup/README.md`.
   `stow/home/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
   launcher uses `appLauncher.terminalCommand` in its `settings.json`. These are
   independent — changing one does not change the other. We standardized on
-  **kitty** in both (see `setup/setup-00-removing-alacritty.md`).
+  **kitty** in both (see `setup/debloat-00-removing-alacritty.md`).
 - **Secrets / machine-local state** must never be committed. See `.gitignore`
   (e.g. `fish_variables`). When adding a package, scan it for tokens/state
   before staging.
