@@ -5,6 +5,9 @@ Personal dotfiles for CachyOS (Hyprland + Noctalia), managed with [GNU Stow](htt
 Each top-level directory is a Stow **package** mirroring the layout under `$HOME`.
 For example, `hypr/.config/hypr/` symlinks to `~/.config/hypr/`.
 
+See [`setup/`](setup/) for reproducible per-topic notes on how this machine was
+configured (e.g. removing packages, wiring up apps) — a runbook for rebuilds.
+
 ## Setup on a new machine
 
 ```sh
