@@ -10,13 +10,13 @@ structure as a first-class concern; do not build on a messy base.
 
 1. **Correct by construction over correct by convention.** Prefer designs where
    the wrong thing is *impossible*, not merely *discouraged*. Example: every
-   subdir of `stow/` is a package — there is no ignore-list to forget. We chose
-   this over a root-level `META` exclusion list precisely because exclusion
-   lists rely on humans remembering to maintain them.
+   directory inside a target group under `stow/` is a package — there is no
+   ignore-list to forget. We chose this over a root-level `META` exclusion list
+   precisely because exclusion lists rely on humans remembering to maintain them.
 2. **One source of truth.** Never duplicate a fact that can be derived. The
-   package set is the directory listing of `stow/`, not a table in a doc. (A
-   hand-maintained package table once drifted and contradicted reality — don't
-   reintroduce that class of bug.)
+   package set is the directory listing under `stow/<group>/`, not a table in a
+   doc. (A hand-maintained package table once drifted and contradicted reality —
+   don't reintroduce that class of bug.)
 3. **Separate namespaces.** Stowable content lives in `stow/`; repo meta (docs,
    scripts, runbooks) lives outside it. Mixing the two is what forced the old
    ignore-list.
@@ -37,39 +37,49 @@ version-controlled here and symlinked into place with **GNU Stow**.
 
 ## The Stow model
 
-- All Stow packages live under **`stow/`**. Each subdirectory of `stow/` is a
-  package whose internal layout mirrors `$HOME`. Example:
-  `stow/hypr/.config/hypr/` → symlinked to `~/.config/hypr/`.
-- Everything in `stow/` is a package, **by construction** — there is no
-  ignore-list. Repo meta (`README.md`, `AGENTS.md`, `setup/`, `stow-all.sh`)
+- All stowable content lives under **`stow/`**, organized **by target root**:
+  `stow/<target-group>/<package>/`. The group name maps to a `stow --target`
+  (see `target_for()` in `stow-all.sh`): `home → $HOME`, `root → /`.
+- Each directory inside a target group is a **package** whose internal layout
+  mirrors that target. Example: `stow/home/hypr/.config/hypr/` →
+  `~/.config/hypr/`.
+- Everything inside a target group is a package, **by construction** — there is
+  no ignore-list. Repo meta (`README.md`, `AGENTS.md`, `setup/`, `stow-all.sh`)
   lives *outside* `stow/`, so it can never be stowed by accident.
+- **Why group by target.** The only axis that varies between dotfiles is the
+  destination *root*. Everything under `$HOME` (`~/.config`, `~/.local`,
+  `~/.bashrc`) is the same target and needs no split — a package just mirrors
+  the deeper path. A genuinely different root (e.g. `/etc`) becomes a new group
+  `stow/root/`. Adding a target = add a case to `target_for()` **and** create
+  the matching `stow/<group>/` dir; the guard errors on any unregistered group,
+  so the two cannot drift.
 - After stowing, `~/.config/<app>` is a **symlink into this repo**. Editing the
   file in `~/.config` and editing it here are the same file — there is no copy
   step and no sync to run.
-- `./stow-all.sh` stows every package: `cd stow && stow --restow -t ~ */`.
+- `./stow-all.sh` stows every package in every group into its mapped target.
 
 ### Source-of-truth rule (important)
 
-**Do not enumerate the package list in prose.** The directories under `stow/`
-are the single source of truth. README and docs must stay generic. We adopted
-this after the README's hand-maintained package table drifted out of sync with
-reality (it still listed `alacritty` after we had removed it). If you find
-yourself writing "the packages are: a, b, c" in a doc, stop — point at `stow/`
-or `stow-all.sh` instead.
+**Do not enumerate the package list in prose.** The directories under
+`stow/<group>/` are the single source of truth. README and docs must stay
+generic. We adopted this after the README's hand-maintained package table
+drifted out of sync with reality (it still listed `alacritty` after we had
+removed it). If you find yourself writing "the packages are: a, b, c" in a doc,
+stop — point at `stow/` or `stow-all.sh` instead.
 
 Consequence: **adding or removing an app requires no doc edit.** The directory's
-presence (or absence) under `stow/` is the registration.
+presence (or absence) under its target group is the registration.
 
 ## Adding / removing a package
 
 ```sh
-# add
-mkdir -p stow/newapp/.config && mv ~/.config/newapp stow/newapp/.config/newapp
-( cd stow && stow --target="$HOME" newapp )
+# add (targets $HOME)
+mkdir -p stow/home/newapp/.config && mv ~/.config/newapp stow/home/newapp/.config/newapp
+( cd stow/home && stow --target="$HOME" newapp )
 
 # remove
-( cd stow && stow --delete --target="$HOME" oldapp )   # drops ~/.config symlink
-git rm -r stow/oldapp                                  # drops it from the repo
+( cd stow/home && stow --delete --target="$HOME" oldapp )   # drops ~/.config symlink
+git rm -r stow/home/oldapp                                  # drops it from the repo
 ```
 
 ## The setup/ runbook
@@ -89,15 +99,15 @@ so a fresh install can be rebuilt and past decisions are explained.
 
 ## Known gotchas
 
-- **Noctalia rewrites its own config.** `stow/noctalia/.config/noctalia/settings.json`
+- **Noctalia rewrites its own config.** `stow/home/noctalia/.config/noctalia/settings.json`
   is written by the running shell. Editing it on disk works, but if Noctalia is
   running it may overwrite your edit on its next settings-write. After editing,
   reload Noctalia (or log out/in) and re-verify with `grep`.
-- **`stow/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme
+- **`stow/home/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme
   changes (matugen-style output), so it churns in diffs. It is currently
   tracked; gitignore it if the noise is annoying.
 - **Two-terminal trap (resolved).** Hyprland's terminal is set in
-  `stow/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
+  `stow/home/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
   launcher uses `appLauncher.terminalCommand` in its `settings.json`. These are
   independent — changing one does not change the other. We standardized on
   **kitty** in both (see `setup/removing-alacritty.md`).

@@ -7,7 +7,7 @@
 A fresh CachyOS + Noctalia install ships with *two* terminals wired in:
 
 - **kitty** — the main terminal. Hyprland sets `TERMINAL = "kitty"` in
-  `stow/hypr/.config/hypr/config/defaults.lua`, so Super+Return and the btop
+  `stow/home/hypr/.config/hypr/config/defaults.lua`, so Super+Return and the btop
   shortcut launch kitty.
 - **alacritty** — used only by Noctalia's app launcher. The launcher's
   `terminalCommand` setting wraps terminal apps (any `.desktop` with
@@ -20,7 +20,7 @@ launching a TUI app from the Noctalia launcher would break.
 
 ### 1. Point Noctalia's launcher at kitty
 
-In `stow/noctalia/.config/noctalia/settings.json`, under `appLauncher`:
+In `stow/home/noctalia/.config/noctalia/settings.json`, under `appLauncher`:
 
 ```diff
 -        "terminalCommand": "alacritty -e",
@@ -33,8 +33,8 @@ In `stow/noctalia/.config/noctalia/settings.json`, under `appLauncher`:
 
 ```sh
 cd ~/dev/cachyos-dotfiles
-( cd stow && stow --delete --target="$HOME" alacritty )  # removes ~/.config/alacritty symlink
-git rm -r stow/alacritty                                 # drop the config from the repo
+( cd stow/home && stow --delete --target="$HOME" alacritty )  # removes ~/.config/alacritty symlink
+git rm -r stow/home/alacritty                                 # drop the config from the repo
 ```
 
 ### 3. Uninstall the alacritty system package (needs sudo)
