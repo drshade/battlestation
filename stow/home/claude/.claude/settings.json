@@ -1,0 +1,100 @@
+{
+  "tui": "fullscreen",
+  "theme": "dark",
+  "enabledPlugins": {
+    "clangd-lsp@claude-plugins-official": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh purple",
+            "async": true
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
+            "async": true
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
+            "async": true
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh clear",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

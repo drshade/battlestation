@@ -16,6 +16,23 @@ id_ecdsa
 id_ed25519
 !*.pub
 
+# Claude Code (~/.claude): default-deny — track config only, never secrets/state.
+# .credentials.json, projects/ (transcripts), history, caches can NEVER be
+# committed, even if accidentally moved into the package.
+stow/home/claude/.claude/**
+!stow/home/claude/.claude/settings.json
+!stow/home/claude/.claude/CLAUDE.md
+!stow/home/claude/.claude/commands/
+!stow/home/claude/.claude/commands/**
+!stow/home/claude/.claude/agents/
+!stow/home/claude/.claude/agents/**
+!stow/home/claude/.claude/skills/
+!stow/home/claude/.claude/skills/**
+!stow/home/claude/.claude/hooks/
+!stow/home/claude/.claude/hooks/**
+!stow/home/claude/.claude/output-styles/
+!stow/home/claude/.claude/output-styles/**
+
 # Editor/OS noise
 *.swp
 .DS_Store

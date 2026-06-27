@@ -130,6 +130,12 @@ live in `setup/README.md`.
 - **Secrets / machine-local state** must never be committed. See `.gitignore`
   (e.g. `fish_variables`). When adding a package, scan it for tokens/state
   before staging.
+- **The `claude` package (`~/.claude`) is default-deny.** `.gitignore` ignores
+  *everything* under it and opts in to config only (`settings.json`, `CLAUDE.md`,
+  `commands/`, `agents/`, `skills/`, `hooks/`, `output-styles/`). `~/.claude`
+  itself is a real dir (only `settings.json` is symlinked in); its
+  `.credentials.json`, `projects/` (chat transcripts), history, and caches must
+  **never** be tracked — never add an `!` rule that exposes them.
 - **Empty dirs** are not tracked by git; that's expected, not a bug.
 
 ## Working habits in this repo
