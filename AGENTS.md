@@ -94,13 +94,9 @@ git rm -r stow/home/oldapp                                  # drops it from the 
 
 ## The setup/ runbook
 
-`setup/` holds **reproducible, per-topic notes** — one `.md` per topic, named
-`<theme>-<order>-<description>.md` — documenting what changed, why, and the exact
-commands, so a fresh install can be rebuilt and past decisions are explained.
-The `<theme>` groups related notes and the two-digit `<order>` sequences them
-within a theme (`00` for standalone notes), so the sorted directory listing is
-itself the grouped, ordered index — there is no separate list to maintain. See
-`setup/README.md` for the full naming convention.
+`setup/` holds **per-machine runbook notes** so a fresh install can be rebuilt
+and past decisions explained. Naming, the theme/step model, and writing style
+live in `setup/README.md`.
 
 - `setup/` lives **outside `stow/`**, so it is structurally not a stow package
   and its markdown can never be symlinked into `~/.config`.
