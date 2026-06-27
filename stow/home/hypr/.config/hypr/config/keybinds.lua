@@ -91,6 +91,9 @@ hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolki
 -- Theming and Wallpaper
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd(noctCall .. " wallpaper toggle"))
 
+-- Restart the Noctalia shell (detached, exactly like autostart)
+hl.bind(mainMod .. " + Backspace", hl.dsp.exec_cmd("qs -c noctalia-shell kill; sleep 1; qs -c noctalia-shell"))
+
 -- Editing: universal copy/paste/cut/undo (see send_shortcut helper) + clipboard history
 hl.bind(mainMod .. " + C",           send_shortcut("CTRL", "Insert"))   -- copy
 hl.bind(mainMod .. " + V",           send_shortcut("SHIFT", "Insert"))  -- paste
