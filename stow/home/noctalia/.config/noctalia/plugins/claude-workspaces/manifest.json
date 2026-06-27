@@ -1,0 +1,35 @@
+{
+  "id": "claude-workspaces",
+  "name": "Claude Workspaces",
+  "version": "0.3.0",
+  "minNoctaliaVersion": "4.4.3",
+  "author": "tom",
+  "license": "MIT",
+  "description": "Workspace pills coloured by Claude Code status (thinking / running a tool / waiting / none).",
+  "tags": [
+    "Bar"
+  ],
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "settings": "Settings.qml"
+  },
+  "dependencies": {
+    "plugins": []
+  },
+  "metadata": {
+    "defaultSettings": {
+      "capitalizeNames": true,
+      "showUsage": false,
+      "overrideThemeColors": false,
+      "thinkingColor": "primary",
+      "toolColor": "tertiary",
+      "waitingColor": "error",
+      "noneColor": "none",
+      "thinkingCustom": "#3fb950",
+      "toolCustom": "#a371f7",
+      "waitingCustom": "#c97b47",
+      "noneCustom": "#3a3a3a"
+    }
+  }
+}

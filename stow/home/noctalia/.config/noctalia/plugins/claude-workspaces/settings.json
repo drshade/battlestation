@@ -1,0 +1,13 @@
+{
+  "capitalizeNames": false,
+  "showUsage": true,
+  "overrideThemeColors": false,
+  "thinkingColor": "tertiary",
+  "toolColor": "secondary",
+  "waitingColor": "error",
+  "noneColor": "none",
+  "thinkingCustom": "#3fb950",
+  "toolCustom": "#a371f7",
+  "waitingCustom": "#c97b47",
+  "noneCustom": "#3a3a3a"
+}
