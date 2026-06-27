@@ -13,22 +13,11 @@ in this repo. This file is the procedure — the key material stays in `~/.ssh`.
 ssh-keygen -t ed25519 -C "tom@$(hostname)"
 #    Accept the default path (~/.ssh/id_ed25519); set a passphrase.
 
-# 2. Load the key into the agent (see setup/enabling-ssh-agent.md for the agent).
+# 2. Load the key into the agent (see sshkeys-11-enable-agent.md for the agent).
 ssh-add ~/.ssh/id_ed25519
-
-# 3. Register the PUBLIC key with GitHub.
-#    With the gh CLI:
-gh auth login
-gh ssh-key add ~/.ssh/id_ed25519.pub --title "$(hostname)"
-#    Or copy it and paste at https://github.com/settings/keys :
-cat ~/.ssh/id_ed25519.pub
 ```
 
-## Verify
-
-```sh
-ssh -T git@github.com   # expect: "Hi <user>! You've successfully authenticated..."
-```
+Next: register the public key with GitHub — see sshkeys-13-register-key.md.
 
 ## Notes
 

@@ -95,8 +95,12 @@ git rm -r stow/home/oldapp                                  # drops it from the 
 ## The setup/ runbook
 
 `setup/` holds **reproducible, per-topic notes** — one `.md` per topic, named
-`<verb>-<subject>.md` — documenting what changed, why, and the exact commands,
-so a fresh install can be rebuilt and past decisions are explained.
+`<theme>-<order>-<description>.md` — documenting what changed, why, and the exact
+commands, so a fresh install can be rebuilt and past decisions are explained.
+The `<theme>` groups related notes and the two-digit `<order>` sequences them
+within a theme (`00` for standalone notes), so the sorted directory listing is
+itself the grouped, ordered index — there is no separate list to maintain. See
+`setup/README.md` for the full naming convention.
 
 - `setup/` lives **outside `stow/`**, so it is structurally not a stow package
   and its markdown can never be symlinked into `~/.config`.
@@ -120,7 +124,7 @@ so a fresh install can be rebuilt and past decisions are explained.
   `stow/home/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
   launcher uses `appLauncher.terminalCommand` in its `settings.json`. These are
   independent — changing one does not change the other. We standardized on
-  **kitty** in both (see `setup/removing-alacritty.md`).
+  **kitty** in both (see `setup/setup-00-removing-alacritty.md`).
 - **Secrets / machine-local state** must never be committed. See `.gitignore`
   (e.g. `fish_variables`). When adding a package, scan it for tokens/state
   before staging.
