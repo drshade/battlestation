@@ -3,6 +3,19 @@ stow/home/fish/.config/fish/fish_variables
 **/*.token
 **/secrets*
 
+# Private key material — never commit (public keys are allowed)
+*.pem
+*.key
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+!*.pub
+
 # Editor/OS noise
 *.swp
 .DS_Store
