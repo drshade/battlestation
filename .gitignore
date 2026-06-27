@@ -1,5 +1,5 @@
 # Secrets / machine-local state — never commit these
-fish/.config/fish/fish_variables
+stow/fish/.config/fish/fish_variables
 **/*.token
 **/secrets*
 

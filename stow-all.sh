@@ -1,15 +1,11 @@
 #!/usr/bin/env sh
-# Stow every package in this repo. Packages are all top-level dirs except the
-# meta dirs in $META (docs/runbooks, not configs). The directory list IS the
-# source of truth — adding an app needs no edit here.
+# Stow every package into $HOME. Every subdirectory of stow/ is a package, by
+# construction — there is no ignore-list to maintain. Repo meta (README, AGENTS,
+# setup/, this script) lives outside stow/ and is therefore never stowed.
 set -eu
-cd "$(dirname "$0")"
-
-META="setup"   # space-separated dirs that are NOT stow packages
+cd "$(dirname "$0")/stow"
 
 for d in */; do
-  d="${d%/}"
-  case " $META " in *" $d "*) continue ;; esac
-  stow --restow --target="$HOME" "$d"
-  echo "stowed: $d"
+  stow --restow --target="$HOME" "${d%/}"
+  echo "stowed: ${d%/}"
 done
