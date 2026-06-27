@@ -26,6 +26,7 @@ Item {
 
   readonly property var ps: (pluginApi && pluginApi.pluginSettings) ? pluginApi.pluginSettings : ({})
   readonly property string displayMode: ps.displayMode || "pill"
+  readonly property bool outline: ps.outlinePills === true
 
   implicitWidth: row.implicitWidth + Style.marginS * 2
   implicitHeight: barHeight
@@ -131,6 +132,14 @@ Item {
     }
   }
 
+  // Emote frame for a status + expression name (e.g. green + "squint").
+  function statusPrefix(status) {
+    return status === "green" ? "claudecode-thinking" : status === "purple" ? "claudecode-tool" : "claudecode-waiting";
+  }
+  function faceUrl(status, emote) {
+    return Qt.resolvedUrl("assets/" + statusPrefix(status) + "-" + emote + ".svg");
+  }
+
   // One aggregate status per workspace (priority: tool > thinking > waiting).
   function wsStatus(id) {
     const arr = instancesByWs[String(id)];
@@ -143,6 +152,40 @@ Item {
     return "orange";
   }
 
+  // Workspace colour keys: none = transparent, surface = grey, + theme colours.
+  function wsKeyColor(key) {
+    switch (key) {
+    case "grey":
+      return Qt.alpha(Color.mOnSurface, 0.22);
+    case "primary":
+      return Color.mPrimary;
+    case "secondary":
+      return Color.mSecondary;
+    case "tertiary":
+      return Color.mTertiary;
+    case "error":
+      return Color.mError;
+    default:
+      return "transparent"; // none -> no background
+    }
+  }
+  function wsKeyOn(key) {
+    switch (key) {
+    case "primary":
+      return Color.mOnPrimary;
+    case "secondary":
+      return Color.mOnSecondary;
+    case "tertiary":
+      return Color.mOnTertiary;
+    case "error":
+      return Color.mOnError;
+    default:
+      return Color.mOnSurface; // none / surface
+    }
+  }
+  function wsKeyFor(role) {
+    return role === "focused" ? (ps.focusedColor || "primary") : role === "occupied" ? (ps.occupiedColor || "secondary") : (ps.emptyColor || "grey");
+  }
   // Workspace pill background (focused/occupied/empty), theme or custom.
   function wsBg(role) {
     if (ps.overrideThemeColors) {
@@ -152,10 +195,7 @@ Item {
         return ps.occupiedCustom || "#434c5e";
       return ps.emptyCustom || "#3a3a3a";
     }
-    const key = role === "focused" ? (ps.focusedColor || "primary") : role === "occupied" ? (ps.occupiedColor || "secondary") : (ps.emptyColor || "none");
-    if (role === "empty" && key === "none")
-      return Qt.alpha(Color.mOnSurface, 0.3);
-    return resolveKey(key);
+    return wsKeyColor(wsKeyFor(role));
   }
   function wsOn(role) {
     if (ps.overrideThemeColors) {
@@ -165,9 +205,7 @@ Item {
         return contrastOn(ps.occupiedCustom || "#434c5e");
       return contrastOn(ps.emptyCustom || "#3a3a3a");
     }
-    if (role === "empty")
-      return Color.mOnSurface;
-    return resolveOnKey(role === "focused" ? (ps.focusedColor || "primary") : (ps.occupiedColor || "secondary"));
+    return wsKeyOn(wsKeyFor(role));
   }
 
   function pillColor(ws) {
@@ -193,6 +231,11 @@ Item {
     if (occupiedMap[String(ws.id)] === true)
       return wsOn("occupied");
     return wsOn("empty");
+  }
+  // Text colour in outline mode: the pill's own colour (mOnSurface if transparent).
+  function pillLineText(ws) {
+    const c = pillColor(ws);
+    return (c === "transparent") ? Color.mOnSurface : c;
   }
 
   function pillLabel(ws) {
@@ -301,7 +344,7 @@ Item {
 
         Image {
           anchors.verticalCenter: parent.verticalCenter
-          source: Qt.resolvedUrl("assets/claudecode.svg")
+          source: Qt.resolvedUrl("assets/claude.svg")
           width: root.d
           height: root.d
           sourceSize.width: Math.round(root.d * 2)
@@ -340,7 +383,7 @@ Item {
         readonly property var instances: root.instancesByWs[String(model.id)] || []
 
         height: root.barHeight
-        width: Math.max(root.d * (active ? 2.2 : 1), Math.round(content.implicitWidth + root.d * 0.6))
+        width: Math.max(root.d * (active ? 2.2 : 1), Math.round(content.implicitWidth + root.d * (root.outline ? 1.35 : 0.6)))
 
         Behavior on width {
           NumberAnimation {
@@ -355,7 +398,9 @@ Item {
           width: parent.width
           height: root.d
           radius: Style.radiusM
-          color: root.pillColor(cell.model)
+          color: root.outline ? "transparent" : root.pillColor(cell.model)
+          border.width: root.outline ? Math.max(2, Math.round(root.d * 0.1)) : 0
+          border.color: root.outline ? root.pillColor(cell.model) : "transparent"
 
           Behavior on color {
             enabled: !Color.isTransitioning
@@ -377,7 +422,7 @@ Item {
               applyUiScale: false
               font.capitalization: (root.ps.capitalizeNames !== false) ? Font.AllUppercase : Font.MixedCase
               font.weight: cell.active ? Font.Bold : Font.Medium
-              color: root.pillTextColor(cell.model)
+              color: root.outline ? root.pillLineText(cell.model) : root.pillTextColor(cell.model)
               opacity: cell.active ? 1.0 : 0.7
             }
 
@@ -388,33 +433,90 @@ Item {
                 id: bot
                 required property var modelData
                 required property int index
-                property bool winking: false
+                readonly property string status: bot.modelData
+                property string faceOverride: ""
                 anchors.verticalCenter: parent.verticalCenter
-                width: root.d
+                width: root.d + 2
                 height: root.d
 
-                // Blink: brief eyes-closed swap, offset per instance so they don't sync.
+                function rnd(lo, hi) {
+                  return lo + Math.random() * (hi - lo);
+                }
+                // Emote vocabulary per status (weighted by repetition).
+                function emotePool() {
+                  if (status === "green")
+                    return ["bounce", "squint", "look", "happy", "blink", "bounce"];
+                  if (status === "purple")
+                    return ["wiggle", "wiggle", "surprised", "blink", "bounce"];
+                  return ["blink", "sleepy", "look", "bounce"];
+                }
+                // Cadence: thinking/tools lively, waiting calm.
+                function nextDelay() {
+                  return status === "orange" ? rnd(20000, 40000) : rnd(500, 1500);
+                }
+                function showFace(emote, ms) {
+                  bot.faceOverride = root.faceUrl(status, emote);
+                  faceTimer.interval = ms;
+                  faceTimer.restart();
+                }
+                function performEmote() {
+                  // One emote at a time, so a face emote (squint/look) never bounces.
+                  if (faceTimer.running || bounceAnim.running || wiggleAnim.running)
+                    return;
+                  var pool = emotePool();
+                  switch (pool[Math.floor(Math.random() * pool.length)]) {
+                  case "squint":
+                    showFace("squint", 700);
+                    break;
+                  case "look":
+                    showFace("look", 700);
+                    break;
+                  case "happy":
+                    showFace("happy", 700);
+                    break;
+                  case "surprised":
+                    showFace("surprised", 600);
+                    break;
+                  case "sleepy":
+                    showFace("sleepy", 1200);
+                    break;
+                  case "blink":
+                    showFace("blink", 150);
+                    break;
+                  case "bounce":
+                    bounceAnim.restart();
+                    break;
+                  case "wiggle":
+                    wiggleAnim.restart();
+                    break;
+                  }
+                }
+
                 Timer {
-                  interval: 2800 + (bot.index % 6) * 350
-                  running: true
-                  repeat: true
+                  id: emoteTimer
+                  repeat: false
                   onTriggered: {
-                    bot.winking = true;
-                    unwink.restart();
+                    bot.performEmote();
+                    interval = bot.nextDelay();
+                    start();
                   }
                 }
                 Timer {
-                  id: unwink
-                  interval: 150
-                  onTriggered: bot.winking = false
+                  id: faceTimer
+                  repeat: false
+                  onTriggered: bot.faceOverride = ""
+                }
+                Component.onCompleted: {
+                  emoteTimer.interval = bot.nextDelay();
+                  emoteTimer.start();
                 }
 
                 Image {
                   id: botImg
                   anchors.centerIn: parent
-                  source: bot.winking ? root.statusIconBlink(bot.modelData) : root.statusIcon(bot.modelData)
-                  width: Math.round(root.d * 0.82)
-                  height: Math.round(root.d * 0.82)
+                  source: bot.faceOverride !== "" ? bot.faceOverride : root.statusIcon(bot.status)
+                  width: root.d + 2
+                  height: root.d + 2
                   sourceSize.width: Math.round(root.d * 2)
                   sourceSize.height: Math.round(root.d * 2)
                   fillMode: Image.PreserveAspectFit
@@ -425,59 +527,56 @@ Item {
                     id: bobT
                   }
 
-                  // Thinking: gentle vertical bob.
+                  // Bounce emote: a quick double hop (its own emote, not tied to a face).
                   SequentialAnimation {
-                    running: bot.modelData === "green"
-                    loops: Animation.Infinite
+                    id: bounceAnim
                     NumberAnimation {
                       target: bobT
                       property: "y"
-                      from: 1.5
-                      to: -1.5
-                      duration: 480
-                      easing.type: Easing.InOutSine
+                      from: 0
+                      to: -3.5
+                      duration: 120
+                      easing.type: Easing.OutQuad
                     }
                     NumberAnimation {
                       target: bobT
                       property: "y"
-                      from: -1.5
-                      to: 1.5
-                      duration: 480
-                      easing.type: Easing.InOutSine
+                      from: -3.5
+                      to: 0
+                      duration: 240
+                      easing.type: Easing.OutBounce
                     }
                   }
-                  // Tool: busy wiggle.
-                  SequentialAnimation on rotation {
-                    running: bot.modelData === "purple"
-                    loops: Animation.Infinite
+                  // Wiggle emote: a quick shake.
+                  SequentialAnimation {
+                    id: wiggleAnim
                     NumberAnimation {
-                      from: -7
-                      to: 7
-                      duration: 150
-                      easing.type: Easing.InOutSine
+                      target: botImg
+                      property: "rotation"
+                      from: 0
+                      to: -9
+                      duration: 60
                     }
                     NumberAnimation {
-                      from: 7
-                      to: -7
-                      duration: 150
-                      easing.type: Easing.InOutSine
-                    }
-                  }
-                  // Waiting: slow breathing pulse.
-                  SequentialAnimation on scale {
-                    running: bot.modelData === "orange"
-                    loops: Animation.Infinite
-                    NumberAnimation {
-                      from: 1.0
-                      to: 1.13
-                      duration: 820
-                      easing.type: Easing.InOutSine
+                      target: botImg
+                      property: "rotation"
+                      from: -9
+                      to: 9
+                      duration: 100
                     }
                     NumberAnimation {
-                      from: 1.13
-                      to: 1.0
-                      duration: 820
-                      easing.type: Easing.InOutSine
+                      target: botImg
+                      property: "rotation"
+                      from: 9
+                      to: -6
+                      duration: 90
+                    }
+                    NumberAnimation {
+                      target: botImg
+                      property: "rotation"
+                      from: -6
+                      to: 0
+                      duration: 70
                     }
                   }
                 }

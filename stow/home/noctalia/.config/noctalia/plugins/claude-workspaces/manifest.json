@@ -23,6 +23,7 @@
       "capitalizeNames": true,
       "showUsage": false,
       "overrideThemeColors": false,
+      "outlinePills": false,
       "thinkingColor": "primary",
       "toolColor": "tertiary",
       "waitingColor": "error",
@@ -31,7 +32,7 @@
       "waitingCustom": "#c97b47",
       "focusedColor": "primary",
       "occupiedColor": "secondary",
-      "emptyColor": "none",
+      "emptyColor": "grey",
       "focusedCustom": "#5e81ac",
       "occupiedCustom": "#434c5e",
       "emptyCustom": "#3a3a3a"

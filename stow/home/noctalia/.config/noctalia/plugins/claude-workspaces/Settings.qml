@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Widgets
+import qs.Services.UI
 
 ColumnLayout {
   id: root
@@ -12,6 +13,7 @@ ColumnLayout {
   property bool capitalizeNames: true
   property bool showUsage: false
   property bool customColours: false
+  property bool outlinePills: false
 
   // Claude status colours (used to paint pills in pill mode)
   property string thinkingColor: "primary"
@@ -24,12 +26,120 @@ ColumnLayout {
   // Workspace colours (pill background in icon mode + non-Claude pills)
   property string focusedColor: "primary"
   property string occupiedColor: "secondary"
-  property string emptyColor: "none"
+  property string emptyColor: "grey"
   property string focusedCustom: "#5e81ac"
   property string occupiedCustom: "#434c5e"
   property string emptyCustom: "#3a3a3a"
 
   property bool _loaded: false
+
+  // Workspace colour options: None (transparent) + Surface (grey) + theme colours.
+  readonly property var wsColorModel: [
+    {
+      "key": "none",
+      "name": "None"
+    },
+    {
+      "key": "grey",
+      "name": "Grey"
+    },
+    {
+      "key": "primary",
+      "name": "Primary"
+    },
+    {
+      "key": "secondary",
+      "name": "Secondary"
+    },
+    {
+      "key": "tertiary",
+      "name": "Tertiary"
+    },
+    {
+      "key": "error",
+      "name": "Error"
+    }
+  ]
+  function wsSwatch(key) {
+    switch (key) {
+    case "grey":
+      return Qt.alpha(Color.mOnSurface, 0.22);
+    case "primary":
+      return Color.mPrimary;
+    case "secondary":
+      return Color.mSecondary;
+    case "tertiary":
+      return Color.mTertiary;
+    case "error":
+      return Color.mError;
+    default:
+      return "transparent";
+    }
+  }
+  function wsSwatchOn(key) {
+    switch (key) {
+    case "primary":
+      return Color.mOnPrimary;
+    case "secondary":
+      return Color.mOnSecondary;
+    case "tertiary":
+      return Color.mOnTertiary;
+    case "error":
+      return Color.mOnError;
+    default:
+      return Color.mOnSurface;
+    }
+  }
+
+  // Like NColorChoice, but with our None(transparent)+Surface(grey) model.
+  component WsColorChoice: RowLayout {
+    id: choice
+    property string label: ""
+    property string currentKey: "none"
+    signal selected(string key)
+    readonly property int diameter: Style.baseWidgetSize * 0.9 * Style.uiScaleRatio
+    Layout.fillWidth: true
+
+    NLabel {
+      label: choice.label
+    }
+    RowLayout {
+      Repeater {
+        model: root.wsColorModel
+        Rectangle {
+          property bool isSelected: choice.currentKey === modelData.key
+          property bool isHovered: swatchMA.containsMouse
+          Layout.alignment: Qt.AlignHCenter
+          implicitWidth: choice.diameter
+          implicitHeight: choice.diameter
+          radius: choice.diameter * 0.5
+          color: root.wsSwatch(modelData.key)
+          border.color: (isSelected || isHovered) ? Color.mOnSurface : Color.mOutline
+          border.width: Style.borderM
+          MouseArea {
+            id: swatchMA
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: TooltipService.show(parent, modelData.name)
+            onExited: TooltipService.hide()
+            onClicked: {
+              choice.currentKey = modelData.key;
+              choice.selected(modelData.key);
+            }
+          }
+          NIcon {
+            anchors.centerIn: parent
+            icon: "check"
+            pointSize: Math.max(Style.fontSizeXS, parent.width * 0.4)
+            color: root.wsSwatchOn(modelData.key)
+            font.weight: Style.fontWeightBold
+            visible: parent.isSelected
+          }
+        }
+      }
+    }
+  }
 
   function _load() {
     if (!pluginApi || !pluginApi.pluginSettings)
@@ -39,6 +149,7 @@ ColumnLayout {
     capitalizeNames = s.capitalizeNames !== false;
     showUsage = s.showUsage === true;
     customColours = s.overrideThemeColors === true;
+    outlinePills = s.outlinePills === true;
     thinkingColor = s.thinkingColor || "primary";
     toolColor = s.toolColor || "tertiary";
     waitingColor = s.waitingColor || "error";
@@ -47,7 +158,7 @@ ColumnLayout {
     waitingCustom = s.waitingCustom || "#c97b47";
     focusedColor = s.focusedColor || "primary";
     occupiedColor = s.occupiedColor || "secondary";
-    emptyColor = s.emptyColor || "none";
+    emptyColor = s.emptyColor || "grey";
     focusedCustom = s.focusedCustom || "#5e81ac";
     occupiedCustom = s.occupiedCustom || "#434c5e";
     emptyCustom = s.emptyCustom || "#3a3a3a";
@@ -62,6 +173,7 @@ ColumnLayout {
     s.capitalizeNames = capitalizeNames;
     s.showUsage = showUsage;
     s.overrideThemeColors = customColours;
+    s.outlinePills = outlinePills;
     s.thinkingColor = thinkingColor;
     s.toolColor = toolColor;
     s.waitingColor = waitingColor;
@@ -128,6 +240,17 @@ ColumnLayout {
     checked: root.customColours
     onToggled: checked => {
       root.customColours = checked;
+      root.saveSettings();
+    }
+  }
+
+  NToggle {
+    Layout.fillWidth: true
+    label: "Outlined pills"
+    description: "Draw the pill colour as an outline with a transparent fill."
+    checked: root.outlinePills
+    onToggled: checked => {
+      root.outlinePills = checked;
       root.saveSettings();
     }
   }
@@ -222,7 +345,7 @@ ColumnLayout {
       Layout.fillWidth: true
       visible: !root.customColours
       spacing: Style.marginM
-      NColorChoice {
+      WsColorChoice {
         label: "Focused"
         currentKey: root.focusedColor
         onSelected: key => {
@@ -230,7 +353,7 @@ ColumnLayout {
           root.saveSettings();
         }
       }
-      NColorChoice {
+      WsColorChoice {
         label: "Occupied"
         currentKey: root.occupiedColor
         onSelected: key => {
@@ -238,7 +361,7 @@ ColumnLayout {
           root.saveSettings();
         }
       }
-      NColorChoice {
+      WsColorChoice {
         label: "Empty"
         currentKey: root.emptyColor
         onSelected: key => {
