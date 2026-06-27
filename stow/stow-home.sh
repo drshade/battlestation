@@ -1,6 +1,4 @@
 #!/usr/bin/env sh
-# Stow every package in stow/home/ into $HOME.
-# Run as your normal user — NOT root (home symlinks must be owned by you).
 set -eu
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -12,7 +10,7 @@ fi
 cd "$(dirname "$0")/home"
 
 for pkg in */; do
-  [ -d "$pkg" ] || continue          # skip if home/ is somehow empty
+  [ -d "$pkg" ] || continue
   name="${pkg%/}"
   stow --restow --target="$HOME" "$name"
   echo "stowed: home/$name -> $HOME"

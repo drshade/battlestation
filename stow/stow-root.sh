@@ -1,6 +1,4 @@
 #!/usr/bin/env sh
-# Stow every package in stow/root/ into / (system configs, e.g. /etc/...).
-# Must be run as root:  sudo ./stow/stow-root.sh
 set -eu
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -16,7 +14,7 @@ fi
 cd "$dir"
 
 for pkg in */; do
-  [ -d "$pkg" ] || continue          # skip if root/ is empty
+  [ -d "$pkg" ] || continue
   name="${pkg%/}"
   stow --restow --target="/" "$name"
   echo "stowed: root/$name -> /"
