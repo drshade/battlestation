@@ -9,7 +9,8 @@ install/removal, enabling services. If `stow` already does it, it's not a note.
   **procedure** read `00`→N — later steps build on earlier ones implicitly,
   shared context stated once, no cross-refs (e.g. `sshkeys`) — or a **collection**
   of independent items (e.g. `debloat`, one note per thing removed).
-- `<order>` — two digits, `00`-based, `+1` within the theme.
+- `<order>` — two digits, ordering steps within a **procedure**; in a
+  **collection** it's irrelevant, so just reuse `00` (notes sort by description).
 - `<description>` — short, free-form.
 
 e.g. `sshkeys-00-generate-key.md` … `sshkeys-03-register-key.md`,
