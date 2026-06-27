@@ -18,7 +18,11 @@
         "ignoreMouseInput": false,
         "overviewLayer": false,
         "pinnedApps": [
-            "firefox"
+            "firefox",
+            "cachyos-pi",
+            "nvidia-settings",
+            "steam",
+            "org.kde.dolphin"
         ],
         "position": "center",
         "screenshotAnnotationTool": "",
@@ -80,24 +84,24 @@
         "widgets": {
             "center": [
                 {
-                    "characterCount": 2,
+                    "characterCount": 20,
                     "colorizeIcons": false,
-                    "emptyColor": "secondary",
-                    "enableScrollWheel": true,
+                    "emptyColor": "none",
+                    "enableScrollWheel": false,
                     "focusedColor": "primary",
                     "followFocusedScreen": false,
-                    "fontWeight": "bold",
+                    "fontWeight": "semibold",
                     "groupedBorderOpacity": 1,
                     "hideUnoccupied": false,
                     "iconScale": 0.8,
                     "id": "Workspace",
-                    "labelMode": "index",
+                    "labelMode": "name",
                     "occupiedColor": "secondary",
-                    "pillSize": 0.6,
+                    "pillSize": 0.7000000000000001,
                     "showApplications": false,
                     "showApplicationsHover": false,
                     "showBadge": true,
-                    "showLabelsOnlyWhenOccupied": true,
+                    "showLabelsOnlyWhenOccupied": false,
                     "unfocusedIconsOpacity": 1
                 }
             ],
@@ -465,7 +469,7 @@
         "firstDayOfWeek": -1,
         "hideWeatherCityName": false,
         "hideWeatherTimezone": false,
-        "name": "",
+        "name": "Amsterdam",
         "showCalendarEvents": true,
         "showCalendarWeather": true,
         "showWeekNumberInCalendar": false,
