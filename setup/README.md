@@ -16,6 +16,7 @@ or understand a past decision.
 
 ## Topics
 
-| File | Summary |
-|------|---------|
-| [removing-alacritty.md](removing-alacritty.md) | Drop alacritty; standardize on kitty as the only terminal |
+The `.md` files in this directory are the topics — the listing is the index.
+Filenames follow `<verb>-<subject>.md`, so the name *is* the summary
+(`ls setup/`). There is deliberately no hand-maintained table here: it would
+just duplicate the directory and drift out of sync.
