@@ -44,8 +44,8 @@ version-controlled here and symlinked into place with **GNU Stow**.
   `stow/<target-group>/<package>/`. Each group has a driver script
   `stow/stow-<group>.sh` that stows that group into its target.
 - Each directory inside a target group is a **package** whose internal layout
-  mirrors that target. Example: `stow/home/hypr/.config/hypr/` →
-  `~/.config/hypr/`.
+  mirrors that target. Example: `stow/home/<pkg>/.config/<pkg>/` →
+  `~/.config/<pkg>/`.
 - Everything inside a target group is a package, **by construction** — there is
   no ignore-list. The driver scripts sit at the `stow/` module root, never
   inside a group, so they are never stowable. Project meta (`README.md`,

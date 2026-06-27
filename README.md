@@ -8,9 +8,7 @@ Personal dotfiles for CachyOS (Hyprland + Noctalia), managed with [GNU Stow](htt
 cachyos-dotfiles/
 ├── stow/                  # the stow module: trees grouped by target + drivers
 │   ├── home/              #   packages stowed into $HOME
-│   │   ├── hypr/.config/hypr/
-│   │   ├── noctalia/.config/noctalia/
-│   │   └── ...
+│   │   └── <package>/.config/<package>/
 │   ├── stow-home.sh       #   stow home/ into $HOME      (run as you)
 │   └── stow-root.sh       #   stow root/ into /          (run with sudo)
 │   # (future: stow/root/ → system configs like /etc/...)
@@ -21,7 +19,7 @@ cachyos-dotfiles/
 
 Packages are organized by **target root**: `stow/<target-group>/<package>/`, and
 each group has its own driver script `stow/stow-<group>.sh`. A package's internal
-layout mirrors its target, e.g. `stow/home/hypr/.config/hypr/` → `~/.config/hypr/`.
+layout mirrors its target, e.g. `stow/home/<pkg>/.config/<pkg>/` → `~/.config/<pkg>/`.
 
 Why the `home/` layer when there's only one target today? Because the only thing
 that varies between dotfiles is the *destination root* — everything under your
