@@ -117,6 +117,19 @@ Item {
       return Qt.resolvedUrl("assets/claudecode.svg");
     }
   }
+  // Eyes-closed frame (the blink).
+  function statusIconBlink(status) {
+    switch (status) {
+    case "green":
+      return Qt.resolvedUrl("assets/claudecode-thinking-blink.svg");
+    case "purple":
+      return Qt.resolvedUrl("assets/claudecode-tool-blink.svg");
+    case "orange":
+      return Qt.resolvedUrl("assets/claudecode-waiting-blink.svg");
+    default:
+      return Qt.resolvedUrl("assets/claudecode.svg");
+    }
+  }
 
   // One aggregate status per workspace (priority: tool > thinking > waiting).
   function wsStatus(id) {
@@ -368,19 +381,106 @@ Item {
               opacity: cell.active ? 1.0 : 0.7
             }
 
-            // Icons mode: one Claude Code logo per instance, tinted by status.
+            // Icons mode: one animated Claude Code bot per instance, tinted by status.
             Repeater {
               model: root.displayMode === "icons" ? cell.instances : []
-              delegate: Image {
+              delegate: Item {
+                id: bot
                 required property var modelData
+                required property int index
+                property bool winking: false
                 anchors.verticalCenter: parent.verticalCenter
-                source: root.statusIcon(modelData)
-                width: Math.round(root.d * 0.85)
-                height: Math.round(root.d * 0.85)
-                sourceSize.width: Math.round(root.d * 2)
-                sourceSize.height: Math.round(root.d * 2)
-                fillMode: Image.PreserveAspectFit
-                smooth: true
+                width: root.d
+                height: root.d
+
+                // Blink: brief eyes-closed swap, offset per instance so they don't sync.
+                Timer {
+                  interval: 2800 + (bot.index % 6) * 350
+                  running: true
+                  repeat: true
+                  onTriggered: {
+                    bot.winking = true;
+                    unwink.restart();
+                  }
+                }
+                Timer {
+                  id: unwink
+                  interval: 150
+                  onTriggered: bot.winking = false
+                }
+
+                Image {
+                  id: botImg
+                  anchors.centerIn: parent
+                  source: bot.winking ? root.statusIconBlink(bot.modelData) : root.statusIcon(bot.modelData)
+                  width: Math.round(root.d * 0.82)
+                  height: Math.round(root.d * 0.82)
+                  sourceSize.width: Math.round(root.d * 2)
+                  sourceSize.height: Math.round(root.d * 2)
+                  fillMode: Image.PreserveAspectFit
+                  smooth: true
+                  asynchronous: false
+                  transformOrigin: Item.Center
+                  transform: Translate {
+                    id: bobT
+                  }
+
+                  // Thinking: gentle vertical bob.
+                  SequentialAnimation {
+                    running: bot.modelData === "green"
+                    loops: Animation.Infinite
+                    NumberAnimation {
+                      target: bobT
+                      property: "y"
+                      from: 1.5
+                      to: -1.5
+                      duration: 480
+                      easing.type: Easing.InOutSine
+                    }
+                    NumberAnimation {
+                      target: bobT
+                      property: "y"
+                      from: -1.5
+                      to: 1.5
+                      duration: 480
+                      easing.type: Easing.InOutSine
+                    }
+                  }
+                  // Tool: busy wiggle.
+                  SequentialAnimation on rotation {
+                    running: bot.modelData === "purple"
+                    loops: Animation.Infinite
+                    NumberAnimation {
+                      from: -7
+                      to: 7
+                      duration: 150
+                      easing.type: Easing.InOutSine
+                    }
+                    NumberAnimation {
+                      from: 7
+                      to: -7
+                      duration: 150
+                      easing.type: Easing.InOutSine
+                    }
+                  }
+                  // Waiting: slow breathing pulse.
+                  SequentialAnimation on scale {
+                    running: bot.modelData === "orange"
+                    loops: Animation.Infinite
+                    NumberAnimation {
+                      from: 1.0
+                      to: 1.13
+                      duration: 820
+                      easing.type: Easing.InOutSine
+                    }
+                    NumberAnimation {
+                      from: 1.13
+                      to: 1.0
+                      duration: 820
+                      easing.type: Easing.InOutSine
+                    }
+                  }
+                }
               }
             }
           }
