@@ -24,33 +24,25 @@ Item {
   readonly property real textRatio: 0.50
   readonly property int characterCount: 20
 
+  readonly property var ps: (pluginApi && pluginApi.pluginSettings) ? pluginApi.pluginSettings : ({})
+  readonly property string displayMode: ps.displayMode || "pill"
+
   implicitWidth: row.implicitWidth + Style.marginS * 2
   implicitHeight: barHeight
 
-  // { "<workspaceId>": "green" | "purple" | "orange" } — last writer wins
-  property var claudeStatus: ({})
+  // Per-workspace instance statuses: { "<wsid>": ["green","purple",...] }
+  property var instancesByWs: ({})
+  // Occupancy computed from real windows (ExtWorkspaceService.isOccupied is unreliable).
+  property var occupiedMap: ({})
 
-  // Plugin settings (theme keys, custom colours, toggles) — set in the pane.
-  readonly property var ps: (pluginApi && pluginApi.pluginSettings) ? pluginApi.pluginSettings : ({})
-
-  // Claude plan usage (from claude-usage.sh) — shown when enabled.
+  // Claude plan usage (from claude-usage.sh).
   readonly property bool showUsage: ps.showUsage === true
   property int sessionPct: -1
   property string sessionResets: ""
   property int weeklyPct: -1
   property string weeklyResets: ""
 
-  function fmtTime(iso, fmt) {
-    if (!iso)
-      return "?";
-    const dt = new Date(iso);
-    return isNaN(dt.getTime()) ? "?" : Qt.formatDateTime(dt, fmt);
-  }
-
-  function usageTooltip() {
-    return "Session  " + sessionPct + "%   ·   resets " + fmtTime(sessionResets, "HH:mm") + "\n" + "Weekly   " + weeklyPct + "%   ·   resets " + fmtTime(weeklyResets, "ddd d MMM");
-  }
-
+  // ---- colour helpers -------------------------------------------------------
   function themeKey(status) {
     switch (status) {
     case "green":
@@ -60,10 +52,9 @@ Item {
     case "orange":
       return ps.waitingColor || "error";
     default:
-      return ps.noneColor || "none";
+      return "none";
     }
   }
-
   function customColor(status) {
     switch (status) {
     case "green":
@@ -73,10 +64,9 @@ Item {
     case "orange":
       return ps.waitingCustom || "#c97b47";
     default:
-      return ps.noneCustom || "#3a3a3a";
+      return "#3a3a3a";
     }
   }
-
   function resolveKey(key) {
     switch (key) {
     case "primary":
@@ -88,10 +78,9 @@ Item {
     case "error":
       return Color.mError;
     default:
-      return Color.mSurfaceVariant; // "none" / unset -> neutral grey
+      return Color.mSurfaceVariant;
     }
   }
-
   function resolveOnKey(key) {
     switch (key) {
     case "primary":
@@ -106,36 +95,116 @@ Item {
       return Color.mOnSurface;
     }
   }
-
-  // Black/white contrast for a custom background colour.
   function contrastOn(hex) {
     const c = Qt.color(hex);
     const lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
     return lum > 0.55 ? "#101010" : "#f5f5f5";
   }
-
-  function statusColor(id) {
-    const s = claudeStatus[String(id)];
-    return ps.overrideThemeColors ? customColor(s) : resolveKey(themeKey(s));
+  // Colour for a single Claude status (theme key or custom override).
+  function statusBg(status) {
+    return ps.overrideThemeColors ? customColor(status) : resolveKey(themeKey(status));
+  }
+  // Claude Code logo tinted per status (icons mode).
+  function statusIcon(status) {
+    switch (status) {
+    case "green":
+      return Qt.resolvedUrl("assets/claudecode-thinking.svg");
+    case "purple":
+      return Qt.resolvedUrl("assets/claudecode-tool.svg");
+    case "orange":
+      return Qt.resolvedUrl("assets/claudecode-waiting.svg");
+    default:
+      return Qt.resolvedUrl("assets/claudecode.svg");
+    }
   }
 
-  function statusTextColor(id) {
-    const s = claudeStatus[String(id)];
-    return ps.overrideThemeColors ? contrastOn(customColor(s)) : resolveOnKey(themeKey(s));
+  // One aggregate status per workspace (priority: tool > thinking > waiting).
+  function wsStatus(id) {
+    const arr = instancesByWs[String(id)];
+    if (!arr || arr.length === 0)
+      return "";
+    if (arr.indexOf("purple") >= 0)
+      return "purple";
+    if (arr.indexOf("green") >= 0)
+      return "green";
+    return "orange";
+  }
+
+  // Workspace pill background (focused/occupied/empty), theme or custom.
+  function wsBg(role) {
+    if (ps.overrideThemeColors) {
+      if (role === "focused")
+        return ps.focusedCustom || "#5e81ac";
+      if (role === "occupied")
+        return ps.occupiedCustom || "#434c5e";
+      return ps.emptyCustom || "#3a3a3a";
+    }
+    const key = role === "focused" ? (ps.focusedColor || "primary") : role === "occupied" ? (ps.occupiedColor || "secondary") : (ps.emptyColor || "none");
+    if (role === "empty" && key === "none")
+      return Qt.alpha(Color.mOnSurface, 0.3);
+    return resolveKey(key);
+  }
+  function wsOn(role) {
+    if (ps.overrideThemeColors) {
+      if (role === "focused")
+        return contrastOn(ps.focusedCustom || "#5e81ac");
+      if (role === "occupied")
+        return contrastOn(ps.occupiedCustom || "#434c5e");
+      return contrastOn(ps.emptyCustom || "#3a3a3a");
+    }
+    if (role === "empty")
+      return Color.mOnSurface;
+    return resolveOnKey(role === "focused" ? (ps.focusedColor || "primary") : (ps.occupiedColor || "secondary"));
+  }
+
+  function pillColor(ws) {
+    if (displayMode !== "icons") {
+      const st = wsStatus(ws.id);
+      if (st)
+        return statusBg(st);
+    }
+    if (ws.isFocused)
+      return wsBg("focused");
+    if (occupiedMap[String(ws.id)] === true)
+      return wsBg("occupied");
+    return wsBg("empty");
+  }
+  function pillTextColor(ws) {
+    if (displayMode !== "icons") {
+      const st = wsStatus(ws.id);
+      if (st)
+        return ps.overrideThemeColors ? contrastOn(customColor(st)) : resolveOnKey(themeKey(st));
+    }
+    if (ws.isFocused)
+      return wsOn("focused");
+    if (occupiedMap[String(ws.id)] === true)
+      return wsOn("occupied");
+    return wsOn("empty");
   }
 
   function pillLabel(ws) {
     return (ws.name && String(ws.name).length > 0) ? String(ws.name).substring(0, characterCount) : String(ws.idx);
   }
-
-  // Mirrors Workspace.qml getWorkspaceWidth: active pill is 2.2x, else fit text.
-  function wsWidth(ws, active) {
-    const factor = active ? 2.2 : 1;
-    const textWidth = pillLabel(ws).length * (d * 0.4);
-    const padding = d * 0.6;
-    return Style.toOdd(Math.max(d * factor, textWidth + padding));
+  function fmtTime(iso, fmt) {
+    if (!iso)
+      return "?";
+    const dt = new Date(iso);
+    return isNaN(dt.getTime()) ? "?" : Qt.formatDateTime(dt, fmt);
+  }
+  function usageTooltip() {
+    return "Session  " + sessionPct + "%   ·   resets " + fmtTime(sessionResets, "HH:mm") + "\n" + "Weekly   " + weeklyPct + "%   ·   resets " + fmtTime(weeklyResets, "ddd d MMM");
+  }
+  function recomputeOccupancy() {
+    var m = {};
+    for (var i = 0; i < CompositorService.windows.count; i++) {
+      var wid = CompositorService.windows.get(i).workspaceId;
+      if (wid !== undefined && wid !== null)
+        m[String(wid)] = true;
+    }
+    occupiedMap = m;
   }
 
+  // ---- pollers --------------------------------------------------------------
   Timer {
     interval: 400
     running: true
@@ -143,33 +212,40 @@ Item {
     onTriggered: if (!poller.running)
       poller.running = true
   }
-
   Process {
     id: poller
-    command: ["sh", "-c", "for f in \"$XDG_RUNTIME_DIR\"/claude-ws/*; do [ -e \"$f\" ] && printf '%s=%s\\n' \"$(basename \"$f\")\" \"$(cat \"$f\")\"; done"]
+    command: ["sh", "-c", "for f in \"$XDG_RUNTIME_DIR\"/claude-ws/*; do [ -e \"$f\" ] && cat \"$f\" && echo; done"]
     stdout: StdioCollector {
       onStreamFinished: {
-        var map = {};
+        var byWs = {};
         var lines = text.split("\n");
         for (var i = 0; i < lines.length; i++) {
-          var kv = lines[i].split("=");
-          if (kv.length === 2 && kv[0].length > 0)
-            map[kv[0]] = kv[1];
+          var p = lines[i].trim().split(/\s+/);
+          if (p.length === 2) {
+            if (!byWs[p[0]])
+              byWs[p[0]] = [];
+            byWs[p[0]].push(p[1]);
+          }
         }
-        root.claudeStatus = map;
+        root.instancesByWs = byWs;
       }
     }
   }
-
   Timer {
-    interval: 60000
+    interval: 500
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.recomputeOccupancy()
+  }
+  Timer {
+    interval: 300000
     running: root.showUsage
     repeat: true
     triggeredOnStart: true
     onTriggered: if (!usageProc.running)
       usageProc.running = true
   }
-
   Process {
     id: usageProc
     command: ["sh", "-c", "$HOME/.config/hypr/scripts/claude-usage.sh"]
@@ -186,8 +262,7 @@ Item {
     }
   }
 
-  // Right-click anywhere on the widget -> context menu (left-clicks on pills
-  // fall through to their own handlers since this only accepts the right button).
+  // Right-click anywhere -> context menu (left-clicks fall through to pills).
   MouseArea {
     anchors.fill: parent
     acceptedButtons: Qt.RightButton
@@ -221,7 +296,6 @@ Item {
           fillMode: Image.PreserveAspectFit
           smooth: true
         }
-
         NText {
           anchors.verticalCenter: parent.verticalCenter
           text: (root.sessionPct >= 0 ? root.sessionPct : "—") + "%"
@@ -250,9 +324,10 @@ Item {
         id: cell
         required property var model
         readonly property bool active: model.isFocused === true
+        readonly property var instances: root.instancesByWs[String(model.id)] || []
 
         height: root.barHeight
-        width: root.wsWidth(model, active)
+        width: Math.max(root.d * (active ? 2.2 : 1), Math.round(content.implicitWidth + root.d * 0.6))
 
         Behavior on width {
           NumberAnimation {
@@ -267,7 +342,7 @@ Item {
           width: parent.width
           height: root.d
           radius: Style.radiusM
-          color: root.statusColor(cell.model.id)
+          color: root.pillColor(cell.model)
 
           Behavior on color {
             enabled: !Color.isTransitioning
@@ -276,23 +351,36 @@ Item {
             }
           }
 
-          NText {
-            anchors.fill: parent
-            text: root.pillLabel(cell.model)
-            family: Settings.data.ui.fontFixed
-            pointSize: pill.height * root.textRatio
-            applyUiScale: false
-            font.capitalization: (root.ps.capitalizeNames !== false) ? Font.AllUppercase : Font.MixedCase
-            font.weight: cell.active ? Font.Bold : Font.Medium
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-            color: root.statusTextColor(cell.model.id)
-            opacity: cell.active ? 1.0 : 0.5
+          Row {
+            id: content
+            anchors.centerIn: parent
+            spacing: Style.marginXXS
 
-            Behavior on opacity {
-              NumberAnimation {
-                duration: Style.animationFast
+            NText {
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.pillLabel(cell.model)
+              family: Settings.data.ui.fontFixed
+              pointSize: root.d * root.textRatio
+              applyUiScale: false
+              font.capitalization: (root.ps.capitalizeNames !== false) ? Font.AllUppercase : Font.MixedCase
+              font.weight: cell.active ? Font.Bold : Font.Medium
+              color: root.pillTextColor(cell.model)
+              opacity: cell.active ? 1.0 : 0.7
+            }
+
+            // Icons mode: one Claude Code logo per instance, tinted by status.
+            Repeater {
+              model: root.displayMode === "icons" ? cell.instances : []
+              delegate: Image {
+                required property var modelData
+                anchors.verticalCenter: parent.verticalCenter
+                source: root.statusIcon(modelData)
+                width: Math.round(root.d * 0.85)
+                height: Math.round(root.d * 0.85)
+                sourceSize.width: Math.round(root.d * 2)
+                sourceSize.height: Math.round(root.d * 2)
+                fillMode: Image.PreserveAspectFit
+                smooth: true
               }
             }
           }

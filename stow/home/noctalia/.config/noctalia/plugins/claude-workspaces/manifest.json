@@ -19,17 +19,22 @@
   },
   "metadata": {
     "defaultSettings": {
+      "displayMode": "pill",
       "capitalizeNames": true,
       "showUsage": false,
       "overrideThemeColors": false,
       "thinkingColor": "primary",
       "toolColor": "tertiary",
       "waitingColor": "error",
-      "noneColor": "none",
       "thinkingCustom": "#3fb950",
       "toolCustom": "#a371f7",
       "waitingCustom": "#c97b47",
-      "noneCustom": "#3a3a3a"
+      "focusedColor": "primary",
+      "occupiedColor": "secondary",
+      "emptyColor": "none",
+      "focusedCustom": "#5e81ac",
+      "occupiedCustom": "#434c5e",
+      "emptyCustom": "#3a3a3a"
     }
   }
 }

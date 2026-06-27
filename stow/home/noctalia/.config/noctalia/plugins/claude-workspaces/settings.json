@@ -1,13 +1,20 @@
 {
+  "displayMode": "icons",
   "capitalizeNames": false,
   "showUsage": true,
   "overrideThemeColors": false,
   "thinkingColor": "tertiary",
   "toolColor": "secondary",
   "waitingColor": "error",
-  "noneColor": "none",
-  "thinkingCustom": "#3fb950",
+  "thinkingCustom": "#1d3e4a",
   "toolCustom": "#a371f7",
   "waitingCustom": "#c97b47",
+  "focusedColor": "tertiary",
+  "occupiedColor": "primary",
+  "emptyColor": "none",
+  "focusedCustom": "#5e81ac",
+  "occupiedCustom": "#434c5e",
+  "emptyCustom": "#3a3a3a",
+  "noneColor": "none",
   "noneCustom": "#3a3a3a"
 }
