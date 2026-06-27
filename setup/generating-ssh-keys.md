@@ -13,8 +13,7 @@ in this repo. This file is the procedure — the key material stays in `~/.ssh`.
 ssh-keygen -t ed25519 -C "tom@$(hostname)"
 #    Accept the default path (~/.ssh/id_ed25519); set a passphrase.
 
-# 2. Start the agent and load the key (so the passphrase is cached).
-eval (ssh-agent -c)          # fish syntax; bash/zsh: eval "$(ssh-agent -s)"
+# 2. Load the key into the agent (see setup/enabling-ssh-agent.md for the agent).
 ssh-add ~/.ssh/id_ed25519
 
 # 3. Register the PUBLIC key with GitHub.
