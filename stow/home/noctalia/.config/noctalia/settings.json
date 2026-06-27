@@ -84,27 +84,6 @@
         "widgets": {
             "center": [
                 {
-                    "characterCount": 20,
-                    "colorizeIcons": false,
-                    "emptyColor": "none",
-                    "enableScrollWheel": false,
-                    "focusedColor": "primary",
-                    "followFocusedScreen": false,
-                    "fontWeight": "semibold",
-                    "groupedBorderOpacity": 1,
-                    "hideUnoccupied": false,
-                    "iconScale": 0.8,
-                    "id": "Workspace",
-                    "labelMode": "name",
-                    "occupiedColor": "secondary",
-                    "pillSize": 0.7000000000000001,
-                    "showApplications": false,
-                    "showApplicationsHover": false,
-                    "showBadge": true,
-                    "showLabelsOnlyWhenOccupied": false,
-                    "unfocusedIconsOpacity": 1
-                },
-                {
                     "defaultSettings": {
                     },
                     "id": "plugin:claude-workspaces"
