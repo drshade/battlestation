@@ -95,11 +95,16 @@ hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipb
 
 -- 5. WORKSPACES
 
+-- One loop per modifier group (not interleaved) so each group is registered as a
+-- consecutive 1..10 run — that's what lets the cheatsheet merge them into a range.
 for i = 1, 10 do
-    local key = i % 10
-    hl.bind(mainMod .. " + " .. key,         hl.dsp.focus({ workspace = i }),                       { description = "Go to workspace " .. i })
-    hl.bind(mainMod .. " + SHIFT + " .. key, hl.dsp.window.move({ workspace = i, follow = true }),  { description = "Move window to workspace " .. i })
-    hl.bind(mainMod .. " + ALT + " .. key,   hl.dsp.window.move({ workspace = i, follow = false }), { description = "Send window to workspace " .. i })
+    hl.bind(mainMod .. " + " .. (i % 10), hl.dsp.focus({ workspace = i }), { description = "Go to workspace " .. i })
+end
+for i = 1, 10 do
+    hl.bind(mainMod .. " + SHIFT + " .. (i % 10), hl.dsp.window.move({ workspace = i, follow = true }), { description = "Move window to workspace " .. i })
+end
+for i = 1, 10 do
+    hl.bind(mainMod .. " + ALT + " .. (i % 10), hl.dsp.window.move({ workspace = i, follow = false }), { description = "Send window to workspace " .. i })
 end
 
 hl.bind(mainMod .. " + CONTROL + Right",       hl.dsp.focus({ workspace = "r+1" }),         { description = "Next workspace" })
