@@ -15,7 +15,6 @@ Item {
   property bool shown: true
 
   readonly property bool active: ws && ws.isFocused === true
-  readonly property string wsStatus: cfg.aggregateStatus(instances)
   property int pokeNonce: 0
 
   function poke() {
@@ -24,10 +23,8 @@ Item {
   onActiveChanged: if (active)
     poke()
 
-  // Pill background: Claude status (pill mode) overrides the focused/occupied/empty base.
+  // Pill background follows the workspace state; Claude status shows via the bots.
   function bg() {
-    if (cfg.displayMode !== "icons" && wsStatus)
-      return cfg.statusBg(wsStatus);
     if (active)
       return cfg.wsBg("focused");
     if (occupied)
@@ -35,8 +32,6 @@ Item {
     return cfg.wsBg("empty");
   }
   function fg() {
-    if (cfg.displayMode !== "icons" && wsStatus)
-      return cfg.statusOn(wsStatus);
     if (active)
       return cfg.wsOn("focused");
     if (occupied)
@@ -98,12 +93,12 @@ Item {
       Item {
         width: Style.marginS
         height: 1
-        visible: cfg.displayMode === "icons" && cell.instances.length > 0
+        visible: cell.instances.length > 0
       }
 
-      // Icons mode: one animated bot per Claude instance.
+      // One animated bot per Claude instance running here.
       Repeater {
-        model: cfg.displayMode === "icons" ? cell.instances : []
+        model: cell.instances
         delegate: BotIcon {
           anchors.verticalCenter: parent.verticalCenter
           required property var modelData

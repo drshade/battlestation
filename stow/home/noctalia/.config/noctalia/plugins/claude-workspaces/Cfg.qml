@@ -22,7 +22,6 @@ QtObject {
   readonly property int characterCount: 20
 
   // ---- settings -------------------------------------------------------------
-  readonly property string displayMode: ps.displayMode || "pill"
   readonly property bool outline: ps.outlinePills === true
   readonly property bool hideTrailing: ps.hideTrailing === true
   readonly property bool showUsage: ps.showUsage === true
@@ -36,67 +35,7 @@ QtObject {
   readonly property int waitS: ps.waitS || 30          // typical waiting emote gap (seconds)
   readonly property real jitter: (ps.jitter !== undefined ? ps.jitter : 0.35) // ±randomness applied each cycle
 
-  // ---- Claude status colours ------------------------------------------------
-  function themeKey(status) {
-    switch (status) {
-    case "green":
-      return ps.thinkingColor || "primary";
-    case "purple":
-      return ps.toolColor || "tertiary";
-    case "orange":
-      return ps.waitingColor || "error";
-    default:
-      return "none";
-    }
-  }
-  function customColor(status) {
-    switch (status) {
-    case "green":
-      return ps.thinkingCustom || "#3fb950";
-    case "purple":
-      return ps.toolCustom || "#a371f7";
-    case "orange":
-      return ps.waitingCustom || "#c97b47";
-    default:
-      return "#3a3a3a";
-    }
-  }
-  function statusBg(status) {
-    return override ? customColor(status) : resolveKey(themeKey(status));
-  }
-  function statusOn(status) {
-    return override ? contrastOn(customColor(status)) : resolveOnKey(themeKey(status));
-  }
-
-  // ---- theme key resolution -------------------------------------------------
-  function resolveKey(key) {
-    switch (key) {
-    case "primary":
-      return Color.mPrimary;
-    case "secondary":
-      return Color.mSecondary;
-    case "tertiary":
-      return Color.mTertiary;
-    case "error":
-      return Color.mError;
-    default:
-      return Color.mSurfaceVariant;
-    }
-  }
-  function resolveOnKey(key) {
-    switch (key) {
-    case "primary":
-      return Color.mOnPrimary;
-    case "secondary":
-      return Color.mOnSecondary;
-    case "tertiary":
-      return Color.mOnTertiary;
-    case "error":
-      return Color.mOnError;
-    default:
-      return Color.mOnSurface;
-    }
-  }
+  // ---- colour helpers -------------------------------------------------------
   function contrastOn(hex) {
     const c = Qt.color(hex);
     const lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
@@ -180,16 +119,6 @@ QtObject {
   }
 
   // ---- misc helpers ---------------------------------------------------------
-  // Aggregate a workspace's instance statuses (priority: tool > thinking > waiting).
-  function aggregateStatus(instances) {
-    if (!instances || instances.length === 0)
-      return "";
-    if (instances.indexOf("purple") >= 0)
-      return "purple";
-    if (instances.indexOf("green") >= 0)
-      return "green";
-    return "orange";
-  }
   function pillLabel(ws) {
     const named = ws.name && String(ws.name).length > 0;
     return named ? (ws.idx + " - " + String(ws.name).substring(0, characterCount)) : String(ws.idx);

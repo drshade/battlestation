@@ -9,7 +9,6 @@ ColumnLayout {
   property var pluginApi: null
   spacing: Style.marginL
 
-  property string displayMode: "pill"
   property bool capitalizeNames: true
   property bool showUsage: false
   property bool customColours: false
@@ -23,15 +22,7 @@ ColumnLayout {
   property int waitS: 30
   property real jitter: 0.35
 
-  // Claude status colours (used to paint pills in pill mode)
-  property string thinkingColor: "primary"
-  property string toolColor: "tertiary"
-  property string waitingColor: "error"
-  property string thinkingCustom: "#3fb950"
-  property string toolCustom: "#a371f7"
-  property string waitingCustom: "#c97b47"
-
-  // Workspace colours (pill background in icon mode + non-Claude pills)
+  // Workspace colours (pill background / outline)
   property string focusedColor: "primary"
   property string occupiedColor: "secondary"
   property string emptyColor: "grey"
@@ -153,7 +144,6 @@ ColumnLayout {
     if (!pluginApi || !pluginApi.pluginSettings)
       return;
     const s = pluginApi.pluginSettings;
-    displayMode = s.displayMode || "pill";
     capitalizeNames = s.capitalizeNames !== false;
     showUsage = s.showUsage === true;
     customColours = s.overrideThemeColors === true;
@@ -164,12 +154,6 @@ ColumnLayout {
     activeMs = s.activeMs || 1000;
     waitS = s.waitS || 30;
     jitter = (s.jitter !== undefined ? s.jitter : 0.35);
-    thinkingColor = s.thinkingColor || "primary";
-    toolColor = s.toolColor || "tertiary";
-    waitingColor = s.waitingColor || "error";
-    thinkingCustom = s.thinkingCustom || "#3fb950";
-    toolCustom = s.toolCustom || "#a371f7";
-    waitingCustom = s.waitingCustom || "#c97b47";
     focusedColor = s.focusedColor || "primary";
     occupiedColor = s.occupiedColor || "secondary";
     emptyColor = s.emptyColor || "grey";
@@ -183,7 +167,6 @@ ColumnLayout {
     if (!pluginApi || !_loaded)
       return;
     const s = pluginApi.pluginSettings;
-    s.displayMode = displayMode;
     s.capitalizeNames = capitalizeNames;
     s.showUsage = showUsage;
     s.overrideThemeColors = customColours;
@@ -194,12 +177,6 @@ ColumnLayout {
     s.activeMs = activeMs;
     s.waitS = waitS;
     s.jitter = jitter;
-    s.thinkingColor = thinkingColor;
-    s.toolColor = toolColor;
-    s.waitingColor = waitingColor;
-    s.thinkingCustom = thinkingCustom;
-    s.toolCustom = toolCustom;
-    s.waitingCustom = waitingCustom;
     s.focusedColor = focusedColor;
     s.occupiedColor = occupiedColor;
     s.emptyColor = emptyColor;
@@ -211,26 +188,6 @@ ColumnLayout {
 
   onPluginApiChanged: _load()
   Component.onCompleted: _load()
-
-  NComboBox {
-    Layout.fillWidth: true
-    label: "Display mode"
-    model: [
-      {
-        "key": "pill",
-        "name": "Pill background"
-      },
-      {
-        "key": "icons",
-        "name": "Instance icons"
-      }
-    ]
-    currentKey: root.displayMode
-    onSelected: key => {
-      root.displayMode = key;
-      root.saveSettings();
-    }
-  }
 
   NToggle {
     Layout.fillWidth: true
@@ -286,84 +243,7 @@ ColumnLayout {
     }
   }
 
-  // ---- Claude status colours (pill mode only — icons use fixed logos) -------
-  ColumnLayout {
-    Layout.fillWidth: true
-    visible: root.displayMode === "pill"
-    spacing: Style.marginM
-
-    NText {
-      text: "Claude status colours"
-    }
-
-    ColumnLayout {
-      Layout.fillWidth: true
-      visible: !root.customColours
-      spacing: Style.marginM
-      NColorChoice {
-        label: "Thinking"
-        currentKey: root.thinkingColor
-        onSelected: key => {
-          root.thinkingColor = key;
-          root.saveSettings();
-        }
-      }
-      NColorChoice {
-        label: "Running a tool"
-        currentKey: root.toolColor
-        onSelected: key => {
-          root.toolColor = key;
-          root.saveSettings();
-        }
-      }
-      NColorChoice {
-        label: "Waiting for input"
-        currentKey: root.waitingColor
-        onSelected: key => {
-          root.waitingColor = key;
-          root.saveSettings();
-        }
-      }
-    }
-
-    ColumnLayout {
-      Layout.fillWidth: true
-      visible: root.customColours
-      spacing: Style.marginS
-      NText {
-        text: "Thinking"
-      }
-      NColorPicker {
-        selectedColor: root.thinkingCustom
-        onColorSelected: c => {
-          root.thinkingCustom = c.toString();
-          root.saveSettings();
-        }
-      }
-      NText {
-        text: "Running a tool"
-      }
-      NColorPicker {
-        selectedColor: root.toolCustom
-        onColorSelected: c => {
-          root.toolCustom = c.toString();
-          root.saveSettings();
-        }
-      }
-      NText {
-        text: "Waiting for input"
-      }
-      NColorPicker {
-        selectedColor: root.waitingCustom
-        onColorSelected: c => {
-          root.waitingCustom = c.toString();
-          root.saveSettings();
-        }
-      }
-    }
-  }
-
-  // ---- Workspace colours (pill background: icon mode + non-Claude pills) -----
+  // ---- Workspace colours (pill background / outline) -----
   ColumnLayout {
     Layout.fillWidth: true
     spacing: Style.marginM

@@ -1,11 +1,11 @@
 {
   "id": "claude-workspaces",
   "name": "Claude Workspaces",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "minNoctaliaVersion": "4.4.3",
   "author": "tom",
   "license": "MIT",
-  "description": "Workspace pills coloured by Claude Code status (thinking / running a tool / waiting / none).",
+  "description": "Workspace pills with an animated Claude Code bot per running instance, coloured by status (thinking / tool / waiting).",
   "tags": [
     "Bar"
   ],
@@ -19,7 +19,6 @@
   },
   "metadata": {
     "defaultSettings": {
-      "displayMode": "pill",
       "capitalizeNames": true,
       "showUsage": false,
       "overrideThemeColors": false,
@@ -30,12 +29,6 @@
       "activeMs": 1000,
       "waitS": 30,
       "jitter": 0.35,
-      "thinkingColor": "primary",
-      "toolColor": "tertiary",
-      "waitingColor": "error",
-      "thinkingCustom": "#3fb950",
-      "toolCustom": "#a371f7",
-      "waitingCustom": "#c97b47",
       "focusedColor": "primary",
       "occupiedColor": "secondary",
       "emptyColor": "grey",
