@@ -14,6 +14,13 @@ ColumnLayout {
   property bool showUsage: false
   property bool customColours: false
   property bool outlinePills: false
+  property bool hideTrailing: true
+
+  // Animation tunables (Advanced section)
+  property real breathScale: 1.045
+  property int breathMs: 1700
+  property int activeMs: 1000
+  property int waitS: 30
 
   // Claude status colours (used to paint pills in pill mode)
   property string thinkingColor: "primary"
@@ -150,6 +157,11 @@ ColumnLayout {
     showUsage = s.showUsage === true;
     customColours = s.overrideThemeColors === true;
     outlinePills = s.outlinePills === true;
+    hideTrailing = s.hideTrailing !== false;
+    breathScale = s.breathScale || 1.045;
+    breathMs = s.breathMs || 1700;
+    activeMs = s.activeMs || 1000;
+    waitS = s.waitS || 30;
     thinkingColor = s.thinkingColor || "primary";
     toolColor = s.toolColor || "tertiary";
     waitingColor = s.waitingColor || "error";
@@ -174,6 +186,11 @@ ColumnLayout {
     s.showUsage = showUsage;
     s.overrideThemeColors = customColours;
     s.outlinePills = outlinePills;
+    s.hideTrailing = hideTrailing;
+    s.breathScale = breathScale;
+    s.breathMs = breathMs;
+    s.activeMs = activeMs;
+    s.waitS = waitS;
     s.thinkingColor = thinkingColor;
     s.toolColor = toolColor;
     s.waitingColor = waitingColor;
@@ -251,6 +268,17 @@ ColumnLayout {
     checked: root.outlinePills
     onToggled: checked => {
       root.outlinePills = checked;
+      root.saveSettings();
+    }
+  }
+
+  NToggle {
+    Layout.fillWidth: true
+    label: "Hide trailing empty workspaces"
+    description: "Only show workspaces up to the highest occupied (or focused) one."
+    checked: root.hideTrailing
+    onToggled: checked => {
+      root.hideTrailing = checked;
       root.saveSettings();
     }
   }
@@ -404,6 +432,61 @@ ColumnLayout {
           root.emptyCustom = c.toString();
           root.saveSettings();
         }
+      }
+    }
+  }
+
+  NCollapsible {
+    Layout.fillWidth: true
+    label: "Advanced"
+    description: "Fine-tune the bot animations."
+
+    NValueSlider {
+      Layout.fillWidth: true
+      label: "Breathing amount"
+      from: 1.0
+      to: 1.12
+      stepSize: 0.005
+      value: root.breathScale
+      onMoved: value => {
+        root.breathScale = value;
+        root.saveSettings();
+      }
+    }
+    NValueSlider {
+      Layout.fillWidth: true
+      label: "Breathing speed (ms)"
+      from: 600
+      to: 3000
+      stepSize: 100
+      value: root.breathMs
+      onMoved: value => {
+        root.breathMs = Math.round(value);
+        root.saveSettings();
+      }
+    }
+    NValueSlider {
+      Layout.fillWidth: true
+      label: "Active emote gap (ms)"
+      from: 300
+      to: 3000
+      stepSize: 100
+      value: root.activeMs
+      onMoved: value => {
+        root.activeMs = Math.round(value);
+        root.saveSettings();
+      }
+    }
+    NValueSlider {
+      Layout.fillWidth: true
+      label: "Waiting emote gap (s)"
+      from: 5
+      to: 120
+      stepSize: 5
+      value: root.waitS
+      onMoved: value => {
+        root.waitS = Math.round(value);
+        root.saveSettings();
       }
     }
   }

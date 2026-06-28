@@ -27,6 +27,14 @@ Item {
   readonly property var ps: (pluginApi && pluginApi.pluginSettings) ? pluginApi.pluginSettings : ({})
   readonly property string displayMode: ps.displayMode || "pill"
   readonly property bool outline: ps.outlinePills === true
+  readonly property bool hideTrailing: ps.hideTrailing === true
+  property int maxVisibleIdx: 999
+
+  // Animation tunables (Advanced settings).
+  readonly property real breathScale: ps.breathScale || 1.045
+  readonly property int breathMs: ps.breathMs || 1700
+  readonly property int activeMs: ps.activeMs || 1000  // typical thinking/tool emote gap
+  readonly property int waitS: ps.waitS || 30          // typical waiting emote gap (seconds)
 
   implicitWidth: row.implicitWidth + Style.marginS * 2
   implicitHeight: barHeight
@@ -239,7 +247,8 @@ Item {
   }
 
   function pillLabel(ws) {
-    return (ws.name && String(ws.name).length > 0) ? String(ws.name).substring(0, characterCount) : String(ws.idx);
+    const named = ws.name && String(ws.name).length > 0;
+    return named ? (ws.idx + " - " + String(ws.name).substring(0, characterCount)) : String(ws.idx);
   }
   function fmtTime(iso, fmt) {
     if (!iso)
@@ -258,6 +267,14 @@ Item {
         m[String(wid)] = true;
     }
     occupiedMap = m;
+    // Highest workspace index that must stay visible (occupied or focused).
+    var mx = 1;
+    for (var j = 0; j < CompositorService.workspaces.count; j++) {
+      var w = CompositorService.workspaces.get(j);
+      if ((m[String(w.id)] === true || w.isFocused === true) && w.idx > mx)
+        mx = w.idx;
+    }
+    maxVisibleIdx = mx;
   }
 
   // ---- pollers --------------------------------------------------------------
@@ -381,9 +398,15 @@ Item {
         required property var model
         readonly property bool active: model.isFocused === true
         readonly property var instances: root.instancesByWs[String(model.id)] || []
+        readonly property bool shown: !root.hideTrailing || model.idx <= root.maxVisibleIdx
+        signal poke
 
+        onActiveChanged: if (active)
+          poke()
+
+        visible: shown
         height: root.barHeight
-        width: Math.max(root.d * (active ? 2.2 : 1), Math.round(content.implicitWidth + root.d * (root.outline ? 1.35 : 0.6)))
+        width: shown ? Math.max(root.d * (active ? 2.2 : 1), Math.round(content.implicitWidth + root.d * (root.outline ? 1.35 : 0.6))) : 0
 
         Behavior on width {
           NumberAnimation {
@@ -426,6 +449,13 @@ Item {
               opacity: cell.active ? 1.0 : 0.7
             }
 
+            // Small gap between the name and the bots.
+            Item {
+              width: Style.marginS
+              height: 1
+              visible: root.displayMode === "icons" && cell.instances.length > 0
+            }
+
             // Icons mode: one animated Claude Code bot per instance, tinted by status.
             Repeater {
               model: root.displayMode === "icons" ? cell.instances : []
@@ -452,16 +482,16 @@ Item {
                 }
                 // Cadence: thinking/tools lively, waiting calm.
                 function nextDelay() {
-                  return status === "orange" ? rnd(20000, 40000) : rnd(500, 1500);
+                  return status === "orange" ? rnd(root.waitS * 660, root.waitS * 1340) : rnd(root.activeMs * 0.5, root.activeMs * 1.5);
                 }
                 function showFace(emote, ms) {
                   bot.faceOverride = root.faceUrl(status, emote);
                   faceTimer.interval = ms;
                   faceTimer.restart();
                 }
-                function performEmote() {
+                function performEmote(force) {
                   // One emote at a time, so a face emote (squint/look) never bounces.
-                  if (faceTimer.running || bounceAnim.running || wiggleAnim.running)
+                  if (!force && (faceTimer.running || bounceAnim.running || wiggleAnim.running))
                     return;
                   var pool = emotePool();
                   switch (pool[Math.floor(Math.random() * pool.length)]) {
@@ -509,6 +539,13 @@ Item {
                 Component.onCompleted: {
                   emoteTimer.interval = bot.nextDelay();
                   emoteTimer.start();
+                }
+                // Poke the bot (forced emote) when its workspace is clicked / switched to.
+                Connections {
+                  target: cell
+                  function onPoke() {
+                    bot.performEmote(true);
+                  }
                 }
 
                 Image {
@@ -579,6 +616,23 @@ Item {
                       duration: 70
                     }
                   }
+                  // Idle breathing: a constant, very slight scale pulse.
+                  SequentialAnimation on scale {
+                    running: true
+                    loops: Animation.Infinite
+                    NumberAnimation {
+                      from: 1.0
+                      to: root.breathScale
+                      duration: root.breathMs
+                      easing.type: Easing.InOutSine
+                    }
+                    NumberAnimation {
+                      from: root.breathScale
+                      to: 1.0
+                      duration: root.breathMs
+                      easing.type: Easing.InOutSine
+                    }
+                  }
                 }
               }
             }
@@ -589,7 +643,11 @@ Item {
           anchors.fill: parent
           cursorShape: Qt.PointingHandCursor
           acceptedButtons: Qt.LeftButton
-          onClicked: CompositorService.switchToWorkspace(cell.model)
+          onClicked: {
+            CompositorService.switchToWorkspace(cell.model);
+            if (cell.active)
+              cell.poke(); // already-current click; switches fire poke via onActiveChanged
+          }
         }
       }
     }
