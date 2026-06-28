@@ -14,9 +14,7 @@ local function send_shortcut(mods, key)
     end
 end
 
----------------------------
----- WINDOW MANAGEMENT ----
----------------------------
+-- 1. WINDOW MANAGEMENT
 
 hl.bind(mainMod .. " + Escape",      hl.dsp.exec_cmd("hyprctl kill"),                  { description = "Force-kill a window (click to select)" })
 hl.bind(mainMod .. " + Q",           hl.dsp.window.close(),                            { description = "Close active window" })
@@ -46,9 +44,7 @@ hl.bind(mainMod .. " + CONTROL + SHIFT + Left",  hl.dsp.window.move({ workspace 
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { description = "Drag window (mouse)" })
 hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { description = "Resize window (mouse)" })
 
-------------------
----- LAUNCHER ----
-------------------
+-- 2. LAUNCHER
 
 hl.bind(mainMod .. " + Return",     hl.dsp.exec_cmd(launchPrefix .. TERMINAL),                 { description = "Open terminal" })
 hl.bind(mainMod .. " + E",          hl.dsp.exec_cmd(launchPrefix .. FILE_MANAGER),             { description = "Open file manager" })
@@ -58,9 +54,7 @@ hl.bind("CONTROL + SHIFT + Escape", hl.dsp.exec_cmd(launchPrefix .. TERMINAL .. 
 hl.bind(mainMod .. " + Space",      hl.dsp.exec_cmd(noctCall .. "launcher toggle"),            { description = "App launcher" })
 hl.bind(mainMod .. " + period",     hl.dsp.exec_cmd(noctCall .. "launcher emoji"),             { description = "Emoji picker" })
 
----------------------------
----- HARDWARE CONTROLS ----
----------------------------
+-- 3. HARDWARE CONTROLS
 
 -- Audio
 hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd(noctCall .. "volume increase"),   { locked = true, repeating = true, description = "Volume up" })
@@ -78,9 +72,7 @@ hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd(noctCall .. "media previous"),  { lock
 hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd(noctCall .. "brightness increase"), { repeating = true, description = "Brightness up" })
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd(noctCall .. "brightness decrease"), { repeating = true, description = "Brightness down" })
 
--------------------
----- UTILITIES ----
--------------------
+-- 4. UTILITIES
 
 -- Screen Capture
 hl.bind(mainMod .. " + P",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit colorPicker"),     { description = "Colour picker" })
@@ -101,9 +93,7 @@ hl.bind(mainMod .. " + X",           send_shortcut("CTRL", "X"),                
 hl.bind(mainMod .. " + Z",           send_shortcut("CTRL", "Z"),                       { description = "Undo" })
 hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipboard"), { description = "Clipboard history" })
 
---------------------
----- WORKSPACES ----
---------------------
+-- 5. WORKSPACES
 
 for i = 1, 10 do
     local key = i % 10
@@ -127,8 +117,6 @@ hl.bind(mainMod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special" })
 hl.bind(mainMod .. " + S",         hl.dsp.workspace.toggle_special(),                           { description = "Toggle scratchpad" })
 hl.bind(mainMod .. " + SHIFT + R", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/rename-workspace.sh"), { description = "Rename workspace" })
 
------------------------
----- NOTIFICATIONS ----
------------------------
+-- 6. NOTIFICATIONS
 
 hl.bind(mainMod .. " + A", hl.dsp.exec_cmd(noctCall .. "notifications toggleHistory"), { description = "Notification history" })
