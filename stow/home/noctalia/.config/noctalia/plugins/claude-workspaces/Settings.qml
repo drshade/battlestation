@@ -21,6 +21,7 @@ ColumnLayout {
   property int breathMs: 1700
   property int activeMs: 1000
   property int waitS: 30
+  property real jitter: 0.35
 
   // Claude status colours (used to paint pills in pill mode)
   property string thinkingColor: "primary"
@@ -162,6 +163,7 @@ ColumnLayout {
     breathMs = s.breathMs || 1700;
     activeMs = s.activeMs || 1000;
     waitS = s.waitS || 30;
+    jitter = (s.jitter !== undefined ? s.jitter : 0.35);
     thinkingColor = s.thinkingColor || "primary";
     toolColor = s.toolColor || "tertiary";
     waitingColor = s.waitingColor || "error";
@@ -191,6 +193,7 @@ ColumnLayout {
     s.breathMs = breathMs;
     s.activeMs = activeMs;
     s.waitS = waitS;
+    s.jitter = jitter;
     s.thinkingColor = thinkingColor;
     s.toolColor = toolColor;
     s.waitingColor = waitingColor;
@@ -444,10 +447,13 @@ ColumnLayout {
     NValueSlider {
       Layout.fillWidth: true
       label: "Breathing amount"
+      text: ((root.breathScale - 1) * 100).toFixed(1) + "%"
       from: 1.0
       to: 1.12
       stepSize: 0.005
       value: root.breathScale
+      defaultValue: 1.045
+      showReset: true
       onMoved: value => {
         root.breathScale = value;
         root.saveSettings();
@@ -455,11 +461,14 @@ ColumnLayout {
     }
     NValueSlider {
       Layout.fillWidth: true
-      label: "Breathing speed (ms)"
+      label: "Breathing speed"
+      text: (root.breathMs / 1000).toFixed(1) + "s"
       from: 600
       to: 3000
       stepSize: 100
       value: root.breathMs
+      defaultValue: 1700
+      showReset: true
       onMoved: value => {
         root.breathMs = Math.round(value);
         root.saveSettings();
@@ -467,11 +476,14 @@ ColumnLayout {
     }
     NValueSlider {
       Layout.fillWidth: true
-      label: "Active emote gap (ms)"
+      label: "Active emote gap"
+      text: (root.activeMs / 1000).toFixed(1) + "s"
       from: 300
       to: 3000
       stepSize: 100
       value: root.activeMs
+      defaultValue: 1000
+      showReset: true
       onMoved: value => {
         root.activeMs = Math.round(value);
         root.saveSettings();
@@ -479,13 +491,45 @@ ColumnLayout {
     }
     NValueSlider {
       Layout.fillWidth: true
-      label: "Waiting emote gap (s)"
+      label: "Waiting emote gap"
+      text: root.waitS + "s"
       from: 5
       to: 120
       stepSize: 5
       value: root.waitS
+      defaultValue: 30
+      showReset: true
       onMoved: value => {
         root.waitS = Math.round(value);
+        root.saveSettings();
+      }
+    }
+    NValueSlider {
+      Layout.fillWidth: true
+      label: "Randomness"
+      text: Math.round(root.jitter * 100) + "%"
+      from: 0
+      to: 0.6
+      stepSize: 0.05
+      value: root.jitter
+      defaultValue: 0.35
+      showReset: true
+      onMoved: value => {
+        root.jitter = value;
+        root.saveSettings();
+      }
+    }
+
+    NButton {
+      Layout.fillWidth: true
+      text: "Reset to defaults"
+      icon: "refresh"
+      onClicked: {
+        root.breathScale = 1.045;
+        root.breathMs = 1700;
+        root.activeMs = 1000;
+        root.waitS = 30;
+        root.jitter = 0.35;
         root.saveSettings();
       }
     }

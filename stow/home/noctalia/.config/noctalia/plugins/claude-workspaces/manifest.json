@@ -29,6 +29,7 @@
       "breathMs": 1700,
       "activeMs": 1000,
       "waitS": 30,
+      "jitter": 0.35,
       "thinkingColor": "primary",
       "toolColor": "tertiary",
       "waitingColor": "error",
