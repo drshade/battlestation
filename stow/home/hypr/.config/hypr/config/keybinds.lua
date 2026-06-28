@@ -95,8 +95,10 @@ hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipb
 
 -- 5. WORKSPACES
 
--- One loop per modifier group (not interleaved) so each group is registered as a
--- consecutive 1..10 run — that's what lets the cheatsheet merge them into a range.
+-- One loop per modifier group (not interleaved) so each group's binds register
+-- contiguously and list together in the keybind cheatsheet. (The cheatsheet's
+-- "merge sequential" only works for file-parsed binds, not the hyprctl fallback
+-- our lua config uses, so they won't collapse into a range — just stay grouped.)
 for i = 1, 10 do
     hl.bind(mainMod .. " + " .. (i % 10), hl.dsp.focus({ workspace = i }), { description = "Go to workspace " .. i })
 end
