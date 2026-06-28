@@ -85,6 +85,28 @@
             "center": [
                 {
                     "defaultSettings": {
+                        "activeMs": 1000,
+                        "breathMs": 1700,
+                        "breathScale": 1.045,
+                        "capitalizeNames": true,
+                        "displayMode": "pill",
+                        "emptyColor": "grey",
+                        "emptyCustom": "#3a3a3a",
+                        "focusedColor": "primary",
+                        "focusedCustom": "#5e81ac",
+                        "hideTrailing": true,
+                        "occupiedColor": "secondary",
+                        "occupiedCustom": "#434c5e",
+                        "outlinePills": false,
+                        "overrideThemeColors": false,
+                        "showUsage": false,
+                        "thinkingColor": "primary",
+                        "thinkingCustom": "#3fb950",
+                        "toolColor": "tertiary",
+                        "toolCustom": "#a371f7",
+                        "waitS": 30,
+                        "waitingColor": "error",
+                        "waitingCustom": "#c97b47"
                     },
                     "id": "plugin:claude-workspaces"
                 }
