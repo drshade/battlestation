@@ -149,6 +149,12 @@ live in `setup/README.md`.
 
 ## Working habits in this repo
 
+- **This repo is shared/published; write tracked content for a stranger.**
+  Config comments, docs and commit messages are read by others, so keep them
+  audience-neutral — no personal framing ("for my demos", "on my machine") and
+  no machine-specific assumptions. The `setup/` style (terse; explain the
+  non-obvious *why*, not the obvious) applies to **all** tracked prose, including
+  config-file comments.
 - After any symlink/stow operation, verify: `ls -ld ~/.config/<app>` should show
   the symlink, and `readlink -f` it should resolve into this repo.
 - Before committing, sanity-check nothing secret was staged:
