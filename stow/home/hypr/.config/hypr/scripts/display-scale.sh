@@ -1,24 +1,12 @@
 #!/usr/bin/env sh
-# Rescale the focused monitor at runtime — for demos where the audience needs a
-# bigger picture. We re-issue the whole monitor line, preserving the current
-# mode (so e.g. the ultrawide keeps its local-override resolution instead of
-# falling back to "highrr") and changing only the scale. This relayouts the
-# workspace — expected, fine for a demo. Bigger scale = larger UI = "zoomed in".
+# Step the focused monitor's scale up/down at runtime, preserving its mode.
 #
-# Three non-obvious things, all handled below:
-#   1. This Hyprland uses the Lua (non-legacy) config parser, so `hyprctl
-#      keyword` is a silent no-op ("keyword can't work with non-legacy
-#      parsers") — same trap as rename-workspace.sh. We drive the Lua API
-#      (hl.monitor) via `hyprctl eval` instead.
-#   2. Hyprland only accepts scales on its 1/120 grid that divide the mode into
-#      ~whole pixels, and snaps anything else to its own choice. The achievable
-#      scales are irregular per panel, so we don't compute them — we step a
-#      fixed LADDER of target scales and let Hyprland snap each rung. On
-#      3440x1440 these seven rungs land on seven distinct scales (no dead step).
-#   3. We persist the ladder INDEX per-monitor, so stepping is deterministic and
-#      immune to how Hyprland rounds the reported scale. With no saved index
-#      (first use / after reset) we start from the rung nearest the live scale,
-#      so a HiDPI default (auto > 1.0) is honoured.
+# Two Hyprland quirks this works around:
+#   1. The Lua (non-legacy) config parser makes `hyprctl keyword` a silent no-op,
+#      so we drive the Lua API (hl.monitor) via `hyprctl eval` instead.
+#   2. Hyprland snaps scale to its own 1/120 grid, and the achievable values are
+#      irregular per panel — so we step a fixed ladder and let it snap each rung,
+#      persisting the rung INDEX per-monitor for deterministic stepping.
 #
 # Usage: display-scale.sh <up|down|reset>
 set -eu

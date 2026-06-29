@@ -80,10 +80,7 @@ hl.bind("Print",               hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolki
 hl.bind(mainMod .. " + Print", hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit annotateWindow"),  { description = "Screenshot window (annotate)" })
 hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit toggle"),          { description = "Screenshot toolkit" })
 
--- Display scaling (for demos — relayouts the workspace; re-issues the focused
--- monitor's mode unchanged). comma steps to native (1.0) at the floor, so a
--- separate reset bind is unneeded. comma/period (< >) chosen so SUPER + =/-
--- stay free for in-app zoom.
+-- Display scaling
 hl.bind(mainMod .. " + comma",  hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh down"), { description = "Zoom display out (scale down)" })
 hl.bind(mainMod .. " + period", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh up"),   { description = "Zoom display in (scale up)" })
 
