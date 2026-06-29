@@ -1,6 +1,10 @@
 local mainMod = "SUPER"
 local noctCall = "qs -c noctalia-shell ipc call "
 local launchPrefix = "uwsm app -- " -- if you are not using UWSM, make this empty (e.g. "")
+-- Workspace navigation by DISPLAY POSITION rather than raw Hyprland id: ws.sh
+-- maps position <-> real id through a persisted order the bar plugin can reorder.
+-- So "workspace N" below means the Nth pill, not necessarily Hyprland's ws N.
+local ws = "$HOME/.config/hypr/scripts/ws.sh"
 
 -- Universal copy/paste/cut: send Ctrl+Insert / Shift+Insert, honored by GUI apps
 -- AND terminals (and Ctrl+Insert avoids Ctrl+C = SIGINT). down -> 50ms -> up
@@ -37,8 +41,8 @@ hl.bind(mainMod .. " + SHIFT + Right", hl.dsp.window.move({ direction = "r" }), 
 hl.bind(mainMod .. " + SHIFT + Left",  hl.dsp.window.move({ direction = "l" }), { description = "Move window left" })
 hl.bind(mainMod .. " + SHIFT + Up",    hl.dsp.window.move({ direction = "u" }), { description = "Move window up" })
 hl.bind(mainMod .. " + SHIFT + Down",  hl.dsp.window.move({ direction = "d" }), { description = "Move window down" })
-hl.bind(mainMod .. " + CONTROL + SHIFT + Right", hl.dsp.window.move({ workspace = "r+1" }), { description = "Move window to next workspace" })
-hl.bind(mainMod .. " + CONTROL + SHIFT + Left",  hl.dsp.window.move({ workspace = "r-1" }), { description = "Move window to previous workspace" })
+hl.bind(mainMod .. " + CONTROL + SHIFT + Right", hl.dsp.exec_cmd(ws .. " relative next --move"), { description = "Move window to next workspace" })
+hl.bind(mainMod .. " + CONTROL + SHIFT + Left",  hl.dsp.exec_cmd(ws .. " relative prev --move"), { description = "Move window to previous workspace" })
 
 -- Move & Resize with mouse
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { description = "Drag window (mouse)" })
@@ -104,24 +108,24 @@ hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipb
 -- "merge sequential" only works for file-parsed binds, not the hyprctl fallback
 -- our lua config uses, so they won't collapse into a range — just stay grouped.)
 for i = 1, 10 do
-    hl.bind(mainMod .. " + " .. (i % 10), hl.dsp.focus({ workspace = i }), { description = "Go to workspace " .. i })
+    hl.bind(mainMod .. " + " .. (i % 10), hl.dsp.exec_cmd(ws .. " goto " .. i), { description = "Go to workspace " .. i })
 end
 for i = 1, 10 do
-    hl.bind(mainMod .. " + SHIFT + " .. (i % 10), hl.dsp.window.move({ workspace = i, follow = true }), { description = "Move window to workspace " .. i })
+    hl.bind(mainMod .. " + SHIFT + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i .. " --follow"), { description = "Move window to workspace " .. i })
 end
 for i = 1, 10 do
-    hl.bind(mainMod .. " + ALT + " .. (i % 10), hl.dsp.window.move({ workspace = i, follow = false }), { description = "Send window to workspace " .. i })
+    hl.bind(mainMod .. " + ALT + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i), { description = "Send window to workspace " .. i })
 end
 
-hl.bind(mainMod .. " + CONTROL + Right",       hl.dsp.focus({ workspace = "r+1" }),         { description = "Next workspace" })
-hl.bind(mainMod .. " + CONTROL + Left",        hl.dsp.focus({ workspace = "r-1" }),         { description = "Previous workspace" })
-hl.bind(mainMod .. " + CONTROL + Down",        hl.dsp.focus({ workspace = "empty" }),       { description = "Go to next empty workspace" })
-hl.bind(mainMod .. " + CONTROL + ALT + Right", hl.dsp.window.move({ workspace = "r+1" }),   { description = "Move window to next workspace" })
-hl.bind(mainMod .. " + CONTROL + ALT + Left",  hl.dsp.window.move({ workspace = "r-1" }),   { description = "Move window to previous workspace" })
+hl.bind(mainMod .. " + CONTROL + Right",       hl.dsp.exec_cmd(ws .. " relative next"),        { description = "Next workspace" })
+hl.bind(mainMod .. " + CONTROL + Left",        hl.dsp.exec_cmd(ws .. " relative prev"),        { description = "Previous workspace" })
+hl.bind(mainMod .. " + CONTROL + Down",        hl.dsp.focus({ workspace = "empty" }),          { description = "Go to next empty workspace" })
+hl.bind(mainMod .. " + CONTROL + ALT + Right", hl.dsp.exec_cmd(ws .. " relative next --move"), { description = "Move window to next workspace" })
+hl.bind(mainMod .. " + CONTROL + ALT + Left",  hl.dsp.exec_cmd(ws .. " relative prev --move"), { description = "Move window to previous workspace" })
 
--- Scroll through existing workspaces
-hl.bind(mainMod .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }), { description = "Scroll to next workspace" })
-hl.bind(mainMod .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }), { description = "Scroll to previous workspace" })
+-- Scroll through workspaces in display order
+hl.bind(mainMod .. " + mouse_down", hl.dsp.exec_cmd(ws .. " relative next"), { description = "Scroll to next workspace" })
+hl.bind(mainMod .. " + mouse_up",   hl.dsp.exec_cmd(ws .. " relative prev"), { description = "Scroll to previous workspace" })
 
 -- Special workspace (scratchpad)
 hl.bind(mainMod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special" }),               { description = "Move window to scratchpad" })
