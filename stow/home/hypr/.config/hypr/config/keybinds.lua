@@ -130,7 +130,7 @@ hl.bind(mainMod .. " + mouse_up",   hl.dsp.exec_cmd(ws .. " relative prev"), { d
 -- Special workspace (scratchpad)
 hl.bind(mainMod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special" }),               { description = "Move window to scratchpad" })
 hl.bind(mainMod .. " + S",         hl.dsp.workspace.toggle_special(),                           { description = "Toggle scratchpad" })
-hl.bind(mainMod .. " + SHIFT + R", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/rename-workspace.sh"), { description = "Rename workspace" })
+hl.bind(mainMod .. " + SHIFT + R", hl.dsp.exec_cmd(noctCall .. "plugin:claude-workspaces rename"), { description = "Rename workspace" })
 
 -- 6. NOTIFICATIONS
 

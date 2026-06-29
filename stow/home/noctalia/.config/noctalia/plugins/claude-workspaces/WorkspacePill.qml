@@ -1,5 +1,7 @@
 // One workspace pill: the capsule (filled or outlined), the "<n> - <name>"
 // label, and a row of animated BotIcons (one per Claude instance in icons mode).
+// Purely visual + the active/poke state; drag, drop and click handling live in
+// the BarWidget ListView delegate that wraps this.
 import QtQuick
 import qs.Commons
 import qs.Widgets
@@ -108,17 +110,6 @@ Item {
           pokeNonce: cell.pokeNonce
         }
       }
-    }
-  }
-
-  MouseArea {
-    anchors.fill: parent
-    cursorShape: Qt.PointingHandCursor
-    acceptedButtons: Qt.LeftButton
-    onClicked: {
-      CompositorService.switchToWorkspace(cell.ws);
-      if (cell.active)
-        cell.poke(); // already-current click; switches fire poke via onActiveChanged
     }
   }
 }

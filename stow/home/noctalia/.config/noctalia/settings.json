@@ -18,10 +18,10 @@
         "ignoreMouseInput": false,
         "overviewLayer": false,
         "pinnedApps": [
-            "firefox",
             "cachyos-pi",
             "nvidia-settings",
             "steam",
+            "firefox",
             "org.kde.dolphin"
         ],
         "position": "center",
@@ -763,7 +763,7 @@
         "wallhavenCategories": "111",
         "wallhavenOrder": "desc",
         "wallhavenPurity": "100",
-        "wallhavenQuery": "amsterdam",
+        "wallhavenQuery": "night",
         "wallhavenRatios": "",
         "wallhavenResolutionHeight": "",
         "wallhavenResolutionMode": "atleast",

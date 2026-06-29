@@ -15,6 +15,9 @@ hl.curve("rubber",         { type = "spring", mass = 1, stiffness = 70,      dam
 -- Animations
 hl.animation({ leaf = "global",              enabled = true, speed = 3, bezier = "quick"                 })
 hl.animation({ leaf = "windows",             enabled = true, speed = 3, spring = "easy",  style = "slide" })
-hl.animation({ leaf = "workspaces",          enabled = true, speed = 5, bezier = "easeOutQuint", style = "slidefade 20%" })
+-- Pure fade (no slide): pills are reordered virtually (see ws.sh), so a
+-- directional slide -- which Hyprland derives from workspace id, not display
+-- order -- would run backwards after a reorder. Fade has no direction to be wrong.
+hl.animation({ leaf = "workspaces",          enabled = true, speed = 5, bezier = "easeOutQuint", style = "fade" })
 hl.animation({ leaf = "specialWorkspaceIn",  enabled = true, speed = 2, bezier = "quick", style = "slide top"})
 hl.animation({ leaf = "specialWorkspaceOut", enabled = true, speed = 2, bezier = "quick", style = "slide bottom"})

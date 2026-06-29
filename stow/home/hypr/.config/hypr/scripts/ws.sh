@@ -22,6 +22,7 @@
 #   ws.sh set <id> [id ...]           write the preferred order
 #   ws.sh get                         print the raw preference
 #   ws.sh order                       print resolved "pos -> id (name)" (debug)
+#   ws.sh rename <id> [name]          rename a workspace (empty name resets to its number)
 set -eu
 
 ORDER_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/claude-workspaces/order"
@@ -56,7 +57,7 @@ focus_ws() { hyprctl dispatch "hl.dsp.focus({ workspace = $1 })" >/dev/null; }
 move_ws()  { hyprctl dispatch "hl.dsp.window.move({ workspace = $1, follow = $2 })" >/dev/null; }
 
 cmd="${1:-}"
-[ -n "$cmd" ] || { echo "usage: ws.sh goto|movewindow|relative|set|get|order ..." >&2; exit 2; }
+[ -n "$cmd" ] || { echo "usage: ws.sh goto|movewindow|relative|set|get|order|rename ..." >&2; exit 2; }
 shift || true
 
 case "$cmd" in
@@ -94,6 +95,16 @@ case "$cmd" in
         ;;
     get)
         cat "$ORDER_FILE" 2>/dev/null || true
+        ;;
+    rename)
+        # Hyprland can't renumber an id; this only changes the display name. The
+        # Lua config parser rejects `hyprctl dispatch renameworkspace`, so the
+        # rename goes through hl.dsp.workspace.rename (same reason as focus/move).
+        id="${1:?id required}"
+        name="${2:-}"
+        [ -n "$name" ] || name="$id"                       # empty -> reset to the number
+        name="$(printf '%s' "$name" | sed 's/[\\"]/\\&/g')" # escape \ and " for the Lua string
+        hyprctl dispatch "hl.dsp.workspace.rename({ workspace = $id, name = \"$name\" })" >/dev/null
         ;;
     order)
         i=1

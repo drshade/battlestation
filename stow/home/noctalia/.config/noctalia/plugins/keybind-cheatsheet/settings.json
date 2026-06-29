@@ -270,12 +270,12 @@
           "_verb": ""
         },
         {
-          "keys": "Super + PERIOD",
+          "keys": "Super + Shift + E",
           "desc": "Emoji picker",
-          "bindId": "|64|period|000|__lua",
+          "bindId": "|65|E|000|__lua",
           "undescribed": false,
-          "_mainKey": "period",
-          "_mods": "Super",
+          "_mainKey": "E",
+          "_mods": "Super+Shift",
           "_verb": ""
         }
       ]
@@ -412,6 +412,33 @@
           "undescribed": false,
           "_mainKey": "R",
           "_mods": "Super",
+          "_verb": ""
+        },
+        {
+          "keys": "Super + COMMA",
+          "desc": "Zoom display out (scale down)",
+          "bindId": "|64|comma|000|__lua",
+          "undescribed": false,
+          "_mainKey": "comma",
+          "_mods": "Super",
+          "_verb": ""
+        },
+        {
+          "keys": "Super + PERIOD",
+          "desc": "Zoom display in (scale up)",
+          "bindId": "|64|period|000|__lua",
+          "undescribed": false,
+          "_mainKey": "period",
+          "_mods": "Super",
+          "_verb": ""
+        },
+        {
+          "keys": "Super + Alt + COMMA",
+          "desc": "Reset display scale",
+          "bindId": "|72|comma|000|__lua",
+          "undescribed": false,
+          "_mainKey": "comma",
+          "_mods": "Super+Alt",
           "_verb": ""
         },
         {
