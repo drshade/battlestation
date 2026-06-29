@@ -519,22 +519,22 @@
       ]
     },
     {
-      "title": "Without Description",
+      "title": "Other",
       "binds": [
         {
           "keys": "SWITCH:ON:LID SWITCH",
-          "desc": "",
+          "desc": "Lid closed: disable internal panel",
           "bindId": "|0|switch:on:Lid Switch|000|__lua",
-          "undescribed": true,
+          "undescribed": false,
           "_mainKey": "switch:on:Lid Switch",
           "_mods": "",
           "_verb": ""
         },
         {
           "keys": "SWITCH:OFF:LID SWITCH",
-          "desc": "",
+          "desc": "Lid opened: enable internal panel",
           "bindId": "|0|switch:off:Lid Switch|000|__lua",
-          "undescribed": true,
+          "undescribed": false,
           "_mainKey": "switch:off:Lid Switch",
           "_mods": "",
           "_verb": ""
