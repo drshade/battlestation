@@ -80,6 +80,12 @@ hl.bind("Print",               hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolki
 hl.bind(mainMod .. " + Print", hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit annotateWindow"),  { description = "Screenshot window (annotate)" })
 hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit toggle"),          { description = "Screenshot toolkit" })
 
+-- Display scaling (for demos — relayouts the workspace; reset restores the
+-- configured "auto" scale). Re-issues the focused monitor's mode unchanged.
+hl.bind(mainMod .. " + equal",       hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh up"),    { description = "Zoom display in (scale up)" })
+hl.bind(mainMod .. " + minus",       hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh down"),  { description = "Zoom display out (scale down)" })
+hl.bind(mainMod .. " + ALT + minus", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh reset"), { description = "Reset display scale" })
+
 -- Theming and Wallpaper
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd(noctCall .. " wallpaper toggle"), { description = "Cycle wallpaper" })
 

@@ -115,6 +115,15 @@ live in `setup/README.md`.
 
 ## Known gotchas
 
+- **Hyprland runs the Lua (non-legacy) config parser.** Our config is
+  `hyprland.lua` + `config/*.lua`, so the legacy `hyprctl` paths silently fail:
+  `hyprctl keyword …` returns *"keyword can't work with non-legacy parsers. Use
+  eval."* and `hyprctl dispatch <name>` (e.g. `renameworkspace`) is rejected.
+  Drive the Lua API instead — `hyprctl eval "hl.monitor({…})"` to set config at
+  runtime, `hyprctl dispatch "hl.dsp.<…>(…)"` for dispatchers. Both
+  `scripts/rename-workspace.sh` and `scripts/display-scale.sh` hit this. (Also:
+  Hyprland snaps fractional `scale` to its own 1/120 grid, so `display-scale.sh`
+  steps a fixed ladder rather than computing exact scales — see its header.)
 - **Noctalia rewrites its own config.** `stow/home/noctalia/.config/noctalia/settings.json`
   is written by the running shell. Editing it on disk works, but if Noctalia is
   running it may overwrite your edit on its next settings-write. After editing,
