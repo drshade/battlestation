@@ -16,7 +16,22 @@ Item {
   width: cfg.d + 2
   height: cfg.d
 
-  onPokeNonceChanged: performEmote(true)
+  // Only a genuine poke (focus switch) emotes -- not the initial binding when a
+  // fresh bot is created on an already-focused pill (whose pokeNonce is nonzero).
+  property bool pokeReady: false
+  onPokeNonceChanged: if (pokeReady)
+    performEmote(true)
+
+  // Bots update their status in place (no recreation), so re-pace the emote
+  // cadence when crossing the waiting<->active boundary -- otherwise a bot that
+  // started out waiting would stay on its slow 30s timer after it got busy (and
+  // vice-versa). Only the boundary crossing re-paces, so rapid green<->purple
+  // flips during work don't keep restarting (and starving) the timer.
+  readonly property bool waiting: status === "orange"
+  onWaitingChanged: {
+    emoteTimer.interval = nextDelay();
+    emoteTimer.restart();
+  }
 
   function rnd(lo, hi) {
     return lo + Math.random() * (hi - lo);
@@ -100,6 +115,7 @@ Item {
     emoteTimer.interval = bot.nextDelay();
     emoteTimer.start();
     breatheOnce();
+    pokeReady = true;
   }
 
   Image {

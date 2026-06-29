@@ -10,14 +10,18 @@ import qs.Services.Compositor
 Item {
   id: cell
 
-  property var ws: null            // the compositor workspace model
+  // Keyed by id with live values pushed in by the BarWidget delegate -- the pill
+  // never holds a compositor snapshot, so it isn't recreated on compositor churn.
+  property int wsId: 0
+  property string wsName: ""
+  property bool focused: false
   property var cfg: null
   property var instances: []       // statuses of Claude instances here
   property bool occupied: false
   property bool shown: true
   property int position: 0         // display position (1-based); shown instead of the raw id
 
-  readonly property bool active: ws && ws.isFocused === true
+  readonly property bool active: focused
   property int pokeNonce: 0
 
   function poke() {
@@ -82,7 +86,7 @@ Item {
 
       NText {
         anchors.verticalCenter: parent.verticalCenter
-        text: cfg.pillLabel(cell.ws, cell.position)
+        text: cfg.pillLabel(cell.wsName, cell.position)
         family: Settings.data.ui.fontFixed
         pointSize: cfg.d * cfg.textRatio
         applyUiScale: false
@@ -99,13 +103,17 @@ Item {
         visible: cell.instances.length > 0
       }
 
-      // One animated bot per Claude instance running here.
+      // One animated bot per Claude instance running here. Model is the COUNT,
+      // not the status array, so a status change updates a bot's `status` in
+      // place instead of rebuilding the Repeater (which would recreate -- and
+      // restart the breathing/emotes of -- every sibling bot, including calm
+      // waiting ones). Delegates are only created/destroyed when the count changes.
       Repeater {
-        model: cell.instances
+        model: cell.instances.length
         delegate: BotIcon {
           anchors.verticalCenter: parent.verticalCenter
-          required property var modelData
-          status: modelData
+          required property int index
+          status: cell.instances[index] || ""
           cfg: cell.cfg
           pokeNonce: cell.pokeNonce
         }

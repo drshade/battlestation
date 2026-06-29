@@ -36,6 +36,10 @@ Item {
   property var instancesByWs: ({})
   // Occupancy computed from real windows (ExtWorkspaceService.isOccupied is unreliable).
   property var occupiedMap: ({})
+  // Reactive lookups the pills read by id, so a pill never has to hold a
+  // (throwaway) compositor snapshot: names by id, and the focused workspace id.
+  property var nameById: ({})
+  property int focusedId: -1
   // Highest display POSITION that must stay visible (occupied or focused).
   property int maxVisiblePos: 999
 
@@ -44,9 +48,17 @@ Item {
   // this order and are LABELLED BY POSITION, not by Hyprland id. The resolve
   // rule mirrors ws.sh: preferred ids that exist (in order), then any remaining
   // live workspaces ascending. Missing/empty file => identity order.
+  //
+  // The compositor rebuilds its workspace ListModel (handing us fresh throwaway
+  // row snapshots) on every Hyprland event, so we keep only plain ids and look
+  // everything else up by id. displayList -- the DelegateModel's model -- is
+  // rebuilt ONLY when the visible id SEQUENCE changes, so pills (and the bots
+  // inside them) survive churn instead of being recreated, which used to reset
+  // every bot's breathing/emote timer and freeze animation on a busy workspace.
   property var prefOrder: []
-  property var ordered: []      // all live workspace objects in resolved order
-  property var displayList: []  // what the ListView shows (ordered, trailing-trimmed)
+  property var orderedIds: []   // resolved order, real ids
+  property var displayIds: []   // orderedIds trimmed to what the ListView shows
+  property var displayList: []  // [{id}] stable wrappers keyed by id
   readonly property string orderFilePath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/claude-workspaces/order"
 
   // While a pill is being dragged we freeze displayList so a focus/occupancy
@@ -66,33 +78,37 @@ Item {
   }
 
   function recomputeOrder() {
-    var byId = {};
+    var present = {};
     var live = [];
+    var names = {};
     for (var i = 0; i < CompositorService.workspaces.count; i++) {
       var w = CompositorService.workspaces.get(i);
-      byId[String(w.id)] = w;
-      live.push(w);
+      present[String(w.id)] = true;
+      live.push(w.id);
+      names[String(w.id)] = w.name || "";
     }
     var out = [];
     var seen = {};
     for (var p = 0; p < prefOrder.length; p++) {
       var id = String(prefOrder[p]);
-      if (byId[id] !== undefined && seen[id] !== true) {
-        out.push(byId[id]);
+      if (present[id] === true && seen[id] !== true) {
+        out.push(prefOrder[p]);
         seen[id] = true;
       }
     }
     live.sort(function (a, b) {
-      return a.id - b.id;
+      return a - b;
     });
     for (var k = 0; k < live.length; k++) {
-      var lid = String(live[k].id);
+      var lid = String(live[k]);
       if (seen[lid] !== true) {
         out.push(live[k]);
         seen[lid] = true;
       }
     }
-    ordered = out;
+    orderedIds = out;
+    if (!sameKeySet(names, nameById))
+      nameById = names;
     recomputeOccupancy();
   }
 
@@ -105,29 +121,34 @@ Item {
     }
     if (!sameKeySet(m, occupiedMap))
       occupiedMap = m;
+    var fid = -1;
+    for (var j = 0; j < CompositorService.workspaces.count; j++) {
+      var w = CompositorService.workspaces.get(j);
+      if (w.isFocused === true) {
+        fid = w.id;
+        break;
+      }
+    }
+    if (fid !== focusedId)
+      focusedId = fid;
     var mx = 1;
-    for (var p = 0; p < ordered.length; p++) {
-      var w = ordered[p];
-      if (m[String(w.id)] === true || w.isFocused === true)
+    for (var p = 0; p < orderedIds.length; p++) {
+      var oid = orderedIds[p];
+      if (m[String(oid)] === true || oid === fid)
         mx = p + 1;
     }
     maxVisiblePos = mx;
     rebuildDisplay();
   }
 
-  // Equality guards: the 400/500 ms pollers rebuild these reactive structures
-  // every tick (the compositor hands us throwaway workspace snapshots), but
-  // reassigning them with identical content still churns their consumers. The
-  // costly one is displayList: a new array resets the ListView's DelegateModel,
-  // destroying and recreating every pill -- and with them every BotIcon, whose
-  // breathing animation and emote timer then restart from scratch. At ~20 Hz
-  // that's a perpetual twitch that never lets the slow "waiting" cadence elapse.
-  // So only reassign when the value actually changed.
-  function sameIdList(a, b) {
+  // Equality guards so the 400/500 ms pollers only reassign a reactive structure
+  // when its content actually changed -- otherwise identical-but-new values churn
+  // the consumers (and rebuilding displayList would recreate every pill + bot).
+  function sameIntList(a, b) {
     if (!a || !b || a.length !== b.length)
       return false;
     for (var i = 0; i < a.length; i++)
-      if (a[i].id !== b[i].id)
+      if (a[i] !== b[i])
         return false;
     return true;
   }
@@ -155,14 +176,21 @@ Item {
     return true;
   }
 
-  // displayList = ordered (trailing empties trimmed when hideTrailing). Frozen
-  // while reordering so the in-flight drag owns the visual order.
+  // Rebuild displayList ONLY when the visible id sequence changes (orderedIds
+  // trimmed to maxVisiblePos when hideTrailing). Frozen while reordering so the
+  // in-flight drag owns the visual order.
   function rebuildDisplay() {
     if (reordering)
       return;
-    var next = config.hideTrailing ? ordered.slice(0, maxVisiblePos) : ordered.slice(0);
-    if (!sameIdList(next, displayList))
-      displayList = next;
+    var ids = config.hideTrailing ? orderedIds.slice(0, maxVisiblePos) : orderedIds.slice(0);
+    if (sameIntList(ids, displayIds))
+      return;
+    displayIds = ids;
+    displayList = ids.map(function (id) {
+      return {
+        "id": id
+      };
+    });
   }
 
   // Drag lifecycle (driven by the ListView delegate).
@@ -201,16 +229,12 @@ Item {
     orderWriter.command = ["sh", "-c", "$HOME/.config/hypr/scripts/ws.sh set " + dragIds.join(" ")];
     orderWriter.running = true;
     // Reflect the new order immediately so there's no flash before the reload.
-    var byId = {};
-    for (var i = 0; i < ordered.length; i++)
-      byId[String(ordered[i].id)] = ordered[i];
-    var nl = [];
-    for (var k = 0; k < dragIds.length; k++) {
-      var w = byId[String(dragIds[k])];
-      if (w)
-        nl.push(w);
-    }
-    displayList = nl;
+    displayIds = dragIds.slice();
+    displayList = dragIds.map(function (id) {
+      return {
+        "id": id
+      };
+    });
   }
 
   // Re-resolve whenever the workspace set changes or ws.sh/a drag rewrites the file.
@@ -307,16 +331,28 @@ Item {
   // The rename target (wsId/wsName) rides on the menu item itself, so the trigger
   // reads it straight off `item` -- no shared state to be clobbered between the
   // menu opening and the user clicking (e.g. by the other monitor's bar widget).
-  function showPillMenu(anchorItem, ws) {
+  function showPillMenu(anchorItem, wsId) {
     contextMenu.model = [{
                            "label": "Rename workspace",
                            "action": "rename",
                            "icon": "edit",
                            "enabled": true,
-                           "wsId": ws.id,
-                           "wsName": ws.name
+                           "wsId": wsId,
+                           "wsName": root.nameById[String(wsId)] || ""
                          }, widgetSettingsItem];
     PanelService.showContextMenu(contextMenu, root, root.screen, anchorItem);
+  }
+
+  // Click-to-switch: look the live workspace up by id (we only keep ids, not the
+  // compositor's throwaway snapshots) and hand it to the backend.
+  function switchToId(id) {
+    for (var i = 0; i < CompositorService.workspaces.count; i++) {
+      var w = CompositorService.workspaces.get(i);
+      if (w.id === id) {
+        CompositorService.switchToWorkspace(w);
+        return;
+      }
+    }
   }
 
   Row {
@@ -414,9 +450,9 @@ Item {
       // Left switches (suppressed if a drag occurred); right opens the pill menu.
       onClicked: mouse => {
         if (mouse.button === Qt.RightButton)
-          root.showPillMenu(dragArea, modelData);
+          root.showPillMenu(dragArea, modelData.id);
         else
-          CompositorService.switchToWorkspace(modelData);
+          root.switchToId(modelData.id);
       }
       onDragActiveChanged: {
         if (dragActive)
@@ -428,7 +464,9 @@ Item {
       WorkspacePill {
         id: pillVisual
         anchors.verticalCenter: parent.verticalCenter
-        ws: dragArea.modelData
+        wsId: dragArea.modelData.id
+        wsName: root.nameById[String(dragArea.modelData.id)] || ""
+        focused: dragArea.modelData.id === root.focusedId
         position: dragArea.DelegateModel.itemsIndex + 1  // renumbers live as items move
         cfg: config
         instances: root.instancesByWs[String(dragArea.modelData.id)] || []

@@ -119,12 +119,10 @@ QtObject {
   }
 
   // ---- misc helpers ---------------------------------------------------------
-  function pillLabel(ws, pos) {
-    if (!ws)
-      return "";
-    const named = ws.name && String(ws.name).length > 0;
-    const n = (pos !== undefined && pos > 0) ? pos : ws.idx;
-    return named ? (n + " - " + String(ws.name).substring(0, characterCount)) : String(n);
+  function pillLabel(name, pos) {
+    const named = name && String(name).length > 0;
+    const n = (pos !== undefined && pos > 0) ? pos : "?";
+    return named ? (n + " - " + String(name).substring(0, characterCount)) : String(n);
   }
   function fmtTime(iso, fmt) {
     if (!iso)
