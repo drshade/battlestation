@@ -103,7 +103,8 @@ Item {
       if (wid !== undefined && wid !== null)
         m[String(wid)] = true;
     }
-    occupiedMap = m;
+    if (!sameKeySet(m, occupiedMap))
+      occupiedMap = m;
     var mx = 1;
     for (var p = 0; p < ordered.length; p++) {
       var w = ordered[p];
@@ -114,12 +115,54 @@ Item {
     rebuildDisplay();
   }
 
+  // Equality guards: the 400/500 ms pollers rebuild these reactive structures
+  // every tick (the compositor hands us throwaway workspace snapshots), but
+  // reassigning them with identical content still churns their consumers. The
+  // costly one is displayList: a new array resets the ListView's DelegateModel,
+  // destroying and recreating every pill -- and with them every BotIcon, whose
+  // breathing animation and emote timer then restart from scratch. At ~20 Hz
+  // that's a perpetual twitch that never lets the slow "waiting" cadence elapse.
+  // So only reassign when the value actually changed.
+  function sameIdList(a, b) {
+    if (!a || !b || a.length !== b.length)
+      return false;
+    for (var i = 0; i < a.length; i++)
+      if (a[i].id !== b[i].id)
+        return false;
+    return true;
+  }
+  function sameKeySet(a, b) {
+    var ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length)
+      return false;
+    for (var i = 0; i < ka.length; i++)
+      if (b[ka[i]] !== a[ka[i]])
+        return false;
+    return true;
+  }
+  function sameInstances(a, b) {
+    var ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length)
+      return false;
+    for (var i = 0; i < ka.length; i++) {
+      var k = ka[i], av = a[k], bv = b[k];
+      if (!bv || av.length !== bv.length)
+        return false;
+      for (var j = 0; j < av.length; j++)
+        if (av[j] !== bv[j])
+          return false;
+    }
+    return true;
+  }
+
   // displayList = ordered (trailing empties trimmed when hideTrailing). Frozen
   // while reordering so the in-flight drag owns the visual order.
   function rebuildDisplay() {
     if (reordering)
       return;
-    displayList = config.hideTrailing ? ordered.slice(0, maxVisiblePos) : ordered.slice(0);
+    var next = config.hideTrailing ? ordered.slice(0, maxVisiblePos) : ordered.slice(0);
+    if (!sameIdList(next, displayList))
+      displayList = next;
   }
 
   // Drag lifecycle (driven by the ListView delegate).
@@ -229,7 +272,8 @@ Item {
             byWs[p[0]].push(p[1]);
           }
         }
-        root.instancesByWs = byWs;
+        if (!root.sameInstances(byWs, root.instancesByWs))
+          root.instancesByWs = byWs;
       }
     }
   }
