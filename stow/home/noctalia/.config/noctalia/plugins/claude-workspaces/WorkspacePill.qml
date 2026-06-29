@@ -13,6 +13,7 @@ Item {
   property var instances: []       // statuses of Claude instances here
   property bool occupied: false
   property bool shown: true
+  property int position: 0         // display position (1-based); shown instead of the raw id
 
   readonly property bool active: ws && ws.isFocused === true
   property int pokeNonce: 0
@@ -79,7 +80,7 @@ Item {
 
       NText {
         anchors.verticalCenter: parent.verticalCenter
-        text: cfg.pillLabel(cell.ws)
+        text: cfg.pillLabel(cell.ws, cell.position)
         family: Settings.data.ui.fontFixed
         pointSize: cfg.d * cfg.textRatio
         applyUiScale: false

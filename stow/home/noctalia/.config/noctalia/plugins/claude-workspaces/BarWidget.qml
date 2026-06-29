@@ -35,8 +35,57 @@ Item {
   property var instancesByWs: ({})
   // Occupancy computed from real windows (ExtWorkspaceService.isOccupied is unreliable).
   property var occupiedMap: ({})
-  // Highest workspace index that must stay visible (occupied or focused).
-  property int maxVisibleIdx: 999
+  // Highest display POSITION that must stay visible (occupied or focused).
+  property int maxVisiblePos: 999
+
+  // ---- virtual ordering -----------------------------------------------------
+  // Preferred order as real workspace ids (ws.sh's state file). Pills render in
+  // this order and are LABELLED BY POSITION, not by Hyprland id. The resolve
+  // rule mirrors ws.sh: preferred ids that exist (in order), then any remaining
+  // live workspaces ascending. Missing/empty file => identity order.
+  property var prefOrder: []
+  property var ordered: []  // live workspace objects in resolved display order
+  readonly property string orderFilePath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/claude-workspaces/order"
+
+  function parsePref(txt) {
+    prefOrder = String(txt || "").trim().split(/\s+/).map(function (s) {
+      return parseInt(s, 10);
+    }).filter(function (n) {
+      return !isNaN(n);
+    });
+    recomputeOrder();
+  }
+
+  function recomputeOrder() {
+    var byId = {};
+    var live = [];
+    for (var i = 0; i < CompositorService.workspaces.count; i++) {
+      var w = CompositorService.workspaces.get(i);
+      byId[String(w.id)] = w;
+      live.push(w);
+    }
+    var out = [];
+    var seen = {};
+    for (var p = 0; p < prefOrder.length; p++) {
+      var id = String(prefOrder[p]);
+      if (byId[id] !== undefined && seen[id] !== true) {
+        out.push(byId[id]);
+        seen[id] = true;
+      }
+    }
+    live.sort(function (a, b) {
+      return a.id - b.id;
+    });
+    for (var k = 0; k < live.length; k++) {
+      var lid = String(live[k].id);
+      if (seen[lid] !== true) {
+        out.push(live[k]);
+        seen[lid] = true;
+      }
+    }
+    ordered = out;
+    recomputeOccupancy();
+  }
 
   function recomputeOccupancy() {
     var m = {};
@@ -47,13 +96,37 @@ Item {
     }
     occupiedMap = m;
     var mx = 1;
-    for (var j = 0; j < CompositorService.workspaces.count; j++) {
-      var w = CompositorService.workspaces.get(j);
-      if ((m[String(w.id)] === true || w.isFocused === true) && w.idx > mx)
-        mx = w.idx;
+    for (var p = 0; p < ordered.length; p++) {
+      var w = ordered[p];
+      if (m[String(w.id)] === true || w.isFocused === true)
+        mx = p + 1;
     }
-    maxVisibleIdx = mx;
+    maxVisiblePos = mx;
   }
+
+  // Re-resolve the order whenever the workspace set changes or ws.sh (later, a
+  // drag) rewrites the preference file.
+  Connections {
+    target: CompositorService
+    function onWorkspacesChanged() {
+      root.recomputeOrder();
+    }
+  }
+
+  FileView {
+    id: orderFile
+    path: root.orderFilePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.parsePref(text())
+    onLoadFailed: {
+      root.prefOrder = [];
+      root.recomputeOrder();
+    }
+  }
+
+  Component.onCompleted: root.recomputeOrder()
 
   // ---- pollers --------------------------------------------------------------
   Timer {
@@ -109,14 +182,16 @@ Item {
     }
 
     Repeater {
-      model: CompositorService.workspaces
+      model: root.ordered
       delegate: WorkspacePill {
-        required property var model
-        ws: model
+        required property var modelData
+        required property int index
+        ws: modelData
+        position: index + 1
         cfg: config
-        instances: root.instancesByWs[String(model.id)] || []
-        occupied: root.occupiedMap[String(model.id)] === true
-        shown: !config.hideTrailing || model.idx <= root.maxVisibleIdx
+        instances: root.instancesByWs[String(modelData.id)] || []
+        occupied: root.occupiedMap[String(modelData.id)] === true
+        shown: !config.hideTrailing || (index + 1) <= root.maxVisiblePos
       }
     }
   }
