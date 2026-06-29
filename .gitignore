@@ -35,6 +35,14 @@ stow/home/claude/.claude/**
 !stow/home/claude/.claude/output-styles/
 !stow/home/claude/.claude/output-styles/**
 
+# Code-OSS (~/.config/Code - OSS): default-deny — track user settings only.
+# globalStorage/workspaceStorage/History hold tokens, state and churn; only
+# settings.json is config. Never add an ! rule that exposes the rest.
+stow/home/code/.config/Code - OSS/**
+!stow/home/code/.config/Code - OSS/
+!stow/home/code/.config/Code - OSS/User/
+!stow/home/code/.config/Code - OSS/User/settings.json
+
 # Editor/OS noise
 *.swp
 .DS_Store

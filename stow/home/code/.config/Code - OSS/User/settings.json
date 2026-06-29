@@ -1,0 +1,5 @@
+{
+    "chat.titleBar.openInAgentsWindow.enabled": false,
+    "window.openFoldersInNewWindow": "on",
+    "chat.titleBar.signIn.enabled": false
+}
