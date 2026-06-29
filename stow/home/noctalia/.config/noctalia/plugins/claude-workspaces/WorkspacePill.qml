@@ -16,7 +16,15 @@ Item {
   property string wsName: ""
   property bool focused: false
   property var cfg: null
-  property var instances: []       // statuses of Claude instances here
+  // Agent instances here, keyed by session id (see BarWidget.sidsByWs). The bot
+  // Repeater is driven by `sids`; each bot reads its own status/title/kind from
+  // the maps, so a status change updates a bot in place without disturbing its
+  // siblings' animations.
+  property var sids: []
+  property var statusBySid: ({})
+  property var titleBySid: ({})
+  property var kindBySid: ({})
+  property var agentsBySid: ({})
   property bool occupied: false
   property bool shown: true
   property int position: 0         // display position (1-based); shown instead of the raw id
@@ -100,22 +108,49 @@ Item {
       Item {
         width: Style.marginS
         height: 1
-        visible: cell.instances.length > 0
+        visible: cell.sids.length > 0
       }
 
-      // One animated bot per Claude instance running here. Model is the COUNT,
-      // not the status array, so a status change updates a bot's `status` in
-      // place instead of rebuilding the Repeater (which would recreate -- and
-      // restart the breathing/emotes of -- every sibling bot, including calm
-      // waiting ones). Delegates are only created/destroyed when the count changes.
+      // One "squad" per agent instance here, keyed by session id. The outer model
+      // is the sid LIST (identity-stable): a status/title/agent-count change leaves
+      // the list untouched, so the squad isn't recreated -- its bots read new state
+      // from the maps and update in place, keeping their breathing/emote timers.
+      // Only an instance starting/stopping changes the sequence (and then only this
+      // pill's squads rebuild, never another workspace's).
+      //
+      // A squad = the commander bot + a line of smaller sub-agent bots to its right,
+      // one per running subagent. The inner Repeater's model is the COUNT (an int),
+      // so a count change adds/removes only the trailing sub-bot incrementally and
+      // never restarts a surviving sub-bot's animation.
       Repeater {
-        model: cell.instances.length
-        delegate: BotIcon {
+        model: cell.sids
+        delegate: Row {
           anchors.verticalCenter: parent.verticalCenter
-          required property int index
-          status: cell.instances[index] || ""
-          cfg: cell.cfg
-          pokeNonce: cell.pokeNonce
+          required property string modelData          // = the session id
+          readonly property int agents: cell.agentsBySid[modelData] || 0
+          readonly property string botStatus: cell.statusBySid[modelData] || ""
+          spacing: Math.round(cfg.d * 0.12)
+
+          BotIcon {
+            anchors.verticalCenter: parent.verticalCenter
+            status: botStatus
+            title: cell.titleBySid[modelData] || ""
+            kind: cell.kindBySid[modelData] || "claude"
+            commander: agents > 0                     // turn to face the squad
+            cfg: cell.cfg
+            pokeNonce: cell.pokeNonce
+          }
+
+          Repeater {
+            model: agents
+            delegate: BotIcon {
+              anchors.verticalCenter: parent.verticalCenter
+              status: botStatus                       // sub-bots mirror the commander
+              cfg: cell.cfg
+              sizeScale: cfg.subScale
+              subordinate: true                       // smaller, pops in, no tooltip
+            }
+          }
         }
       }
     }

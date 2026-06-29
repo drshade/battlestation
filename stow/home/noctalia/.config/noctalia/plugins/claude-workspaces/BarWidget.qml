@@ -32,8 +32,15 @@ Item {
   }
 
   // ---- live workspace state -------------------------------------------------
-  // Per-workspace instance statuses: { "<wsid>": ["green","purple",...] }
-  property var instancesByWs: ({})
+  // Per-workspace agent instances, keyed by SESSION ID so every bot keeps a
+  // stable identity (its own status + title + kind) across polls. Positional
+  // arrays would shuffle a title onto the wrong bot the moment a second instance
+  // starts or either one stops -- fine when statuses were anonymous, wrong now.
+  property var sidsByWs: ({})       // { "<wsid>": [sid, ...] } stable bot order
+  property var statusBySid: ({})    // { "<sid>": "green" }
+  property var titleBySid: ({})     // { "<sid>": "<aiTitle>" }
+  property var kindBySid: ({})      // { "<sid>": "claude" } -- future: codex/gemini/...
+  property var agentsBySid: ({})    // { "<sid>": 2 } live count of running subagents
   // Occupancy computed from real windows (ExtWorkspaceService.isOccupied is unreliable).
   property var occupiedMap: ({})
   // Reactive lookups the pills read by id, so a pill never has to hold a
@@ -283,21 +290,71 @@ Item {
   }
   Process {
     id: poller
-    command: ["sh", "-c", "for f in \"$XDG_RUNTIME_DIR\"/claude-ws/*; do [ -e \"$f\" ] && cat \"$f\" && echo; done"]
+    // Prefix each record with its session id (the file name) and a LIVE count of
+    // running subagents -- agent-*.jsonl files in this session's subagents/ dir
+    // touched in the last 30s (a finished agent's file goes quiet and ages out).
+    // Counting here (every poll) keeps it live even while the main agent waits,
+    // with no +1/-1 counter to leak. Line: <sid>\t<agents>\t<wsid>\t<status>\t<kind>\t<title>.
+    // `ref` is an absolute cutoff (find's relative -newermt '-30 seconds' silently
+    // no-ops here); 30s tolerates an agent's quiet stretches yet a finished agent's
+    // file ages out within ~30s. Adjust the seconds below to taste.
+    command: ["sh", "-c", "ref=$(date -d '-30 seconds' '+%F %T'); for f in \"$XDG_RUNTIME_DIR\"/claude-ws/*; do [ -e \"$f\" ] || continue; sid=\"${f##*/}\"; n=$(find \"$HOME\"/.claude/projects/*/\"$sid\"/subagents -maxdepth 1 -name 'agent-*.jsonl' -newermt \"$ref\" 2>/dev/null | wc -l); printf '%s\\t%s\\t' \"$sid\" \"$n\"; cat \"$f\"; echo; done"]
     stdout: StdioCollector {
       onStreamFinished: {
-        var byWs = {};
+        var statusBySid = {};
+        var titleBySid = {};
+        var kindBySid = {};
+        var agentsBySid = {};
+        var seen = {};      // wsid -> { sid: true } present this poll
+        var fresh = {};     // wsid -> [sid] in file order (for appending new bots)
         var lines = text.split("\n");
         for (var i = 0; i < lines.length; i++) {
-          var p = lines[i].trim().split(/\s+/);
-          if (p.length === 2) {
-            if (!byWs[p[0]])
-              byWs[p[0]] = [];
-            byWs[p[0]].push(p[1]);
+          if (!lines[i])
+            continue;
+          var p = lines[i].split("\t");
+          if (p.length < 5)
+            continue;       // need at least sid, agents, wsid, status, kind
+          var sid = p[0], ws = p[2];
+          agentsBySid[sid] = parseInt(p[1], 10) || 0;
+          statusBySid[sid] = p[3];
+          kindBySid[sid] = p[4] || "claude";
+          titleBySid[sid] = p[5] || "";
+          if (!seen[ws]) {
+            seen[ws] = {};
+            fresh[ws] = [];
+          }
+          if (!seen[ws][sid]) {
+            seen[ws][sid] = true;
+            fresh[ws].push(sid);
           }
         }
-        if (!root.sameInstances(byWs, root.instancesByWs))
-          root.instancesByWs = byWs;
+        // Keep each workspace's existing bot order, drop sids that vanished, and
+        // append newly-seen ones at the end -- so a status/title change never
+        // reshuffles a live bot's slot (only a start/stop touches the sequence).
+        var sidsByWs = {};
+        for (var ws2 in fresh) {
+          var prior = root.sidsByWs[ws2] || [];
+          var out = [];
+          for (var a = 0; a < prior.length; a++)
+            if (seen[ws2][prior[a]])
+              out.push(prior[a]);
+          for (var b = 0; b < fresh[ws2].length; b++)
+            if (out.indexOf(fresh[ws2][b]) === -1)
+              out.push(fresh[ws2][b]);
+          sidsByWs[ws2] = out;
+        }
+        // sidsByWs is a map of string arrays (sameInstances handles that shape);
+        // the value maps churn only when a status/title/kind actually changes.
+        if (!root.sameInstances(sidsByWs, root.sidsByWs))
+          root.sidsByWs = sidsByWs;
+        if (!root.sameKeySet(statusBySid, root.statusBySid))
+          root.statusBySid = statusBySid;
+        if (!root.sameKeySet(titleBySid, root.titleBySid))
+          root.titleBySid = titleBySid;
+        if (!root.sameKeySet(kindBySid, root.kindBySid))
+          root.kindBySid = kindBySid;
+        if (!root.sameKeySet(agentsBySid, root.agentsBySid))
+          root.agentsBySid = agentsBySid;
       }
     }
   }
@@ -469,7 +526,11 @@ Item {
         focused: dragArea.modelData.id === root.focusedId
         position: dragArea.DelegateModel.itemsIndex + 1  // renumbers live as items move
         cfg: config
-        instances: root.instancesByWs[String(dragArea.modelData.id)] || []
+        sids: root.sidsByWs[String(dragArea.modelData.id)] || []
+        statusBySid: root.statusBySid
+        titleBySid: root.titleBySid
+        kindBySid: root.kindBySid
+        agentsBySid: root.agentsBySid
         occupied: root.occupiedMap[String(dragArea.modelData.id)] === true
         shown: true
         opacity: dragArea.dragActive ? 0.85 : 1.0

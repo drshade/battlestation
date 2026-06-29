@@ -34,6 +34,7 @@ QtObject {
   readonly property int activeMs: ps.activeMs || 1000  // typical thinking/tool emote gap
   readonly property int waitS: ps.waitS || 30          // typical waiting emote gap (seconds)
   readonly property real jitter: (ps.jitter !== undefined ? ps.jitter : 0.35) // ±randomness applied each cycle
+  readonly property real subScale: ps.subScale || 0.6  // sub-agent bot size vs the commander
 
   // ---- colour helpers -------------------------------------------------------
   function contrastOn(hex) {

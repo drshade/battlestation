@@ -3,6 +3,7 @@
 // "poke" emote when pokeNonce changes (workspace clicked / switched to).
 import QtQuick
 import qs.Commons
+import qs.Services.UI
 
 Item {
   id: bot
@@ -11,10 +12,43 @@ Item {
   property var cfg: null
   property int pokeNonce: 0     // bump to force an emote
 
+  property string title: ""        // this session's aiTitle (hover tooltip)
+  property string kind: "claude"   // agent kind -- future: "codex" | "gemini" | ...
+
+  // A squad's commander (running subagents) turns to face its line of sub-bots.
+  // Sub-bots are `subordinate`: smaller (sizeScale), pop in on spawn, no tooltip.
+  property bool commander: false
+  property bool subordinate: false
+  property real sizeScale: 1.0
+  readonly property real d: cfg.d * sizeScale
+
   property string faceOverride: ""
 
-  width: cfg.d + 2
-  height: cfg.d
+  // Readable agent name, shown when the session has no title yet. The emote
+  // vocabulary + assets are still Claude-only (see Cfg); when other kinds land,
+  // switch those on `kind` too.
+  function kindLabel() {
+    if (kind === "codex")
+      return "Codex";
+    if (kind === "gemini")
+      return "Gemini";
+    return "Claude Code";
+  }
+
+  width: d + 2
+  height: d
+
+  // Commander leans toward its squad (a real "turn"); the lean eases in/out as the
+  // subagent count crosses zero. transformOrigin is Center, so layout is unaffected.
+  rotation: commander ? 7 : 0
+  Behavior on rotation {
+    NumberAnimation {
+      duration: 280
+      easing.type: Easing.OutBack
+    }
+  }
+  // Sub-bots pop in from near-zero when spawned (see spawnIn); commanders stay 1.0.
+  scale: subordinate ? 0.2 : 1.0
 
   // Only a genuine poke (focus switch) emotes -- not the initial binding when a
   // fresh bot is created on an already-focused pill (whose pokeNonce is nonzero).
@@ -116,16 +150,32 @@ Item {
     emoteTimer.start();
     breatheOnce();
     pokeReady = true;
+    if (bot.subordinate)
+      spawnIn.start();
+  }
+  // Entrance pop for a freshly-spawned sub-bot. Targets the root `scale` (the
+  // breath animates botImg.scale), so the two compose instead of fighting.
+  NumberAnimation {
+    id: spawnIn
+    target: bot
+    property: "scale"
+    from: 0.2
+    to: 1.0
+    duration: 300
+    easing.type: Easing.OutBack
   }
 
   Image {
     id: botImg
     anchors.centerIn: parent
-    source: bot.faceOverride !== "" ? bot.faceOverride : cfg.statusIcon(bot.status)
-    width: cfg.d + 2
-    height: cfg.d + 2
-    sourceSize.width: Math.round(cfg.d * 2)
-    sourceSize.height: Math.round(cfg.d * 2)
+    // Commander rests on the "look" face (watching the squad) between its own
+    // transient emotes; a plain bot rests on its status icon. Each status has a
+    // -look asset (the tool one has star eyes), so this holds in every state.
+    source: bot.faceOverride !== "" ? bot.faceOverride : (bot.commander ? cfg.faceUrl(bot.status, "look") : cfg.statusIcon(bot.status))
+    width: bot.d + 2
+    height: bot.d + 2
+    sourceSize.width: Math.round(bot.d * 2)
+    sourceSize.height: Math.round(bot.d * 2)
     fillMode: Image.PreserveAspectFit
     smooth: true
     asynchronous: false
@@ -141,14 +191,14 @@ Item {
         target: bobT
         property: "y"
         from: 0
-        to: -3.5
+        to: -3.5 * bot.sizeScale
         duration: 120
         easing.type: Easing.OutQuad
       }
       NumberAnimation {
         target: bobT
         property: "y"
-        from: -3.5
+        from: -3.5 * bot.sizeScale
         to: 0
         duration: 240
         easing.type: Easing.OutBounce
@@ -209,5 +259,20 @@ Item {
       }
       onFinished: Qt.callLater(bot.breatheOnce)
     }
+  }
+
+  // Hover -> tooltip with this instance's session title (falls back to the agent
+  // name until Claude generates one). NoButton so the press still falls through
+  // to the pill delegate underneath -- click-to-switch and drag-reorder keep
+  // working over the bots.
+  MouseArea {
+    anchors.fill: parent
+    enabled: !bot.subordinate          // sub-bots are decorative, not interactive
+    hoverEnabled: !bot.subordinate
+    acceptedButtons: Qt.NoButton
+    cursorShape: Qt.PointingHandCursor
+    onEntered: TooltipService.show(bot, (bot.title && bot.title.length) ? bot.title : bot.kindLabel(), BarService.getTooltipDirection(cfg.screenName))
+    onExited: TooltipService.hide()
+    onCanceled: TooltipService.hide()
   }
 }
