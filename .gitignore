@@ -1,5 +1,7 @@
 # Secrets / machine-local state — never commit these
 stow/home/fish/.config/fish/fish_variables
+# Per-machine Hyprland monitor tuning (resolution/refresh); see setup/displays-00-*
+stow/home/hypr/.config/hypr/config/monitors_local.lua
 **/*.token
 **/secrets*
 
