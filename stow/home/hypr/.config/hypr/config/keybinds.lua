@@ -52,7 +52,7 @@ hl.bind(mainMod .. " + T",          hl.dsp.exec_cmd(launchPrefix .. EDITOR),    
 hl.bind(mainMod .. " + W",          hl.dsp.exec_cmd(launchPrefix .. BROWSER),                  { description = "Open browser" })
 hl.bind("CONTROL + SHIFT + Escape", hl.dsp.exec_cmd(launchPrefix .. TERMINAL .. " -e btop"),   { description = "Open system monitor (btop)" })
 hl.bind(mainMod .. " + Space",      hl.dsp.exec_cmd(noctCall .. "launcher toggle"),            { description = "App launcher" })
-hl.bind(mainMod .. " + period",     hl.dsp.exec_cmd(noctCall .. "launcher emoji"),             { description = "Emoji picker" })
+hl.bind(mainMod .. " + SHIFT + E",  hl.dsp.exec_cmd(noctCall .. "launcher emoji"),             { description = "Emoji picker" })
 
 -- 3. HARDWARE CONTROLS
 
@@ -82,9 +82,10 @@ hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolki
 
 -- Display scaling (for demos — relayouts the workspace; reset restores the
 -- configured "auto" scale). Re-issues the focused monitor's mode unchanged.
-hl.bind(mainMod .. " + equal",       hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh up"),    { description = "Zoom display in (scale up)" })
-hl.bind(mainMod .. " + minus",       hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh down"),  { description = "Zoom display out (scale down)" })
-hl.bind(mainMod .. " + ALT + minus", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh reset"), { description = "Reset display scale" })
+-- comma/period (< >) chosen so SUPER + =/- stay free for in-app zoom.
+hl.bind(mainMod .. " + comma",       hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh down"),  { description = "Zoom display out (scale down)" })
+hl.bind(mainMod .. " + period",      hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh up"),    { description = "Zoom display in (scale up)" })
+hl.bind(mainMod .. " + ALT + comma", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh reset"), { description = "Reset display scale" })
 
 -- Theming and Wallpaper
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd(noctCall .. " wallpaper toggle"), { description = "Cycle wallpaper" })
