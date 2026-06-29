@@ -34,9 +34,10 @@ now, even if it costs a little more today.
 
 ## What this repo is
 
-Personal dotfiles for a **CachyOS** machine running **Hyprland** (Wayland
-compositor) + **Noctalia** (a Quickshell-based desktop shell). Configs are
-version-controlled here and symlinked into place with **GNU Stow**.
+Personal dotfiles, published as a reference for others, for a **CachyOS**
+machine running **Hyprland** (Wayland compositor) + **Noctalia** (a
+Quickshell-based desktop shell). Configs are version-controlled here and
+symlinked into place with **GNU Stow**.
 
 ## The Stow model
 
