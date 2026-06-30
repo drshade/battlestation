@@ -20,14 +20,9 @@ esac
 
 hyprctl eval "hl.config({ general = { layout = \"$next\" } })" >/dev/null
 
-# Toast the new mode, reusing one notification slot so rapid re-toggles replace
-# the toast instead of stacking. We persist the daemon-assigned id and feed it
-# back via --replace-id (the x-canonical synchronous hint isn't honored here).
-case "$next" in
-    scrolling) label="Scrolling — columns flow over the edge" ;;
-    dwindle)   label="Dwindle — tiling splits" ;;
-esac
-idfile="${XDG_RUNTIME_DIR:-/tmp}/hypr-layout-notify.id"
-prev=$(cat "$idfile" 2>/dev/null || echo 0)
-id=$(notify-send -a Hyprland -t 1500 -r "$prev" -p "Layout: $next" "$label" 2>/dev/null) \
-    && printf '%s' "$id" > "$idfile" || true
+# Announce the new mode via noctalia's transient toast OSD (the volume/brightness
+# popup channel), NOT the freedesktop notification server -- so it shows once and
+# vanishes without ever piling up in notification history. A new toast supersedes
+# the previous one, so rapid re-toggles never stack.
+qs -c noctalia-shell ipc call toast send \
+    "{\"title\":\"Layout: $next\",\"duration\":1500}" >/dev/null 2>&1 || true
