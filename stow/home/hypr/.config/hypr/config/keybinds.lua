@@ -56,7 +56,9 @@ hl.bind(mainMod .. " + A",            hl.dsp.exec_cmd(noctCall .. "notifications
 -- process and cds there); falls back to $HOME for non-terminal windows.
 hl.bind(hyperMod .. " + T",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/term-here.sh " .. TERMINAL), { description = "Open terminal" })
 hl.bind(hyperMod .. " + B",         hl.dsp.exec_cmd(launchPrefix .. BROWSER),      { description = "Open browser" })
-hl.bind(hyperMod .. " + N",         hl.dsp.exec_cmd(launchPrefix .. FILE_MANAGER), { description = "Open file manager" })
+-- Opens the file manager at the focused terminal's cwd (dolphin-here.sh via
+-- focused-cwd.sh); opens at its default location otherwise.
+hl.bind(hyperMod .. " + N",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/dolphin-here.sh"), { description = "Open file manager" })
 -- Opens VS Code at the focused terminal's cwd (code-here.sh via focused-cwd.sh);
 -- opens with no folder when the focused window isn't a terminal.
 hl.bind(hyperMod .. " + E",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/code-here.sh"), { description = "Open VS Code" })
