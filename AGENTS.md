@@ -129,6 +129,19 @@ live in `setup/README.md`.
   is written by the running shell. Editing it on disk works, but if Noctalia is
   running it may overwrite your edit on its next settings-write. After editing,
   reload Noctalia (or log out/in) and re-verify with `grep`.
+- **Crashed lock screen ⇒ stuck `ext-session-lock`.** Noctalia draws the lock
+  surface, so if it crashes *while locked* the compositor keeps the session
+  locked (for security) with nothing rendering the password prompt — you land on
+  Hyprland's bare "lock app died" recovery screen. The compositor is fine; only
+  the locker died, so **do not log out or reboot** (you'd lose every running
+  app). Recover with `scripts/restart_crashed_lock.sh`, run **from a text VT**
+  (Ctrl+Alt+F3) since the GUI is locked. The on-screen hint Hyprland prints
+  (`hyprctl keyword allow_session_lock_restore 1` → `dispatch exec hyprlock`)
+  does *not* apply verbatim: the Lua parser rejects `keyword`/bare `dispatch`
+  (use `eval` + `hl.*`, per the gotcha above), and there is no hyprlock — the
+  locker is `qs -c noctalia-shell`. The script does the Lua-native equivalent
+  (set `misc:allow_session_lock_restore`, ensure the shell is up, re-present the
+  lock); you then type your password to unlock normally.
 - **`stow/home/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme
   changes (matugen-style output), so it churns in diffs. It is currently
   tracked; gitignore it if the noise is annoying.
