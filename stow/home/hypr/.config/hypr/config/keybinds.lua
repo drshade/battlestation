@@ -52,9 +52,14 @@ hl.bind(mainMod .. " + A",            hl.dsp.exec_cmd(noctCall .. "notifications
 
 -- 2. Launch · Hyper
 
-hl.bind(hyperMod .. " + T",         hl.dsp.exec_cmd(launchPrefix .. TERMINAL),     { description = "Open terminal" })
+-- Opens in the focused window's cwd (term-here.sh walks to the foreground
+-- process and cds there); falls back to $HOME for non-terminal windows.
+hl.bind(hyperMod .. " + T",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/term-here.sh " .. TERMINAL), { description = "Open terminal" })
 hl.bind(hyperMod .. " + B",         hl.dsp.exec_cmd(launchPrefix .. BROWSER),      { description = "Open browser" })
 hl.bind(hyperMod .. " + N",         hl.dsp.exec_cmd(launchPrefix .. FILE_MANAGER), { description = "Open file manager" })
+-- Opens VS Code at the focused terminal's cwd (code-here.sh via focused-cwd.sh);
+-- opens with no folder when the focused window isn't a terminal.
+hl.bind(hyperMod .. " + E",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/code-here.sh"), { description = "Open VS Code" })
 hl.bind(hyperMod .. " + Space",     hl.dsp.exec_cmd(noctCall .. "launcher toggle"), { description = "App launcher" })
 hl.bind(hyperMod .. " + SHIFT + E", hl.dsp.exec_cmd(noctCall .. "launcher emoji"),  { description = "Emoji picker" })
 
