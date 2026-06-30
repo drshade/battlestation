@@ -66,6 +66,7 @@ hl.bind(hyperMod .. " + F",      hl.dsp.window.fullscreen(),                 { d
 hl.bind(hyperMod .. " + D",      hl.dsp.window.fullscreen({ mode = 1 }),     { description = "Maximise (keep bar)" })
 hl.bind(hyperMod .. " + O",      hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
 hl.bind(hyperMod .. " + J",      hl.dsp.layout("togglesplit"),               { description = "Toggle split direction" })
+hl.bind(hyperMod .. " + M",      hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/layout-toggle.sh"), { description = "Toggle layout mode (dwindle / scrolling)" })
 hl.bind(hyperMod .. " + mouse:272", hl.dsp.window.drag(),   { description = "Drag window (mouse)" })
 hl.bind(hyperMod .. " + mouse:273", hl.dsp.window.resize(), { description = "Resize window (mouse)" })
 
