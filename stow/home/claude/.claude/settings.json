@@ -1,12 +1,6 @@
 {
-  "tui": "fullscreen",
-  "theme": "dark",
-  "preferredNotifChannel": "notifications_disabled",
   "permissions": {
     "defaultMode": "auto"
-  },
-  "enabledPlugins": {
-    "clangd-lsp@claude-plugins-official": true
   },
   "hooks": {
     "SessionStart": [
@@ -33,38 +27,38 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh purple",
             "async": true
           }
-        ],
-        "matcher": "*"
+        ]
       }
     ],
     "PostToolUse": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
             "async": true
           }
-        ],
-        "matcher": "*"
+        ]
       }
     ],
     "PostToolUseFailure": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
             "async": true
           }
-        ],
-        "matcher": "*"
+        ]
       }
     ],
     "Notification": [
@@ -100,5 +94,17 @@
         ]
       }
     ]
-  }
+  },
+  "enabledPlugins": {
+    "clangd-lsp@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash $HOME/.claude/statusline.sh",
+    "padding": 0
+  },
+  "tui": "fullscreen",
+  "theme": "dark",
+  "preferredNotifChannel": "notifications_disabled"
 }

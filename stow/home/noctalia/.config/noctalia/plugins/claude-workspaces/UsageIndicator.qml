@@ -66,7 +66,7 @@ Item {
     }
     NText {
       anchors.verticalCenter: parent.verticalCenter
-      text: (usage.sessionPct >= 0 ? usage.sessionPct : "—") + "%"
+      text: (usage.sessionPct >= 0 ? usage.sessionPct : "—") + "% / " + (usage.weeklyPct >= 0 ? usage.weeklyPct : "—") + "%"
       pointSize: cfg.d * cfg.textRatio
       applyUiScale: false
       color: Color.mOnSurface

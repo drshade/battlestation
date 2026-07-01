@@ -23,6 +23,7 @@ id_ed25519
 # committed, even if accidentally moved into the package.
 stow/home/claude/.claude/**
 !stow/home/claude/.claude/settings.json
+!stow/home/claude/.claude/statusline.sh
 !stow/home/claude/.claude/CLAUDE.md
 !stow/home/claude/.claude/commands/
 !stow/home/claude/.claude/commands/**
