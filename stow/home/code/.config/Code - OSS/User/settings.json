@@ -1,5 +1,7 @@
 {
     "chat.titleBar.openInAgentsWindow.enabled": false,
     "window.openFoldersInNewWindow": "on",
-    "chat.titleBar.signIn.enabled": false
+    "chat.titleBar.signIn.enabled": false,
+    "claudeCode.preferredLocation": "panel",
+    "workbench.secondarySideBar.defaultVisibility": "hidden"
 }

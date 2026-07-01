@@ -1,0 +1,9 @@
+/* App look with a slim nav bar: hide the tab strip, keep the nav bar
+   (Back/Forward/URL) so any navigation is always recoverable. Paired
+   with the open_newwindow prefs in user.js, external links open in the
+   current tab, so Back returns you to the inbox. */
+
+#TabsToolbar { visibility: collapse !important; }
+
+/* Keep menubar hidden; press Alt to reveal it if ever needed. */
+#toolbar-menubar { visibility: collapse !important; }

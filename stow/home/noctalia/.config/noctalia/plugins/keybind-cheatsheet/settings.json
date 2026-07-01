@@ -125,6 +125,15 @@
           "_verb": ""
         },
         {
+          "keys": "Mod3 + E",
+          "desc": "Open VS Code",
+          "bindId": "|32|E|000|__lua",
+          "undescribed": false,
+          "_mainKey": "E",
+          "_mods": "Mod3",
+          "_verb": ""
+        },
+        {
           "keys": "Mod3 + SPACE",
           "desc": "App launcher",
           "bindId": "|32|Space|000|__lua",
@@ -202,6 +211,15 @@
           "_verb": ""
         },
         {
+          "keys": "Mod3 + M",
+          "desc": "Toggle layout mode (dwindle / scrolling)",
+          "bindId": "|32|M|000|__lua",
+          "undescribed": false,
+          "_mainKey": "M",
+          "_mods": "Mod3",
+          "_verb": ""
+        },
+        {
           "keys": "Mod3 + Left Click",
           "desc": "Drag window (mouse)",
           "bindId": "|32|mouse:272|000|__lua",
@@ -262,7 +280,7 @@
       "binds": [
         {
           "keys": "Mod3 + 1-9",
-          "desc": "Send window to workspace 1-9",
+          "desc": "Send window to workspace 1-9 & follow",
           "_verb": "",
           "_mods": "Mod3",
           "_mainKey": "1-9",
@@ -270,7 +288,7 @@
         },
         {
           "keys": "Mod3 + 0",
-          "desc": "Send window to workspace 10",
+          "desc": "Send window to workspace 10 & follow",
           "bindId": "|32|0|000|__lua",
           "undescribed": false,
           "_mainKey": "0",
@@ -279,7 +297,7 @@
         },
         {
           "keys": "Shift + Mod3 + 1-9",
-          "desc": "Send window to workspace 1-9 & follow",
+          "desc": "Send window to workspace 1-9",
           "_verb": "",
           "_mods": "Shift+Mod3",
           "_mainKey": "1-9",
@@ -287,7 +305,7 @@
         },
         {
           "keys": "Shift + Mod3 + 0",
-          "desc": "Send window to workspace 10 & follow",
+          "desc": "Send window to workspace 10",
           "bindId": "|33|0|000|__lua",
           "undescribed": false,
           "_mainKey": "0",

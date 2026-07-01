@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Outlook
+Comment=Outlook web app (Firefox SSB)
+Exec=firefox --no-remote --profile /home/tom/.local/share/ff-pwa/outlook --class=ffpwa-outlook --name=ffpwa-outlook --new-window https://outlook.office.com/mail/
+Icon=/home/tom/.local/share/ff-pwa/outlook/icon.png
+Categories=Network;Email;
+StartupWMClass=ffpwa-outlook
+StartupNotify=true
+Terminal=false
