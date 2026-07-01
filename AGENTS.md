@@ -129,17 +129,34 @@ live in `setup/README.md`.
   is written by the running shell. Editing it on disk works, but if Noctalia is
   running it may overwrite your edit on its next settings-write. After editing,
   reload Noctalia (or log out/in) and re-verify with `grep`.
-- **Crashed lock screen ⇒ stuck `ext-session-lock`.** Noctalia draws the lock
-  surface, so if it crashes *while locked* the compositor keeps the session
-  locked (for security) with nothing rendering the password prompt — you land on
-  Hyprland's bare "lock app died" recovery screen. The compositor is fine; only
-  the locker died, so **do not log out or reboot** (you'd lose every running
-  app). Recover with `scripts/restart_crashed_lock.sh`, run **from a text VT**
-  (Ctrl+Alt+F3) since the GUI is locked. The on-screen hint Hyprland prints
+- **hyprlock is the locker on every normal path.** Suspend, idle, and the
+  Noctalia session menu (`Hyper+L`) all end at **hyprlock**, driven by
+  **hypridle** (`hypr/.config/hypr/hyprlock.conf` + `hypridle.conf`, started from
+  `autostart.lua`). Two settings make this hold and must stay in lockstep:
+  Noctalia's `general.lockOnSuspend` is `false` (so it doesn't lock on the sleep
+  path), and its session-menu **lock entry has a custom `command`,
+  `loginctl lock-session`** (`sessionMenu.powerOptions[action=lock].command`).
+  That custom command matters: `CompositorService.lock()` runs it and returns
+  *before* activating Noctalia's own `WlSessionLock`, so the menu bypasses the
+  in-shell locker entirely. `loginctl lock-session` emits the logind Lock signal,
+  which hypridle answers with hyprlock. hyprlock being a separate process is the
+  whole point — a Noctalia crash on resume can no longer strand the session on a
+  black `ext-session-lock`, the failure mode that drove the switch (see
+  `setup/deps-00-hyprlock-hypridle.md`). Clear the custom command or re-enable
+  `lockOnSuspend` and you're back to the fragile in-shell locker.
+- **Crashed Noctalia lock ⇒ stuck `ext-session-lock` (legacy path).** Noctalia's
+  `WlSessionLock` is no longer reached in normal use (per above), but the failure
+  mode is kept documented in case it's re-enabled: if Noctalia crashes *while
+  locked* the compositor keeps the session locked (for security) with nothing
+  rendering the password prompt — you land on Hyprland's bare "lock app died"
+  recovery screen. The compositor is fine; only the locker died, so **do not log
+  out or reboot** (you'd lose every running app). Recover with
+  `scripts/restart_crashed_lock.sh`, run **from a text VT** (Ctrl+Alt+F3) since
+  the GUI is locked. The on-screen hint Hyprland prints
   (`hyprctl keyword allow_session_lock_restore 1` → `dispatch exec hyprlock`)
   does *not* apply verbatim: the Lua parser rejects `keyword`/bare `dispatch`
-  (use `eval` + `hl.*`, per the gotcha above), and there is no hyprlock — the
-  locker is `qs -c noctalia-shell`. The script does the Lua-native equivalent
+  (use `eval` + `hl.*`, per the gotcha above), and the crashed locker is
+  `qs -c noctalia-shell`, not hyprlock. The script does the Lua-native equivalent
   (set `misc:allow_session_lock_restore`, ensure the shell is up, re-present the
   lock); you then type your password to unlock normally.
 - **`stow/home/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme

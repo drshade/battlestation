@@ -447,7 +447,7 @@
             ]
         },
         "language": "",
-        "lockOnSuspend": true,
+        "lockOnSuspend": false,
         "lockScreenAnimations": false,
         "lockScreenBlur": 0,
         "lockScreenCountdownDuration": 10000,
@@ -593,7 +593,7 @@
         "powerOptions": [
             {
                 "action": "lock",
-                "command": "",
+                "command": "loginctl lock-session",
                 "countdownEnabled": true,
                 "enabled": true,
                 "keybind": "1"
