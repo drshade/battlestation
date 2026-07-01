@@ -125,6 +125,17 @@ live in `setup/README.md`.
   `scripts/rename-workspace.sh` and `scripts/display-scale.sh` hit this. (Also:
   Hyprland snaps fractional `scale` to its own 1/120 grid, so `display-scale.sh`
   steps a fixed ladder rather than computing exact scales — see its header.)
+- **The `dpms` dispatcher is toggle-only — it ignores its on/off argument.**
+  `hyprctl dispatch 'hl.dsp.dpms("on")'` (string form) toggles *every* monitor at
+  once; the table form `hl.dsp.dpms({ monitor = "eDP-1" })` toggles just that one.
+  Neither "sets on", so blindly calling either can blank an already-on screen and
+  a mixed state can't be fixed with one call. To turn displays on idempotently,
+  read each output's `dpmsStatus` and toggle only the ones that are off — that's
+  what `scripts/displays-on.sh` does (first-line fix; hypridle's `after_sleep_cmd`
+  calls it). `displays-on.sh reset` additionally reloads + reconciles the lid, for
+  an output stuck disabled or at a bad mode. Runtime `hl.monitor` mode/scale evals
+  only apply to an *enabled* output — on a disabled one they return "ok" but
+  no-op; re-enable via `hyprctl reload` first.
 - **Noctalia rewrites its own config.** `stow/home/noctalia/.config/noctalia/settings.json`
   is written by the running shell. Editing it on disk works, but if Noctalia is
   running it may overwrite your edit on its next settings-write. After editing,
