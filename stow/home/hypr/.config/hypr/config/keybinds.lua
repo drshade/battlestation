@@ -86,17 +86,19 @@ hl.bind(hyperMod .. " + Down",  hl.dsp.window.move({ direction = "d" }), { descr
 -- 4. Workspace · Hyper
 
 -- Throw the active window to a workspace by display position.
--- Plain = send & stay; SHIFT = send & follow. (One loop per group so each lists
+-- Plain = send & follow; SHIFT = send & stay. (One loop per group so each lists
 -- contiguously in the cheatsheet.)
 for i = 1, 10 do
-    hl.bind(hyperMod .. " + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i), { description = "Send window to workspace " .. i })
+    hl.bind(hyperMod .. " + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i .. " --follow"), { description = "Send window to workspace " .. i .. " & follow" })
 end
 for i = 1, 10 do
-    hl.bind(hyperMod .. " + SHIFT + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i .. " --follow"), { description = "Send window to workspace " .. i .. " & follow" })
+    hl.bind(hyperMod .. " + SHIFT + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i), { description = "Send window to workspace " .. i })
 end
 
 hl.bind(hyperMod .. " + S", hl.dsp.window.move({ workspace = "special" }),                  { description = "Send window to scratchpad" })
 hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noctCall .. "plugin:claude-workspaces rename"), { description = "Rename workspace" })
+-- Clear any manual pill reordering: positions map back to 1,2,3,... (ascending id).
+hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " reset"), { description = "Reset workspace order to default" })
 
 -- 5. System · Hyper
 

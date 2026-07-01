@@ -20,6 +20,7 @@
 #   ws.sh movewindow <pos> [--follow] send active window there (--follow = move to it too)
 #   ws.sh relative <next|prev> [--move]  step focus (or window) in display order
 #   ws.sh set <id> [id ...]           write the preferred order
+#   ws.sh reset                       clear the preference (back to 1,2,3,... order)
 #   ws.sh get                         print the raw preference
 #   ws.sh order                       print resolved "pos -> id (name)" (debug)
 #   ws.sh rename <id> [name]          rename a workspace (empty name resets to its number)
@@ -57,7 +58,7 @@ focus_ws() { hyprctl dispatch "hl.dsp.focus({ workspace = $1 })" >/dev/null; }
 move_ws()  { hyprctl dispatch "hl.dsp.window.move({ workspace = $1, follow = $2 })" >/dev/null; }
 
 cmd="${1:-}"
-[ -n "$cmd" ] || { echo "usage: ws.sh goto|movewindow|relative|set|get|order|rename ..." >&2; exit 2; }
+[ -n "$cmd" ] || { echo "usage: ws.sh goto|movewindow|relative|set|reset|get|order|rename ..." >&2; exit 2; }
 shift || true
 
 case "$cmd" in
@@ -92,6 +93,13 @@ case "$cmd" in
         [ "$#" -gt 0 ] || { echo "set: need at least one id" >&2; exit 2; }
         mkdir -p "$(dirname "$ORDER_FILE")"
         printf '%s\n' "$*" > "$ORDER_FILE"
+        ;;
+    reset)
+        # Empty (not delete) the preference so resolved() falls back to identity
+        # order. Truncating in place keeps the bar plugin's FileView watch firing,
+        # so the pills re-render to 1,2,3,... immediately.
+        mkdir -p "$(dirname "$ORDER_FILE")"
+        : > "$ORDER_FILE"
         ;;
     get)
         cat "$ORDER_FILE" 2>/dev/null || true
