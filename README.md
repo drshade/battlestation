@@ -1,11 +1,13 @@
-# cachyos-dotfiles
+# battlestation
 
-Personal dotfiles for CachyOS (Hyprland + Noctalia), managed with [GNU Stow](https://www.gnu.org/software/stow/).
+My **battlestation** — the CachyOS + Hyprland + Noctalia (Quickshell) desktop
+configuration and personal customisations for this machine, managed as dotfiles
+with [GNU Stow](https://www.gnu.org/software/stow/).
 
 ## Layout
 
 ```
-cachyos-dotfiles/
+battlestation/
 ├── stow/                  # the stow module: trees grouped by target + drivers
 │   ├── home/              #   packages stowed into $HOME
 │   │   └── <package>/.config/<package>/
@@ -41,8 +43,8 @@ configured — a runbook for rebuilds.
 
 ```sh
 sudo pacman -S stow
-git clone <repo-url> ~/dev/cachyos-dotfiles
-cd ~/dev/cachyos-dotfiles
+git clone git@github.com:drshade/battlestation.git ~/dev/battlestation
+cd ~/dev/battlestation
 ./stow/stow-home.sh          # your configs -> $HOME
 sudo ./stow/stow-root.sh     # system configs -> /   (no-op until stow/root/ exists)
 ```
