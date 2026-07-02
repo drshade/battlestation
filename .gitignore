@@ -44,6 +44,9 @@ stow/home/code/.config/Code - OSS/**
 !stow/home/code/.config/Code - OSS/User/
 !stow/home/code/.config/Code - OSS/User/settings.json
 
+# Local scratch space — not shipped in a published repo
+scratch/
+
 # Editor/OS noise
 *.swp
 .DS_Store

@@ -71,7 +71,11 @@ No README or list to update — the new directory under `stow/home/` *is* the
 registration. To add a new *target root*, create `stow/<group>/` and a matching
 `stow/stow-<group>.sh`.
 
-# TODO
-[ ] stuff installed by flatpak doesn't automatically add to the launcher
-[ ] designing and setting up a great keymap (cmd for common, caps for window management maybe?)
-[ ] keyboard repeat and delay are too slow
+## Open work
+
+Smaller follow-ups live in [`TODO.md`](TODO.md); the larger structural review is
+in [`PLAN.md`](PLAN.md).
+
+## License
+
+[MIT](LICENSE).
