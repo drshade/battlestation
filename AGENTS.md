@@ -90,6 +90,14 @@ stop — point at `stow/<group>/` instead.
 Consequence: **adding or removing an app requires no doc edit.** The directory's
 presence (or absence) under its target group is the registration.
 
+**This applies to negative facts too.** "`stow/root/` is empty", "there's only
+one target group today", "X doesn't exist yet" are enumerations in disguise —
+they go stale the moment a directory changes, exactly like the alacritty table.
+Don't write the current contents (or emptiness) of `stow/<group>/` into prose;
+point at the directory. This rule was itself violated: README, AGENTS and the
+skill all called `stow/root/` "future/empty" for two days after `keyd` landed
+there — and that blind spot is why a dangling `/etc/keyd` symlink went unnoticed.
+
 ## Adding / removing a package
 
 ```sh

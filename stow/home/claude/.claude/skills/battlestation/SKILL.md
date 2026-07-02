@@ -23,7 +23,8 @@ It is a single git repository — the source of truth for how the system is set 
 - **Compositor:** Hyprland (Wayland)
 - **Shell/UI:** Noctalia — a Quickshell-based desktop shell
 - **Login shell:** fish
-- **Dotfile management:** GNU Stow (`stow/home/<pkg>/.config/<pkg>/` → `~/.config/<pkg>/`)
+- **Dotfile management:** GNU Stow, grouped by target root: `stow/<group>/<pkg>/`
+  (`home/` → `$HOME`, `root/` → `/` for system configs like `/etc`)
 
 ## First move: read the repo, don't rely on this file
 
@@ -35,26 +36,29 @@ source of truth — read it rather than answering from memory:
 2. `~/dev/battlestation/README.md` — layout, the stow model, common commands.
 3. `~/dev/battlestation/setup/` — per-topic runbook notes on how this machine
    was configured (useful for "why is X set up this way?").
-4. The relevant package under `stow/home/<pkg>/` for the actual config files.
+4. The relevant package under `stow/<group>/<pkg>/` for the actual config files.
 
 ## What's configured here
 
 Each tool or app configured on this machine is one stow package — a directory
-under `stow/home/`. This set **grows as the machine is customised**, so never
-assume a fixed list: check what exists now with
+under a target group: `stow/home/` (stowed into `$HOME`) or `stow/root/` (stowed
+into `/`, for system configs like `/etc`). This set **grows as the machine is
+customised**, and groups come and go, so never assume a fixed list: check what
+exists now with
 
 ```sh
-ls ~/dev/battlestation/stow/home/
+ls ~/dev/battlestation/stow/*/
 ```
 
-Each directory holds that tool's config (`stow/home/<pkg>/.config/<pkg>/` →
-`~/.config/<pkg>/`). If something on the system isn't configured here yet, this
-repo is where it would be added.
+Each directory holds that tool's config, mirroring its target
+(`stow/home/<pkg>/.config/<pkg>/` → `~/.config/<pkg>/`;
+`stow/root/<pkg>/etc/<pkg>/` → `/etc/<pkg>/`). If something on the system isn't
+configured here yet, this repo is where it would be added.
 
 ## Making changes
 
 - Config files are **symlinked into place**, so editing a file under
-  `stow/home/<pkg>/…` changes the live config immediately — no copy step.
+  `stow/<group>/<pkg>/…` changes the live config immediately — no copy step.
 - After **adding new files** to a package, re-stow it:
   `cd ~/dev/battlestation/stow/home && stow --restow --target="$HOME" <pkg>`
   (or run `~/dev/battlestation/stow/stow-home.sh` to restow everything).
