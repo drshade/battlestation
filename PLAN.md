@@ -264,7 +264,7 @@ underlying reference). Chose Makefile over justfile — no extra dependency
 
 ## P3 — Coverage gaps
 
-### 8. Declarative package manifest
+### 8. Declarative package manifest — ✅ DONE (2026-07-02)
 
 **Problem.** Installed software is recorded only as imperative `pacman -S` lines
 scattered through `setup/` notes. A rebuild means re-reading every note; there
@@ -276,6 +276,32 @@ a `make install-packages` target applies them. `setup/` notes then carry only
 the non-package steps (service enablement, key generation) and the reasoning —
 the *list* has one home. Seed the lists from the existing setup notes +
 `pacman -Qqe` triage.
+
+**Outcome.** 173 of 185 explicit native packages declared, split by
+provenance (user decision on review): `packages/pacman-base.txt` = the
+*accepted* CachyOS-installer baseline (~159; changes only when re-baselining),
+`packages/pacman.txt` = the deliberate additions (14: stow, github-cli,
+shellcheck, code, keyd, hyprlock, hypridle, kdeconnect, zenity, discord,
+teams-for-linux, evince, typst, tree). drift/install-packages operate on the
+union. Both grouped with `# why` comments (setup-note entries cite their note);
+`aur.txt`/`flatpak.txt` deliberately empty (zero foreign packages / zero
+flatpak apps — tracked so the diff sections stay armed). Key rule in the
+header: dependencies are NOT listed (fish, uwsm, jq, quickshell all ride in
+via `cachyos-hypr-noctalia`) and a raw `-Qqe` dump is forbidden — unclear
+packages stay OUT so `make drift` keeps them visible. The 12 initially
+unclassified packages were user-triaged same day: `shelly` recalled as a
+deliberate install (→ pacman.txt); the other 11 (bind, netctl,
+cachyos-zsh-config, dmraid, dnsmasq, fsarchiver, nfs-utils,
+python-defusedxml/-packaging, s-nail, xl2tpd) accepted into the baseline
+with candid comments (several noted as installer leftovers, prunable later).
+All three package sections report **in sync**.
+`bin/install-packages` (new; `make install-packages`) applies the manifests
+idempotently (`--needed`; install-only — removals stay manual, mirroring
+drift's read-only stance). Activating the diff exposed **two latent bugs in
+`bin/drift`** (empty `pacman -Qqm`/comments-only manifest exit 1 under
+pipefail and aborted the always-exit-0 report; `[ -n … ] && {…}` as a
+function's last line fails under -e) — both fixed. AGENTS.md/README now route
+installs to the manifest; setup notes keep reasoning + non-package steps.
 
 ### 9. Standardize systemd user-service enablement — ✅ DONE (2026-07-02)
 
@@ -409,9 +435,9 @@ flagged in the P1.1 correction has since been fixed by the user.)
    settings.json clean filter *(all of P1 now done)*.
 3. ✅ **P2.7** + ✅ **P2.4** Makefile + doctor (the enforcement spine); fold
    shellcheck fixes in as they surface. *(both done.)*
-4. **P2.6** hooks; ✅ **P2.5** + **P3.8** drift + package manifest (one feature —
-   drift needs the manifest to be useful). *(drift done, degrades gracefully
-   until the P3.8 manifest lands; then its package-diff activates.)*
+4. **P2.6** hooks; ✅ **P2.5** + ✅ **P3.8** drift + package manifest (one
+   feature — drift needs the manifest to be useful). *(both done; the
+   package-diff is live.)*
 5. ✅ **P3.9**, ✅ **P3.10**, ✅ **P4.11** *(done — one parallel-agent batch,
    2026-07-02)*; P4.14 follow-ups remain.
 

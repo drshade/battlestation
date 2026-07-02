@@ -14,6 +14,7 @@ battlestation/
 │   ├── root/              #   packages stowed into /     (system configs, e.g. /etc)
 │   ├── stow-home.sh       #   stow home/ into $HOME      (run as you)
 │   └── stow-root.sh       #   stow root/ into /          (run with sudo)
+├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + aur/flatpak
 ├── setup/                 # reproducible per-topic setup notes (never stowed)
 ├── AGENTS.md              # how to work in this repo (read this first)
 └── README.md
@@ -41,7 +42,10 @@ The package set is **defined by the directories under `stow/<group>/`** — ther
 is no hand-maintained list. Repo meta (docs) lives outside `stow/`.
 
 See [`setup/`](setup/) for reproducible per-topic notes on how this machine was
-configured — a runbook for rebuilds.
+configured — a runbook for rebuilds. The *package list* is declared in
+[`packages/`](packages/) — `make install-packages` applies it, `make drift`
+diffs it against what is actually installed; setup notes carry the reasoning
+and the non-package steps.
 
 ## Setup on a new machine
 
@@ -49,6 +53,7 @@ configured — a runbook for rebuilds.
 sudo pacman -S stow make
 git clone git@github.com:drshade/battlestation.git ~/dev/battlestation
 cd ~/dev/battlestation
+make install-packages   # everything packages/*.txt declares (prompts for sudo)
 make stow        # your configs -> $HOME
 make stow-root   # system configs -> /   (prompts for sudo)
 for f in bin/filters/*; do git config "filter.${f##*/}.clean" "$f"; done
@@ -66,14 +71,16 @@ this can't ship with the clone; `make fix` performs the same registration.
 `make` is the entrypoint — run it with no target for the full list:
 
 ```sh
-make        # list all targets
-make stow   # stow home packages into $HOME
-make check  # verify deployment + parse/lint (read-only; bin/doctor)
-make fix    # repair: restow + install clean-filter config (bin/doctor --fix)
-make drift  # what the machine has that the repo doesn't manage (bin/drift)
+make                   # list all targets
+make stow              # stow home packages into $HOME
+make install-packages  # install everything packages/*.txt declares (bin/install-packages)
+make check             # verify deployment + parse/lint (read-only; bin/doctor)
+make fix               # repair: restow + install clean-filter config (bin/doctor --fix)
+make drift             # what the machine has that the repo doesn't manage (bin/drift)
 ```
 
-`check` and `drift` are read-only; `fix` is the only mutating task. Targets are
+`check` and `drift` are read-only; `fix` and `install-packages` mutate (the
+latter only ever installs — `--needed`, so it is idempotent). Targets are
 thin wrappers over `bin/*` and `stow/stow-*.sh` — run those directly if you
 prefer. Install `shellcheck` and `luacheck` for full linting; without them
 `make check` falls back to `bash -n` / `luac -p`.

@@ -1,0 +1,214 @@
+# packages/pacman-base.txt — the ACCEPTED BASELINE: the explicit native
+# package set as the CachyOS installer left it (snapshot 2026-07-02), minus
+# anything we've deliberately removed or reclassified.
+#
+# Same format/parse as packages/pacman.txt. bin/drift diffs the union of both
+# files against `pacman -Qqe --native`; `make install-packages` applies both.
+#
+# Nothing NEW belongs here: a deliberate install goes in pacman.txt with a
+# `# why`. This file changes only when re-baselining (a fresh installer
+# defaults sweep) or when a baseline package is deliberately dropped. Most of
+# these were chosen by the installer, not by hand — declaring them keeps the
+# drift report quiet so *new* explicit packages stand out.
+
+# --- base tooling ------------------------------------------------------------
+git                            # clone/manage this repo (ships with installer)
+openssh                        # ssh keys + agent (setup/sshkeys-*, stow/home/ssh-agent)
+
+# --- desktop: Hyprland + Noctalia ----------------------------------------
+cachyos-hypr-noctalia          # THE desktop meta: pulls noctalia-shell/quickshell, uwsm, portals, jq, wl-clipboard, …
+hyprland                       # compositor (config: stow/home/hypr)
+kitty                          # terminal (config: stow/home/kitty; the standard terminal — see setup/debloat-00-removing-alacritty.md)
+sddm                           # display manager
+dolphin                        # file manager
+accountsservice                # user account info for sddm
+firefox                        # browser
+flatpak                        # sandboxed apps (manifest: packages/flatpak.txt)
+pavucontrol                    # audio mixer GUI
+xdg-user-dirs                  # ~/Documents etc.
+
+# --- apps ------------------------------------------------------------------
+meld                           # GUI diff/merge
+vlc-plugins-all                # VLC with all plugins (pulls vlc itself)
+
+# --- editors -----------------------------------------------------------------
+vim
+micro                          # CachyOS default editor (pairs with cachyos-micro-settings)
+nano
+nano-syntax-highlighting
+
+# --- CLI utilities -----------------------------------------------------------
+btop                           # system monitor (config: stow/home/btop)
+glances                        # system monitor (remote/web-capable, complements btop)
+fastfetch                      # system info banner (CachyOS default)
+ripgrep
+duf                            # friendlier df
+pv                             # pipe progress
+wget
+rsync
+dos2unix
+zip
+unzip
+unrar
+
+# --- CachyOS base / distro plumbing ------------------------------------------
+base
+base-devel
+sudo
+cachyos-fish-config            # fish is the shell; pulls fish + plugins (config: stow/home/fish)
+cachyos-hello
+cachyos-hooks
+cachyos-kernel-manager
+cachyos-keyring
+cachyos-micro-settings
+cachyos-mirrorlist
+cachyos-packageinstaller
+cachyos-rate-mirrors
+cachyos-settings
+cachyos-v3-mirrorlist
+cachyos-v4-mirrorlist
+cachyos-wallpapers
+chwd                           # CachyOS hardware detection
+pacman-contrib                 # paccache & friends
+reflector                      # mirror ranking
+rebuild-detector
+pkgfile                        # command-not-found lookups
+plocate
+logrotate
+lsb-release
+man-db
+man-pages
+texinfo
+bash-completion
+diffutils
+less
+which
+perl                           # baseline scripting runtime
+python                         # baseline scripting runtime
+python-defusedxml              # stray explicit python lib (installer leftover)
+python-packaging               # stray explicit python lib (installer leftover)
+cachyos-zsh-config             # installer zsh config (shell is fish; unused)
+s-nail                         # mail(1)
+fsarchiver                     # disk imaging (installer toolbox)
+
+# --- kernel / boot -------------------------------------------------------
+linux-cachyos
+linux-cachyos-headers
+linux-cachyos-lts              # fallback kernel
+linux-cachyos-lts-headers
+linux-firmware
+intel-ucode
+mkinitcpio
+limine                         # bootloader
+limine-mkinitcpio-hook
+limine-snapper-sync            # boot into snapper snapshots
+plymouth                       # boot splash
+cachyos-plymouth-bootanimation
+cachyos-plymouth-theme
+efibootmgr
+efitools
+os-prober
+
+# --- audio (pipewire) ------------------------------------------------------
+pipewire-alsa
+pipewire-pulse
+wireplumber
+gst-plugin-pipewire
+alsa-firmware
+alsa-plugins
+alsa-utils
+sof-firmware                   # laptop audio DSP firmware
+realtime-privileges
+
+# --- media codecs / file previews -----------------------------------------
+gst-libav
+gst-plugins-bad
+gst-plugins-ugly
+gst-plugin-va                  # VA-API accelerated decode
+libdvdcss
+ffmpegthumbnailer              # video thumbnails
+poppler-glib                   # PDF previews
+libgsf                         # office-file previews
+libopenraw                     # RAW image previews
+
+# --- graphics (Intel GPU) -----------------------------------------------
+intel-media-driver
+vulkan-intel
+vpl-gpu-rt                     # oneVPL hardware video runtime
+opencl-mesa
+mesa-utils
+lib32-mesa                     # 32-bit GL/Vulkan (games etc.)
+lib32-vulkan-intel
+lib32-opencl-mesa
+
+# --- power management ------------------------------------------------------
+power-profiles-daemon
+cpupower
+intel-lpmd                     # Intel low-power daemon
+
+# --- bluetooth ---------------------------------------------------------------
+bluez
+bluez-libs
+bluez-utils
+bluez-obex                     # file transfer
+bluez-hid2hci
+
+# --- network -----------------------------------------------------------------
+networkmanager
+networkmanager-openvpn
+modemmanager                   # mobile broadband
+usb_modeswitch                 # mobile broadband mode switching
+iwd                            # wifi backend
+wpa_supplicant                 # wifi backend (NM fallback)
+nss-mdns                       # .local hostname resolution
+ethtool
+inetutils                      # hostname etc.
+ufw                            # firewall
+ufw-extras
+bind                           # dig/nslookup (full BIND suite, installer choice)
+dnsmasq                        # NM connection-sharing helper
+netctl                         # Arch's old network manager (redundant with NM, installer baseline)
+xl2tpd                         # L2TP VPN daemon
+
+# --- filesystems / storage / snapshots ---------------------------------------
+btrfs-progs                    # root fs
+snapper                        # btrfs snapshots
+btrfs-assistant                # snapper GUI
+cachyos-snapper-support
+e2fsprogs
+dosfstools                     # FAT (EFI partition)
+mtools
+exfatprogs
+f2fs-tools                     # non-native fs support, installer baseline
+jfsutils                       # non-native fs support, installer baseline
+nilfs-utils                    # non-native fs support, installer baseline
+xfsprogs                       # non-native fs support, installer baseline
+cryptsetup
+device-mapper
+lvm2
+mdadm
+dmraid                         # legacy BIOS fake-RAID (installer baseline)
+nfs-utils                      # NFS client/server
+
+# --- hardware / disk diagnostics ------------------------------------------
+smartmontools
+hdparm
+sg3_utils
+lsscsi
+dmidecode
+hwinfo
+hwdetect
+usbutils
+sysfsutils
+
+# --- fonts -------------------------------------------------------------------
+awesome-terminal-fonts
+cantarell-fonts
+noto-fonts
+noto-fonts-cjk
+noto-fonts-emoji
+ttf-bitstream-vera
+ttf-dejavu
+ttf-liberation
+ttf-meslo-nerd                 # terminal nerd font
+ttf-opensans

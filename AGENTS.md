@@ -131,6 +131,15 @@ live in `setup/README.md`.
   never as runbook steps. (The first `removing-alacritty` note wrongly listed
   "edit settings.json" and "git rm the package" — both already reproduced by the
   repo — leaving only `pacman -Rns alacritty` as a real step.)
+- **The package *list* lives in `packages/*.txt`, not in notes.** The manifests
+  are the one home of *what* is installed (`make install-packages` applies them,
+  `make drift` diffs them against reality); each entry carries a short `# why`,
+  citing its setup note where one exists. Notes keep the reasoning and the
+  non-package steps only — a new install means a manifest line first, and a note
+  only if there is more to say than "install it". The pacman manifest is split
+  by provenance: `pacman-base.txt` is the *accepted* CachyOS-installer baseline
+  (changes only when re-baselining) and `pacman.txt` is the deliberate
+  additions — new installs always go in `pacman.txt`.
 - **Repo-owned systemd *user* services are enabled by stow, never by runbook.**
   A package that owns a user unit also carries the enablement as a relative
   `.wants` symlink beside it — `.config/systemd/user/<target>.wants/<unit> ->
@@ -249,8 +258,10 @@ live in `setup/README.md`.
   filter config to repair. (Manual spot-check if needed: `ls -ld ~/.config/<app>`
   shows the symlink, `readlink -f` resolves it into this repo.)
 - **`make drift`** (`bin/drift`, read-only) reports what the machine has that
-  the repo doesn't — unmanaged `~/.config` entries and, once a manifest exists,
-  package drift. Drift is normal; run it to keep it *visible*.
+  the repo doesn't — unmanaged `~/.config` entries and installed packages not
+  declared in `packages/*.txt`. Drift is normal; run it to keep it *visible*.
+  Triage package drift line by line — declare (with a `# why`) or remove —
+  never by pasting a `pacman -Qqe` dump into the manifest.
 - Before committing, sanity-check nothing secret was staged:
   `git ls-files | grep -iE 'token|secret|fish_variables'`.
 - **Runtime-rewritten tracked files are handled by mechanism, not vigilance.**
@@ -277,5 +288,6 @@ live in `setup/README.md`.
   Stage explicit paths and review `git status` first; if churn lands in the
   wrong commit, split it (unpushed history is safe to tidy).
 - System-level actions (`pacman -Rns`, `pacman -S`) need sudo — hand the user
-  the exact command rather than running it, and record it in the relevant
-  `setup/` note so it is reproducible.
+  the exact command rather than running it, and record it so it is
+  reproducible: installs as a `packages/*.txt` line (with a `# why`),
+  removals and other system actions in the relevant `setup/` note.

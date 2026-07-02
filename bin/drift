@@ -6,7 +6,8 @@
 # Adopting a config or installing a package is a deliberate manual step.
 #
 # Reports: unmanaged ~/.config entries and ~/.local/share/applications, and
-# (once packages/*.txt exists — P3.8) installed packages vs the manifest.
+# installed packages vs the packages/*.txt manifests (bin/install-packages
+# applies those; this only reports).
 set -euo pipefail
 
 self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
@@ -74,27 +75,37 @@ fi
 # --- 3. installed packages vs manifest (needs P3.8) -------------------------
 hdr "Package manifest drift"
 pkg_diff() {
-  local label file listcmd
-  label=$1; file=$2; listcmd=$3
-  if [ ! -f "$file" ]; then info "$label: no $file yet (P3.8) — skipping"; return; fi
+  # pkg_diff <label> <listcmd> <manifest>... — the declared set is the UNION
+  # of every manifest file that exists (pacman splits into the accepted
+  # installer baseline pacman-base.txt + deliberate additions pacman.txt).
+  local label listcmd
+  label=$1; listcmd=$2; shift 2
+  local f files=()
+  for f in "$@"; do [ -f "$f" ] && files+=("$f"); done
+  if [ "${#files[@]}" -eq 0 ]; then info "$label: no manifest ($*) — skipping"; return; fi
+  # Empty sets are legitimate (no foreign packages / comments-only manifest)
+  # but exit non-zero from pacman -Qqm and grep -v — don't let -e/pipefail
+  # abort the report over them.
   local installed manifest
-  installed=$(eval "$listcmd" | sort -u)
-  manifest=$(grep -vE '^\s*(#|$)' "$file" | awk '{print $1}' | sort -u)
+  installed=$(eval "$listcmd" | sort -u) || true
+  manifest=$(cat "${files[@]}" | grep -vE '^\s*(#|$)' | awk '{print $1}' | sort -u) || true
   local only_inst only_man
   only_inst=$(comm -23 <(printf '%s\n' "$installed") <(printf '%s\n' "$manifest"))
   only_man=$(comm -13 <(printf '%s\n' "$installed") <(printf '%s\n' "$manifest"))
   if [ -z "$only_inst" ] && [ -z "$only_man" ]; then ok "$label: in sync"; return; fi
-  [ -n "$only_inst" ] && { warn "$label: installed but not in manifest"; while IFS= read -r p; do note "$p"; done <<<"$only_inst"; }
-  [ -n "$only_man" ]  && { warn "$label: in manifest but not installed"; while IFS= read -r p; do note "$p"; done <<<"$only_man"; }
+  # if, not `[ … ] && { … }`: a false final test would fail the function under -e.
+  if [ -n "$only_inst" ]; then warn "$label: installed but not in manifest"; while IFS= read -r p; do note "$p"; done <<<"$only_inst"; fi
+  if [ -n "$only_man" ];  then warn "$label: in manifest but not installed";  while IFS= read -r p; do note "$p"; done <<<"$only_man"; fi
 }
 if have pacman; then
-  pkg_diff "pacman (explicit)" packages/pacman.txt  "pacman -Qqe --native 2>/dev/null || pacman -Qqe"
-  pkg_diff "AUR/foreign"       packages/aur.txt     "pacman -Qqm"
+  pkg_diff "pacman (explicit)" "pacman -Qqe --native 2>/dev/null || pacman -Qqe" \
+    packages/pacman-base.txt packages/pacman.txt
+  pkg_diff "AUR/foreign"       "pacman -Qqm" packages/aur.txt
 else
   info "pacman not found — skipping"
 fi
 if have flatpak; then
-  pkg_diff "flatpak" packages/flatpak.txt "flatpak list --app --columns=application"
+  pkg_diff "flatpak" "flatpak list --app --columns=application" packages/flatpak.txt
 fi
 
 printf '\n%s——%s drift is informational; adopt configs / update manifests deliberately.\n' "$C_DIM" "$C_RST"

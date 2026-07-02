@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# install-packages — apply the packages/*.txt manifests to this machine.
+#
+# The mutating counterpart to bin/drift's package diff: installs everything
+# the manifests declare. Idempotent — pacman/flatpak get --needed/or-update
+# semantics, so already-installed packages are skipped, never reinstalled.
+# It only ever installs; removing something is a deliberate manual step
+# (pacman -Rns), same philosophy as drift being read-only.
+#
+# Manifest format (shared with bin/drift): one name per line, `#` starts a
+# comment (full-line or trailing), first whitespace-separated field is the
+# package name.
+set -euo pipefail
+
+self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
+# shellcheck source=bin/lib.sh
+. "$BIN/lib.sh"
+cd "$REPO"
+
+for a in "${@:-}"; do
+  case "$a" in
+    -h|--help) awk 'NR>1{ if(/^#/){sub(/^# ?/,"");print} else exit }' "$self"; exit 0 ;;
+    "") ;;
+    *) echo "install-packages: unknown argument: $a (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+# Package names from one or more manifests, comments stripped — bin/drift's
+# exact parse (pacman's declared set = pacman-base.txt ∪ pacman.txt).
+pkgs() { cat "$@" | grep -vE '^\s*(#|$)' | awk '{print $1}' | sort -u; }
+
+printf '%sbattlestation install-packages%s\n' "$C_BLD" "$C_RST"
+
+# --- pacman (native, sudo): accepted baseline + deliberate additions ----------
+hdr "pacman (packages/pacman-base.txt + pacman.txt)"
+pacman_manifests=()
+for f in packages/pacman-base.txt packages/pacman.txt; do
+  [ -f "$f" ] && pacman_manifests+=("$f")
+done
+if have pacman && [ "${#pacman_manifests[@]}" -gt 0 ]; then
+  mapfile -t native < <(pkgs "${pacman_manifests[@]}")
+  if [ "${#native[@]}" -gt 0 ]; then
+    info "sudo pacman -S --needed (${#native[@]} declared)"
+    sudo pacman -S --needed "${native[@]}"
+  else
+    ok "manifests declare nothing"
+  fi
+else
+  info "pacman or packages/pacman*.txt missing — skipping"
+fi
+
+# --- AUR (via helper, which handles its own sudo) ----------------------------
+hdr "AUR (packages/aur.txt)"
+if [ -f packages/aur.txt ]; then
+  mapfile -t foreign < <(pkgs packages/aur.txt)
+  if [ "${#foreign[@]}" -eq 0 ]; then
+    ok "manifest declares nothing"
+  elif have paru || have yay; then
+    have paru && helper=paru || helper=yay
+    info "$helper -S --needed (${#foreign[@]} declared)"
+    "$helper" -S --needed "${foreign[@]}"
+  else
+    warn "aur.txt declares packages but no AUR helper (paru/yay) is installed — skipping"
+  fi
+else
+  info "no packages/aur.txt — skipping"
+fi
+
+# --- flatpak (per-user not assumed; flatpak prompts as needed) ---------------
+hdr "flatpak (packages/flatpak.txt)"
+if have flatpak && [ -f packages/flatpak.txt ]; then
+  mapfile -t apps < <(pkgs packages/flatpak.txt)
+  if [ "${#apps[@]}" -gt 0 ]; then
+    info "flatpak install --or-update (${#apps[@]} declared)"
+    flatpak install --or-update "${apps[@]}"
+  else
+    ok "manifest declares nothing"
+  fi
+else
+  info "flatpak or packages/flatpak.txt missing — skipping"
+fi
+
+printf '\n%s——%s idempotent (--needed); removals stay manual. Run "make drift" to see what remains undeclared.\n' "$C_DIM" "$C_RST"

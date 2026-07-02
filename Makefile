@@ -5,17 +5,20 @@
 # source of truth and `make` stays a discoverable index of what you can do.
 
 .DEFAULT_GOAL := help
-.PHONY: help stow stow-root check fix drift
+.PHONY: help stow stow-root install-packages check fix drift
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) \
-		| awk 'BEGIN{FS=":.*## "}{printf "  \033[1m%-11s\033[0m %s\n", $$1, $$2}'
+		| awk 'BEGIN{FS=":.*## "}{printf "  \033[1m%-16s\033[0m %s\n", $$1, $$2}'
 
 stow: ## Stow home packages into $HOME (as you)
 	@./stow/stow-home.sh
 
 stow-root: ## Stow root packages into / (prompts for sudo)
 	@sudo ./stow/stow-root.sh
+
+install-packages: ## Install everything packages/*.txt declares (prompts for sudo)
+	@./bin/install-packages
 
 check: ## Verify deployment + parse/lint — read-only (bin/doctor)
 	@./bin/doctor

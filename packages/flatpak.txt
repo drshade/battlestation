@@ -1,0 +1,10 @@
+# packages/flatpak.txt — declared flatpak applications.
+#
+# Format: one application ID per line (e.g. org.gnome.Loupe); `#` starts a
+# comment — same parse as packages/pacman.txt. bin/drift diffs this against
+# `flatpak list --app --columns=application`; `make install-packages`
+# applies it with `flatpak install`.
+#
+# Deliberately empty: no flatpak apps are installed (flatpak itself is
+# declared in pacman.txt). If an app shows up in `make drift`, either
+# declare it here (with a why) or uninstall it.

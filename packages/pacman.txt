@@ -1,0 +1,37 @@
+# packages/pacman.txt — DELIBERATE additions: native packages installed on
+# purpose, on top of the CachyOS installer baseline (packages/pacman-base.txt).
+#
+# Format: one package name per line; `#` starts a comment (full-line or
+# trailing) — the same parse bin/drift and bin/install-packages use.
+# bin/drift diffs base+this against `pacman -Qqe --native`; `make
+# install-packages` applies both with `pacman -S --needed`.
+#
+# Every entry carries a why (setup-note entries cite their note). Dependencies
+# of a declared package are NOT listed — drift compares the explicit set only.
+# A new install means a line HERE; pacman-base.txt only changes when
+# re-baselining against the installer. Never paste a `pacman -Qqe` dump:
+# triage new drift-report entries one by one, and leave anything unclear OUT
+# so it stays visible in `make drift`.
+
+# --- repo tooling -------------------------------------------------------
+stow                           # deploys stow/ (README new-machine steps)
+github-cli                     # gh — setup/sshkeys-02-install-gh.md
+shellcheck                     # bin/doctor shell linting
+
+# --- documented in setup/ notes ------------------------------------------
+code                           # setup/deps-00-vscode.md
+keyd                           # setup/deps-00-keyd.md (config: stow/root/keyd)
+hyprlock                       # setup/deps-00-hyprlock-hypridle.md
+hypridle                       # setup/deps-00-hyprlock-hypridle.md
+kdeconnect                     # setup/deps-00-kdeconnect.md (config: stow/home/kdeconnect)
+zenity                         # setup/deps-00-zenity.md
+
+# --- apps ------------------------------------------------------------------
+discord                        # chat
+teams-for-linux                # work chat
+evince                         # PDF viewer
+typst                          # document typesetting
+
+# --- CLI utilities -----------------------------------------------------------
+tree
+shelly                         # modern pacman/AUR wrapper (config: ~/.config/shelly, unmanaged)
