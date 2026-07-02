@@ -42,34 +42,39 @@ configured — a runbook for rebuilds.
 ## Setup on a new machine
 
 ```sh
-sudo pacman -S stow
+sudo pacman -S stow make
 git clone git@github.com:drshade/battlestation.git ~/dev/battlestation
 cd ~/dev/battlestation
-./stow/stow-home.sh          # your configs -> $HOME
-sudo ./stow/stow-root.sh     # system configs -> /
+make stow        # your configs -> $HOME
+make stow-root   # system configs -> /   (prompts for sudo)
+make check       # verify everything linked correctly
 ```
 
-## Common commands
+## Tasks
+
+`make` is the entrypoint — run it with no target for the full list:
 
 ```sh
-# Operate on a single package (run from inside its target group)
+make        # list all targets
+make stow   # stow home packages into $HOME
+make check  # verify deployment + parse/lint (read-only; bin/doctor)
+make fix    # repair broken stow links by restowing (bin/doctor --fix)
+make drift  # what the machine has that the repo doesn't manage (bin/drift)
+```
+
+`check` and `drift` are read-only; `fix` is the only mutating task. Targets are
+thin wrappers over `bin/*` and `stow/stow-*.sh` — run those directly if you
+prefer. Install `shellcheck` and `luacheck` for full linting; without them
+`make check` falls back to `bash -n` / `luac -p`.
+
+Underlying per-package stow commands, when you need finer control:
+
+```sh
 cd stow/home
 stow --target="$HOME" hypr            # link into place
 stow --restow --target="$HOME" hypr   # re-link after adding files
 stow --delete --target="$HOME" hypr   # remove symlinks (files stay in repo)
 ```
-
-## Checking the repo
-
-```sh
-bin/doctor        # verify deployment: every tracked file is a live symlink into
-                  # the repo, stow simulates clean, shell/JSON/Lua all parse
-bin/doctor --fix  # the only mutating mode — restow to repair broken links
-bin/drift         # read-only: what the machine has that the repo doesn't manage
-```
-
-Both default to read-only (dry-run). Install `shellcheck` and `luacheck` for
-full linting; without them `bin/doctor` falls back to `bash -n` / `luac -p`.
 
 ## Adding a new app (targets $HOME)
 
