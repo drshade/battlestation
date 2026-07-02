@@ -37,10 +37,10 @@ Item {
   // arrays would shuffle a title onto the wrong bot the moment a second instance
   // starts or either one stops -- fine when statuses were anonymous, wrong now.
   property var sidsByWs: ({})       // { "<wsid>": [sid, ...] } stable bot order
-  property var statusBySid: ({})    // { "<sid>": "green" }
+  property var statusBySid: ({})    // { "<sid>": "thinking" | "tooling" | "waiting" }
   property var titleBySid: ({})     // { "<sid>": "<aiTitle>" }
   property var kindBySid: ({})      // { "<sid>": "claude" } -- future: codex/gemini/...
-  property var agentsBySid: ({})    // { "<sid>": 2 } live count of running subagents
+  property var agentsBySid: ({})    // { "<sid>": [{id,type,description,started}] } running subagents
   // Occupancy computed from real windows (ExtWorkspaceService.isOccupied is unreliable).
   property var occupiedMap: ({})
   // Reactive lookups the pills read by id, so a pill never has to hold a
@@ -182,6 +182,19 @@ Item {
     }
     return true;
   }
+  // Deep-compare one sid's subagent list. Used to REUSE the prior array instance
+  // when nothing changed, so the pill's sub-bot Repeater (whose model is that
+  // instance) is never rebuilt by a mere re-poll.
+  function sameAgentList(a, b) {
+    if (!a || a.length !== b.length)
+      return false;
+    for (var i = 0; i < a.length; i++) {
+      var x = a[i], y = b[i];
+      if (x.id !== y.id || x.type !== y.type || x.description !== y.description || x.started !== y.started)
+        return false;
+    }
+    return true;
+  }
 
   // Rebuild displayList ONLY when the visible id sequence changes (orderedIds
   // trimmed to maxVisiblePos when hideTrailing). Frozen while reordering so the
@@ -288,37 +301,99 @@ Item {
     onTriggered: if (!poller.running)
       poller.running = true
   }
+  // One flat pass over the claude-ws state dir (claude-ws-status.sh documents the
+  // protocol: `<sid>` session JSON + `<sid>.<agent_id>` running-subagent markers).
+  // Self-cleaning: a session file whose pid is dead OR that doesn't parse (legacy
+  // tab-separated format) is deleted along with its markers, as are orphan markers
+  // whose session file is gone. Dotfiles are the writer's in-flight temp files;
+  // skip them. Emits ONE JSON array:
+  //   [{sid, ws, status, kind, title, agents: [{id, type, description, started}]}]
+  // with `started` = the marker's mtime (subagent start time).
+  readonly property string pollScript: `
+import os, json
+d = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "claude-ws")
+try:
+    names = os.listdir(d)
+except OSError:
+    names = []
+sess = []
+marks = {}
+for n in names:
+    if n.startswith(".") or n == "debug.log":
+        continue
+    if "." in n:
+        sid, aid = n.split(".", 1)
+        marks.setdefault(sid, []).append(aid)
+    else:
+        sess.append(n)
+def rm(p):
+    try:
+        os.unlink(p)
+    except OSError:
+        pass
+out = []
+for sid in sorted(sess):
+    p = os.path.join(d, sid)
+    try:
+        with open(p) as f:
+            rec = json.load(f)
+        ok = os.path.exists("/proc/%d" % int(rec["pid"]))
+    except Exception:
+        ok = False
+    if not ok:
+        rm(p)
+        for aid in marks.pop(sid, []):
+            rm(p + "." + aid)
+        continue
+    agents = []
+    for aid in marks.pop(sid, []):
+        mp = p + "." + aid
+        try:
+            with open(mp) as f:
+                m = json.load(f)
+            agents.append({"id": aid, "type": str(m.get("type") or ""), "description": str(m.get("description") or ""), "started": int(os.stat(mp).st_mtime)})
+        except Exception:
+            pass
+    agents.sort(key=lambda a: (a["started"], a["id"]))
+    out.append({"sid": sid, "ws": rec.get("ws"), "status": str(rec.get("status") or ""), "kind": str(rec.get("kind") or "claude"), "title": str(rec.get("title") or ""), "agents": agents})
+for sid in marks:
+    for aid in marks[sid]:
+        rm(os.path.join(d, sid + "." + aid))
+print(json.dumps(out))
+`
+
   Process {
     id: poller
-    // Prefix each record with its session id (the file name) and a LIVE count of
-    // running subagents -- agent-*.jsonl files in this session's subagents/ dir
-    // touched in the last 30s (a finished agent's file goes quiet and ages out).
-    // Counting here (every poll) keeps it live even while the main agent waits,
-    // with no +1/-1 counter to leak. Line: <sid>\t<agents>\t<wsid>\t<status>\t<kind>\t<title>.
-    // `ref` is an absolute cutoff (find's relative -newermt '-30 seconds' silently
-    // no-ops here); 30s tolerates an agent's quiet stretches yet a finished agent's
-    // file ages out within ~30s. Adjust the seconds below to taste.
-    command: ["sh", "-c", "ref=$(date -d '-30 seconds' '+%F %T'); for f in \"$XDG_RUNTIME_DIR\"/claude-ws/*; do [ -e \"$f\" ] || continue; sid=\"${f##*/}\"; n=$(find \"$HOME\"/.claude/projects/*/\"$sid\"/subagents -maxdepth 1 -name 'agent-*.jsonl' -newermt \"$ref\" 2>/dev/null | wc -l); printf '%s\\t%s\\t' \"$sid\" \"$n\"; cat \"$f\"; echo; done"]
+    command: ["python3", "-c", root.pollScript]
     stdout: StdioCollector {
       onStreamFinished: {
+        var recs;
+        try {
+          recs = JSON.parse(text);
+        } catch (e) {
+          recs = null;
+        }
+        if (!recs || recs.length === undefined)
+          return;
         var statusBySid = {};
         var titleBySid = {};
         var kindBySid = {};
         var agentsBySid = {};
         var seen = {};      // wsid -> { sid: true } present this poll
-        var fresh = {};     // wsid -> [sid] in file order (for appending new bots)
-        var lines = text.split("\n");
-        for (var i = 0; i < lines.length; i++) {
-          if (!lines[i])
+        var fresh = {};     // wsid -> [sid] in poll order (for appending new bots)
+        for (var i = 0; i < recs.length; i++) {
+          var r = recs[i];
+          if (!r || !r.sid)
             continue;
-          var p = lines[i].split("\t");
-          if (p.length < 5)
-            continue;       // need at least sid, agents, wsid, status, kind
-          var sid = p[0], ws = p[2];
-          agentsBySid[sid] = parseInt(p[1], 10) || 0;
-          statusBySid[sid] = p[3];
-          kindBySid[sid] = p[4] || "claude";
-          titleBySid[sid] = p[5] || "";
+          var sid = r.sid, ws = String(r.ws);
+          statusBySid[sid] = r.status || "";
+          kindBySid[sid] = r.kind || "claude";
+          titleBySid[sid] = r.title || "";
+          // Reuse the prior list instance when its content is unchanged, so the
+          // sub-bot Repeater bound to it never sees a new model on a mere re-poll.
+          var list = r.agents || [];
+          var prior = root.agentsBySid[sid];
+          agentsBySid[sid] = root.sameAgentList(prior, list) ? prior : list;
           if (!seen[ws]) {
             seen[ws] = {};
             fresh[ws] = [];
@@ -333,11 +408,11 @@ Item {
         // reshuffles a live bot's slot (only a start/stop touches the sequence).
         var sidsByWs = {};
         for (var ws2 in fresh) {
-          var prior = root.sidsByWs[ws2] || [];
+          var priorSids = root.sidsByWs[ws2] || [];
           var out = [];
-          for (var a = 0; a < prior.length; a++)
-            if (seen[ws2][prior[a]])
-              out.push(prior[a]);
+          for (var a = 0; a < priorSids.length; a++)
+            if (seen[ws2][priorSids[a]])
+              out.push(priorSids[a]);
           for (var b = 0; b < fresh[ws2].length; b++)
             if (out.indexOf(fresh[ws2][b]) === -1)
               out.push(fresh[ws2][b]);
@@ -353,6 +428,8 @@ Item {
           root.titleBySid = titleBySid;
         if (!root.sameKeySet(kindBySid, root.kindBySid))
           root.kindBySid = kindBySid;
+        // Identity compare is sound here: unchanged agent lists were reused above,
+        // so a differing value instance means the list's content really changed.
         if (!root.sameKeySet(agentsBySid, root.agentsBySid))
           root.agentsBySid = agentsBySid;
       }

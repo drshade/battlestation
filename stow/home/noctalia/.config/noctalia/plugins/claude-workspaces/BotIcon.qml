@@ -8,15 +8,15 @@ import qs.Services.UI
 Item {
   id: bot
 
-  property string status: ""   // "green" | "purple" | "orange"
+  property string status: ""   // "thinking" | "tooling" | "waiting"
   property var cfg: null
   property int pokeNonce: 0     // bump to force an emote
 
-  property string title: ""        // this session's aiTitle (hover tooltip)
+  property string title: ""        // hover tooltip: session aiTitle, or the sub-bot's "<type> — <description>"
   property string kind: "claude"   // agent kind -- future: "codex" | "gemini" | ...
 
   // A squad's commander (running subagents) turns to face its line of sub-bots.
-  // Sub-bots are `subordinate`: smaller (sizeScale), pop in on spawn, no tooltip.
+  // Sub-bots are `subordinate`: smaller (sizeScale), pop in on spawn.
   property bool commander: false
   property bool subordinate: false
   property real sizeScale: 1.0
@@ -59,9 +59,9 @@ Item {
   // Bots update their status in place (no recreation), so re-pace the emote
   // cadence when crossing the waiting<->active boundary -- otherwise a bot that
   // started out waiting would stay on its slow 30s timer after it got busy (and
-  // vice-versa). Only the boundary crossing re-paces, so rapid green<->purple
+  // vice-versa). Only the boundary crossing re-paces, so rapid thinking<->tooling
   // flips during work don't keep restarting (and starving) the timer.
-  readonly property bool waiting: status === "orange"
+  readonly property bool waiting: status === "waiting"
   onWaitingChanged: {
     emoteTimer.interval = nextDelay();
     emoteTimer.restart();
@@ -72,15 +72,15 @@ Item {
   }
   // Emote vocabulary per status (weighted by repetition).
   function emotePool() {
-    if (status === "green")
+    if (status === "thinking")
       return ["bounce", "squint", "look", "happy", "blink", "bounce"];
-    if (status === "purple")
+    if (status === "tooling")
       return ["wiggle", "wiggle", "surprised", "blink", "bounce"];
     return ["blink", "sleepy", "look", "bounce"];
   }
   // Cadence: thinking/tools lively, waiting calm. Each gap is jittered ±cfg.jitter.
   function nextDelay() {
-    var base = status === "orange" ? cfg.waitS * 1000 : cfg.activeMs;
+    var base = status === "waiting" ? cfg.waitS * 1000 : cfg.activeMs;
     return base * rnd(1 - cfg.jitter, 1 + cfg.jitter);
   }
   // Run one breath, re-jittering its amplitude + duration; loops via onFinished.
@@ -261,14 +261,14 @@ Item {
     }
   }
 
-  // Hover -> tooltip with this instance's session title (falls back to the agent
-  // name until Claude generates one). NoButton so the press still falls through
-  // to the pill delegate underneath -- click-to-switch and drag-reorder keep
+  // Hover -> tooltip: a session bot shows its aiTitle (falling back to the agent
+  // name until Claude generates one); a sub-bot shows its "<type> — <description>"
+  // (set as `title` by the pill). NoButton so the press still falls through to
+  // the pill delegate underneath -- click-to-switch and drag-reorder keep
   // working over the bots.
   MouseArea {
     anchors.fill: parent
-    enabled: !bot.subordinate          // sub-bots are decorative, not interactive
-    hoverEnabled: !bot.subordinate
+    hoverEnabled: true
     acceptedButtons: Qt.NoButton
     cursorShape: Qt.PointingHandCursor
     onEntered: TooltipService.show(bot, (bot.title && bot.title.length) ? bot.title : bot.kindLabel(), BarService.getTooltipDirection(cfg.screenName))

@@ -100,20 +100,20 @@ QtObject {
   }
 
   // ---- bot icon URLs --------------------------------------------------------
+  // The protocol's statuses are semantic (thinking/tooling/waiting); mapping a
+  // state to its presentation -- the green/purple/orange asset families -- is
+  // this table's job, and every status-string consumer routes through it.
+  readonly property var statusAsset: ({
+                                        "thinking": "claudecode-thinking", // green
+                                        "tooling": "claudecode-tool",      // purple
+                                        "waiting": "claudecode-waiting"    // orange
+                                      })
   function statusIcon(status) {
-    switch (status) {
-    case "green":
-      return Qt.resolvedUrl("assets/claudecode-thinking.svg");
-    case "purple":
-      return Qt.resolvedUrl("assets/claudecode-tool.svg");
-    case "orange":
-      return Qt.resolvedUrl("assets/claudecode-waiting.svg");
-    default:
-      return Qt.resolvedUrl("assets/claudecode.svg");
-    }
+    var a = statusAsset[status];
+    return Qt.resolvedUrl("assets/" + (a || "claudecode") + ".svg");
   }
   function statusPrefix(status) {
-    return status === "green" ? "claudecode-thinking" : status === "purple" ? "claudecode-tool" : "claudecode-waiting";
+    return statusAsset[status] || "claudecode-waiting";
   }
   function faceUrl(status, emote) {
     return Qt.resolvedUrl("assets/" + statusPrefix(status) + "-" + emote + ".svg");

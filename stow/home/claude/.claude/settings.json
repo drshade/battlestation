@@ -9,7 +9,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh orange",
+            "command": "$HOME/.local/bin/claude-ws-status.sh waiting",
             "type": "command"
           }
         ]
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh green",
+            "command": "$HOME/.local/bin/claude-ws-status.sh thinking",
             "type": "command"
           }
         ],
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh green",
+            "command": "$HOME/.local/bin/claude-ws-status.sh thinking",
             "type": "command"
           }
         ],
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh purple",
+            "command": "$HOME/.local/bin/claude-ws-status.sh tooling",
             "type": "command"
           }
         ],
@@ -67,7 +67,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh orange",
+            "command": "$HOME/.local/bin/claude-ws-status.sh waiting",
             "type": "command"
           }
         ]
@@ -78,7 +78,29 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh orange",
+            "command": "$HOME/.local/bin/claude-ws-status.sh waiting",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "$HOME/.local/bin/claude-ws-status.sh agent-start",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "$HOME/.local/bin/claude-ws-status.sh agent-stop",
             "type": "command"
           }
         ]
@@ -89,7 +111,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh green",
+            "command": "$HOME/.local/bin/claude-ws-status.sh thinking",
             "type": "command"
           }
         ]

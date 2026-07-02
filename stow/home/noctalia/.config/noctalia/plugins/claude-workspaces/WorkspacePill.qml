@@ -24,7 +24,7 @@ Item {
   property var statusBySid: ({})
   property var titleBySid: ({})
   property var kindBySid: ({})
-  property var agentsBySid: ({})
+  property var agentsBySid: ({})   // { "<sid>": [{id,type,description,started}] }
   property bool occupied: false
   property bool shown: true
   property int position: 0         // display position (1-based); shown instead of the raw id
@@ -112,22 +112,23 @@ Item {
       }
 
       // One "squad" per agent instance here, keyed by session id. The outer model
-      // is the sid LIST (identity-stable): a status/title/agent-count change leaves
-      // the list untouched, so the squad isn't recreated -- its bots read new state
+      // is the sid LIST (identity-stable): a status/title/agent change leaves the
+      // list untouched, so the squad isn't recreated -- its bots read new state
       // from the maps and update in place, keeping their breathing/emote timers.
       // Only an instance starting/stopping changes the sequence (and then only this
       // pill's squads rebuild, never another workspace's).
       //
       // A squad = the commander bot + a line of smaller sub-agent bots to its right,
-      // one per running subagent. The inner Repeater's model is the COUNT (an int),
-      // so a count change adds/removes only the trailing sub-bot incrementally and
-      // never restarts a surviving sub-bot's animation.
+      // one per running subagent. The inner Repeater's model is this sid's agent
+      // LIST; BarWidget reuses the list instance across polls unless its content
+      // changed, so surviving sub-bots keep their animations between polls (a list
+      // change does rebuild this squad's sub-bots, but only this squad's).
       Repeater {
         model: cell.sids
         delegate: Row {
           anchors.verticalCenter: parent.verticalCenter
           required property string modelData          // = the session id
-          readonly property int agents: cell.agentsBySid[modelData] || 0
+          readonly property var agents: cell.agentsBySid[modelData] || []
           readonly property string botStatus: cell.statusBySid[modelData] || ""
           spacing: Math.round(cfg.d * 0.12)
 
@@ -136,7 +137,7 @@ Item {
             status: botStatus
             title: cell.titleBySid[modelData] || ""
             kind: cell.kindBySid[modelData] || "claude"
-            commander: agents > 0                     // turn to face the squad
+            commander: agents.length > 0              // turn to face the squad
             cfg: cell.cfg
             pokeNonce: cell.pokeNonce
           }
@@ -144,11 +145,13 @@ Item {
           Repeater {
             model: agents
             delegate: BotIcon {
+              required property var modelData         // = {id,type,description,started}
               anchors.verticalCenter: parent.verticalCenter
               status: botStatus                       // sub-bots mirror the commander
+              title: (modelData.type || "agent") + (modelData.description ? " — " + modelData.description : "")
               cfg: cell.cfg
               sizeScale: cfg.subScale
-              subordinate: true                       // smaller, pops in, no tooltip
+              subordinate: true                       // smaller, pops in
             }
           }
         }
