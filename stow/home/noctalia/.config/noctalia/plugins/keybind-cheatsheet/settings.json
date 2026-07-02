@@ -329,6 +329,15 @@
           "_mainKey": "R",
           "_mods": "Mod3",
           "_verb": ""
+        },
+        {
+          "keys": "Shift + Mod3 + BACKSPACE",
+          "desc": "Reset workspace order to default",
+          "bindId": "|33|Backspace|000|__lua",
+          "undescribed": false,
+          "_mainKey": "Backspace",
+          "_mods": "Shift+Mod3",
+          "_verb": ""
         }
       ]
     },
