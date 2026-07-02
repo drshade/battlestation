@@ -47,8 +47,15 @@ git clone git@github.com:drshade/battlestation.git ~/dev/battlestation
 cd ~/dev/battlestation
 make stow        # your configs -> $HOME
 make stow-root   # system configs -> /   (prompts for sudo)
+for f in bin/filters/*; do git config "filter.${f##*/}.clean" "$f"; done
+                 # one-time: activate the git clean filters (repo-local config)
 make check       # verify everything linked correctly
 ```
+
+The filter line registers each tracked `bin/filters/<name>` script as the clean
+command for its `filter=<name>` entry in `.gitattributes` (they hide runtime
+churn in app-rewritten configs — see AGENTS.md). Git config is repo-local, so
+this can't ship with the clone; `make fix` performs the same registration.
 
 ## Tasks
 
@@ -58,7 +65,7 @@ make check       # verify everything linked correctly
 make        # list all targets
 make stow   # stow home packages into $HOME
 make check  # verify deployment + parse/lint (read-only; bin/doctor)
-make fix    # repair broken stow links by restowing (bin/doctor --fix)
+make fix    # repair: restow + install clean-filter config (bin/doctor --fix)
 make drift  # what the machine has that the repo doesn't manage (bin/drift)
 ```
 

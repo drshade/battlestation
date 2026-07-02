@@ -1,73 +1,74 @@
 {
-  "permissions": {
-    "defaultMode": "auto"
+  "enabledPlugins": {
+    "clangd-lsp@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
   },
   "hooks": {
-    "SessionStart": [
+    "Notification": [
       {
         "hooks": [
           {
-            "type": "command",
+            "async": true,
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh purple",
-            "async": true
+            "type": "command"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "*",
         "hooks": [
           {
-            "type": "command",
+            "async": true,
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
-            "async": true
+            "type": "command"
           }
-        ]
+        ],
+        "matcher": "*"
       }
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "*",
         "hooks": [
           {
-            "type": "command",
+            "async": true,
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
-            "async": true
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh purple",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh clear",
+            "type": "command"
           }
         ]
       }
     ],
-    "Notification": [
+    "SessionStart": [
       {
         "hooks": [
           {
-            "type": "command",
+            "async": true,
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
-            "async": true
+            "type": "command"
           }
         ]
       }
@@ -76,35 +77,34 @@
       {
         "hooks": [
           {
-            "type": "command",
+            "async": true,
             "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
-            "async": true
+            "type": "command"
           }
         ]
       }
     ],
-    "SessionEnd": [
+    "UserPromptSubmit": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh clear",
-            "async": true
+            "async": true,
+            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
+            "type": "command"
           }
         ]
       }
     ]
   },
-  "enabledPlugins": {
-    "clangd-lsp@claude-plugins-official": true,
-    "rust-analyzer-lsp@claude-plugins-official": true
+  "permissions": {
+    "defaultMode": "auto"
   },
+  "preferredNotifChannel": "notifications_disabled",
   "statusLine": {
-    "type": "command",
     "command": "bash $HOME/.claude/statusline.sh",
-    "padding": 0
+    "padding": 0,
+    "type": "command"
   },
-  "tui": "fullscreen",
   "theme": "dark",
-  "preferredNotifChannel": "notifications_disabled"
+  "tui": "fullscreen"
 }

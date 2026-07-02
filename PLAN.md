@@ -101,7 +101,7 @@ after (tracked JSON 55→29; screen-toolkit's ~13 scripts left the lint scope �
 **shellcheck is now safe to install**). Longer-term `claude-workspaces`
 promotion stays open above.
 
-### 3. Runtime-rewritten configs: replace the "avoid `git add -A`" convention with tooling
+### 3. Runtime-rewritten configs: replace the "avoid `git add -A`" convention with tooling — ✅ DONE (2026-07-02)
 
 **Problem.** Noctalia rewrites `settings.json`; Claude Code rewrites
 `settings.json` (a `/model` selection dirtied it *today*); `colors.json` churns
@@ -118,6 +118,37 @@ reject.
   any commit.
 - Optionally a pre-commit hook (P2.6) that blocks staging a known-churn file
   unless the commit message / an env var acknowledges it.
+
+**Outcome.** Two mechanisms, chosen per churn class (rule recorded in AGENTS.md
+working habits: *derived output → gitignore; merged config → clean filter*):
+
+- `colors.json` — gitignored + `git rm --cached` (derived output; stays on disk,
+  Noctalia untouched). Doctor's churn report (P2.4) covered the detection half
+  already.
+- Claude's `settings.json` — the file **merges** user-authored config (hooks,
+  permissions — hugely important) with keys Claude Code rewrites at runtime
+  (`model` — dirtied by a `/model` today — plus `effortLevel`,
+  `alwaysThinkingEnabled`, and wholesale key reordering). Docs check confirmed
+  the churn can't be stopped at the source: `/model` always writes
+  `~/.claude/settings.json`; user-level `settings.local.json` exists but
+  doesn't redirect it. So a **git clean filter** hides it from git instead:
+  `.gitattributes` maps the path to `filter=claude-settings`;
+  `bin/filters/claude-settings` (tracked = single source of truth) strips the
+  volatile keys and `jq -S`-sorts the rest (killing reorder churn too); a
+  repo-local `git config filter.<name>.clean bin/filters/<name>` activates it.
+  Verified: worktree file holds `model` while index doesn't, status stays
+  clean; a hook edit still shows as dirt.
+- The unclonable git config is the weak point → **doctor check 7** enumerates
+  `filter=` declarations via `git check-attr` (nothing hardcoded), fails on
+  missing/non-executable script or missing/wrong config, warns on dead
+  `bin/filters/*` scripts; `--fix` installs the config + prints a renormalize
+  hint. README new-machine steps carry the one-time registration loop.
+  Review finding fixed post-agent: the `--fix` renormalize hint listed only the
+  first path of a multi-path filter.
+- The optional pre-commit churn guard (third bullet above) is **superseded**:
+  filtered churn never appears as dirt, and doctor enforces the wiring. The
+  "avoid `git add -A`" habit stays, rescoped to Noctalia's `settings.json` —
+  source-of-truth churn that can be neither ignored nor filtered.
 
 ---
 
@@ -335,8 +366,8 @@ flagged in the P1.1 correction has since been fixed by the user.)
 
 1. ✅ **P1.1** `--no-folding` (small diff, removes the standing hazard) —
    then restow + verify.
-2. ✅ **P1.2** de-vendor plugins *(done)*; **P1.3** gitignore `colors.json`
-   still open.
+2. ✅ **P1.2** de-vendor plugins; ✅ **P1.3** colors.json ignored +
+   settings.json clean filter *(all of P1 now done)*.
 3. ✅ **P2.7** + ✅ **P2.4** Makefile + doctor (the enforcement spine); fold
    shellcheck fixes in as they surface. *(both done.)*
 4. **P2.6** hooks; ✅ **P2.5** + **P3.8** drift + package manifest (one feature —

@@ -188,8 +188,10 @@ live in `setup/README.md`.
   (set `misc:allow_session_lock_restore`, ensure the shell is up, re-present the
   lock); you then type your password to unlock normally.
 - **`stow/home/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme
-  changes (matugen-style output), so it churns in diffs. It is currently
-  tracked; gitignore it if the noise is annoying.
+  changes (matugen-style output). It is derived output, not config — the
+  wallpaper/color settings in `settings.json` are the source of truth — so it
+  is gitignored, untracked, and must stay that way (see "Runtime-rewritten
+  tracked files" under working habits).
 - **Two-terminal trap (resolved).** Hyprland's terminal is set in
   `stow/home/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
   launcher uses `appLauncher.terminalCommand` in its `settings.json`. These are
@@ -223,19 +225,39 @@ live in `setup/README.md`.
   the targets are thin wrappers over `bin/*` and `stow/stow-*.sh`.
 - After any symlink/stow operation, run **`make check`** (`bin/doctor`) — it
   verifies every tracked leaf is a live symlink resolving into this repo (across
-  all groups), that `stow --simulate` is conflict-free, and that shell/JSON/Lua
-  all parse. It is read-only; **`make fix`** (`bin/doctor --fix`) restows to
-  repair. (Manual spot-check if needed: `ls -ld ~/.config/<app>` shows the
-  symlink, `readlink -f` resolves it into this repo.)
+  all groups), that `stow --simulate` is conflict-free, that shell/JSON/Lua all
+  parse, and that the git clean filters are wired up. It is read-only;
+  **`make fix`** (`bin/doctor --fix`) restows and installs the repo-local
+  filter config to repair. (Manual spot-check if needed: `ls -ld ~/.config/<app>`
+  shows the symlink, `readlink -f` resolves it into this repo.)
 - **`make drift`** (`bin/drift`, read-only) reports what the machine has that
   the repo doesn't — unmanaged `~/.config` entries and, once a manifest exists,
   package drift. Drift is normal; run it to keep it *visible*.
 - Before committing, sanity-check nothing secret was staged:
   `git ls-files | grep -iE 'token|secret|fish_variables'`.
-- **Avoid `git add -A`.** Apps like Noctalia rewrite their own tracked config at
-  runtime (see gotchas), so a blanket add silently bundles unrelated churn into
-  your commit. Stage explicit paths and review `git status` first; if churn lands
-  in the wrong commit, split it (unpushed history is safe to tidy).
+- **Runtime-rewritten tracked files are handled by mechanism, not vigilance.**
+  When an app churns a file at runtime, classify it and wire up the matching
+  defense — don't fall back to "remember not to commit it":
+  - **Derived output** — regenerable from other tracked config (e.g. Noctalia's
+    `colors.json`, rebuilt from the wallpaper/color settings): **gitignore it**.
+    Derived ≠ source of truth; tracking it only records churn.
+  - **Merged config** — a file this repo owns that the app also rewrites
+    runtime keys into (e.g. Claude Code's `settings.json`, where it
+    inserts/updates `model` etc. and reorders keys wholesale): a **git clean
+    filter**. Three parts, one name: `.gitattributes` maps the file to
+    `filter=<name>`; the tracked script `bin/filters/<name>` strips the
+    runtime keys and normalizes key order (it is the single source of truth
+    for the strip-list); and a repo-local
+    `git config filter.<name>.clean bin/filters/<name>` activates it. Runtime
+    churn then never shows as dirt, while real config edits still do. The git
+    config is repo-local (not versionable), so a fresh clone needs it once —
+    see README's new-machine steps; doctor validates it is in place and
+    `make fix` (doctor `--fix`) installs it.
+- **Avoid `git add -A`** even so — apps like Noctalia rewrite tracked config
+  that (unlike the cases above) *is* the source of truth and can't be filtered
+  or ignored, so a blanket add still bundles unrelated churn into your commit.
+  Stage explicit paths and review `git status` first; if churn lands in the
+  wrong commit, split it (unpushed history is safe to tidy).
 - System-level actions (`pacman -Rns`, `pacman -S`) need sudo — hand the user
   the exact command rather than running it, and record it in the relevant
   `setup/` note so it is reproducible.

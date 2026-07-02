@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# claude-settings — git clean filter for stow/home/claude/.claude/settings.json.
+#
+# Claude Code rewrites its settings file at runtime: it inserts/updates the
+# keys below (session state, not config) and reorders keys wholesale. This
+# filter strips those keys and sorts the rest (jq -S) so the tracked form is
+# stable — the live file can churn without dirtying the repo.
+#
+# This script is the single source of truth for the strip-list. Wired up via
+# .gitattributes (filter=claude-settings) + repo-local git config:
+#   git config filter.claude-settings.clean 'bin/filters/claude-settings'
+# No smudge filter: checkout keeps the cleaned form (identity), and Claude Code
+# re-adds its runtime keys on next run.
+set -euo pipefail
+
+jq -S 'del(.model, .effortLevel, .alwaysThinkingEnabled)'

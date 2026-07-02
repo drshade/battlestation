@@ -32,6 +32,7 @@ runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 # --- locate the running Hyprland instance (we are likely on a different VT) ---
 if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    # shellcheck disable=SC2012  # HIS dirs are machine-named (hash_timestamp) — ls -t is the simple "newest" pick
     his=$(ls -t "$runtime/hypr" 2>/dev/null | head -n1) || true
     [ -n "${his:-}" ] || {
         echo "No Hyprland instance under $runtime/hypr — is Hyprland running?" >&2

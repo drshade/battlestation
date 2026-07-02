@@ -44,6 +44,12 @@ stow/home/code/.config/Code - OSS/**
 !stow/home/code/.config/Code - OSS/User/
 !stow/home/code/.config/Code - OSS/User/settings.json
 
+# Noctalia colors (~/.config/noctalia/colors.json): derived output, not config —
+# regenerated (matugen-style) on every wallpaper/theme change. The wallpaper +
+# color settings in settings.json are the source of truth; tracking the output
+# would only churn.
+stow/home/noctalia/.config/noctalia/colors.json
+
 # Noctalia plugins (~/.config/noctalia/plugins): default-deny — plugin code is
 # installed/updated by Noctalia's plugin manager, and plugins.json (tracked)
 # already records the source + enabled set; tracking third-party code here

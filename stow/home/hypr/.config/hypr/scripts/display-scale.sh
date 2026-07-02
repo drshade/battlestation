@@ -35,6 +35,7 @@ if [ "$action" = "reset" ]; then
     luascale='"auto"'                                   # quoted -> Lua string
 else
     saved=$(cat "$state" 2>/dev/null || echo "")
+    # shellcheck disable=SC2046,SC2086  # splitting is the point: $ladder -> argv, python's "idx scale" -> $1 $2
     set -- $(python3 - "$action" "$scale" "$saved" $ladder <<'PY'
 import sys
 action, scale, saved = sys.argv[1], float(sys.argv[2]), sys.argv[3]

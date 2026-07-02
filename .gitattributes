@@ -1,0 +1,5 @@
+# Clean filters for runtime-rewritten tracked configs.
+# filter=<name> pairs with the tracked script bin/filters/<name> plus a
+# one-time repo-local `git config filter.<name>.clean bin/filters/<name>`
+# (doctor validates / doctor --fix installs it). See AGENTS.md.
+stow/home/claude/.claude/settings.json filter=claude-settings

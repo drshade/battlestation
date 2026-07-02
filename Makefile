@@ -20,7 +20,7 @@ stow-root: ## Stow root packages into / (prompts for sudo)
 check: ## Verify deployment + parse/lint — read-only (bin/doctor)
 	@./bin/doctor
 
-fix: ## Repair stow linkage by restowing (bin/doctor --fix)
+fix: ## Repair: restow + install clean-filter config (bin/doctor --fix)
 	@./bin/doctor --fix
 
 drift: ## Report machine config the repo doesn't manage (bin/drift)
