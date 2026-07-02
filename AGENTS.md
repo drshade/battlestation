@@ -214,8 +214,15 @@ live in `setup/README.md`.
   no machine-specific assumptions. The `setup/` style (terse; explain the
   non-obvious *why*, not the obvious) applies to **all** tracked prose, including
   config-file comments.
-- After any symlink/stow operation, verify: `ls -ld ~/.config/<app>` should show
-  the symlink, and `readlink -f` it should resolve into this repo.
+- After any symlink/stow operation, run **`bin/doctor`** — it verifies every
+  tracked leaf is a live symlink resolving into this repo (across all groups),
+  that `stow --simulate` is conflict-free, and that shell/JSON/Lua all parse. It
+  is read-only; `bin/doctor --fix` restows to repair. (Manual spot-check if
+  needed: `ls -ld ~/.config/<app>` shows the symlink, `readlink -f` resolves it
+  into this repo.)
+- **`bin/drift`** (read-only) reports what the machine has that the repo
+  doesn't — unmanaged `~/.config` entries and, once a manifest exists, package
+  drift. Drift is normal; run it to keep it *visible*.
 - Before committing, sanity-check nothing secret was staged:
   `git ls-files | grep -iE 'token|secret|fish_variables'`.
 - **Avoid `git add -A`.** Apps like Noctalia rewrite their own tracked config at

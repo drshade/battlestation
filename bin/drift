@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# drift — show what the machine has that the repo doesn't manage.
+#
+# Read-only ALWAYS: drift never changes the system or the repo. Its output is a
+# triage list, not an error — drift is normal, invisible drift is the bug.
+# Adopting a config or installing a package is a deliberate manual step.
+#
+# Reports: unmanaged ~/.config entries and ~/.local/share/applications, and
+# (once packages/*.txt exists — P3.8) installed packages vs the manifest.
+set -euo pipefail
+
+self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
+# shellcheck source=bin/lib.sh
+. "$BIN/lib.sh"
+cd "$REPO"
+
+for a in "${@:-}"; do
+  case "$a" in
+    -h|--help) awk 'NR>1{ if(/^#/){sub(/^# ?/,"");print} else exit }' "$self"; exit 0 ;;
+    "") ;;
+    *) echo "drift: unknown argument: $a (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+# Runtime/state/cache dirs that are never dotfiles — a report FILTER, not a
+# correctness mechanism. Edit freely; suppressed count is always shown.
+NOISE=(pulse dconf session mozilla gh ghc uv nautilus)
+
+printf '%sbattlestation drift%s  %s(read-only report)%s\n' "$C_BLD" "$C_RST" "$C_DIM" "$C_RST"
+
+# True if $1 (a path) is, or contains within 4 levels, a symlink into the repo.
+managed() {
+  local e=$1 l
+  if [ -L "$e" ]; then case "$(readlink -f "$e" 2>/dev/null)" in "$REPO"/*) return 0 ;; esac; fi
+  while IFS= read -r -d '' l; do
+    case "$(readlink -f "$l" 2>/dev/null)" in "$REPO"/*) return 0 ;; esac
+  done < <(find "$e" -maxdepth 4 -type l -print0 2>/dev/null)
+  return 1
+}
+
+is_noise() { local n=$1 x; for x in "${NOISE[@]}"; do [ "$x" = "$n" ] && return 0; done; return 1; }
+
+# --- 1. unmanaged ~/.config -------------------------------------------------
+hdr "Unmanaged in ~/.config"
+suppressed=0 unmanaged=0
+for e in "$HOME"/.config/*; do
+  [ -e "$e" ] || continue
+  n=$(basename "$e")
+  if is_noise "$n"; then suppressed=$((suppressed + 1)); continue; fi
+  if managed "$e"; then continue; fi
+  [ -d "$e" ] && kind="dir" || kind="file"
+  info "$n ($kind)"
+  unmanaged=$((unmanaged + 1))
+done
+[ "$unmanaged" -eq 0 ] && ok "nothing unmanaged (outside the noise filter)"
+[ "$suppressed" -gt 0 ] && info "($suppressed suppressed by the noise filter: ${NOISE[*]})"
+
+# --- 2. unmanaged ~/.local/share/applications -------------------------------
+hdr "Unmanaged desktop entries (~/.local/share/applications)"
+appdir="$HOME/.local/share/applications"
+if [ -d "$appdir" ]; then
+  app_unmanaged=0
+  for f in "$appdir"/*.desktop; do
+    [ -e "$f" ] || continue
+    if [ -L "$f" ]; then case "$(readlink -f "$f" 2>/dev/null)" in "$REPO"/*) continue ;; esac; fi
+    info "$(basename "$f")"
+    app_unmanaged=$((app_unmanaged + 1))
+  done
+  [ "$app_unmanaged" -eq 0 ] && ok "none"
+else
+  info "no $appdir"
+fi
+
+# --- 3. installed packages vs manifest (needs P3.8) -------------------------
+hdr "Package manifest drift"
+pkg_diff() {
+  local label file listcmd
+  label=$1; file=$2; listcmd=$3
+  if [ ! -f "$file" ]; then info "$label: no $file yet (P3.8) — skipping"; return; fi
+  local installed manifest
+  installed=$(eval "$listcmd" | sort -u)
+  manifest=$(grep -vE '^\s*(#|$)' "$file" | awk '{print $1}' | sort -u)
+  local only_inst only_man
+  only_inst=$(comm -23 <(printf '%s\n' "$installed") <(printf '%s\n' "$manifest"))
+  only_man=$(comm -13 <(printf '%s\n' "$installed") <(printf '%s\n' "$manifest"))
+  if [ -z "$only_inst" ] && [ -z "$only_man" ]; then ok "$label: in sync"; return; fi
+  [ -n "$only_inst" ] && { warn "$label: installed but not in manifest"; while IFS= read -r p; do note "$p"; done <<<"$only_inst"; }
+  [ -n "$only_man" ]  && { warn "$label: in manifest but not installed"; while IFS= read -r p; do note "$p"; done <<<"$only_man"; }
+}
+if have pacman; then
+  pkg_diff "pacman (explicit)" packages/pacman.txt  "pacman -Qqe --native 2>/dev/null || pacman -Qqe"
+  pkg_diff "AUR/foreign"       packages/aur.txt     "pacman -Qqm"
+else
+  info "pacman not found — skipping"
+fi
+if have flatpak; then
+  pkg_diff "flatpak" packages/flatpak.txt "flatpak list --app --columns=application"
+fi
+
+printf '\n%s——%s drift is informational; adopt configs / update manifests deliberately.\n' "$C_DIM" "$C_RST"

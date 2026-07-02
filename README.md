@@ -59,6 +59,18 @@ stow --restow --target="$HOME" hypr   # re-link after adding files
 stow --delete --target="$HOME" hypr   # remove symlinks (files stay in repo)
 ```
 
+## Checking the repo
+
+```sh
+bin/doctor        # verify deployment: every tracked file is a live symlink into
+                  # the repo, stow simulates clean, shell/JSON/Lua all parse
+bin/doctor --fix  # the only mutating mode — restow to repair broken links
+bin/drift         # read-only: what the machine has that the repo doesn't manage
+```
+
+Both default to read-only (dry-run). Install `shellcheck` and `luacheck` for
+full linting; without them `bin/doctor` falls back to `bash -n` / `luac -p`.
+
 ## Adding a new app (targets $HOME)
 
 ```sh

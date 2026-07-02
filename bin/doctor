@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# doctor — verify the repo is correctly deployed and internally sound.
+#
+# Read-only by default (dry-run). Pass --fix to repair stow linkage by
+# restowing; that is the ONLY mode that touches the filesystem.
+#
+# Checks: stow linkage (every tracked leaf is a symlink resolving into this
+# repo — catches missing/shadowed/dangling links), a clean `stow --simulate`,
+# shell + JSON + Lua parse/lint, and a runtime-churn dirty-file report.
+set -euo pipefail
+
+self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
+# shellcheck source=bin/lib.sh
+. "$BIN/lib.sh"
+cd "$REPO"
+
+FIX=0
+for a in "${@:-}"; do
+  case "$a" in
+    --fix) FIX=1 ;;
+    -h|--help) awk 'NR>1{ if(/^#/){sub(/^# ?/,"");print} else exit }' "$self"; exit 0 ;;
+    "") ;;
+    *) echo "doctor: unknown argument: $a (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$FIX" -eq 1 ]; then MODE="${C_YEL}FIX — will restow${C_RST}"; else MODE="${C_DIM}dry-run (read-only; pass --fix to repair)${C_RST}"; fi
+printf '%sbattlestation doctor%s  [%s]\n' "$C_BLD" "$C_RST" "$MODE"
+
+# --- optional repair (only with --fix) --------------------------------------
+if [ "$FIX" -eq 1 ]; then
+  hdr "Repair: restowing home packages"
+  ./stow/stow-home.sh
+  if [ -d stow/root ] && [ -n "$(ls -A stow/root 2>/dev/null)" ]; then
+    warn "root packages exist — rerun as root to repair them: sudo ./stow/stow-root.sh"
+  fi
+fi
+
+# --- 1. stow linkage: every tracked leaf is a live symlink into the repo -----
+hdr "Stow linkage (deployed state)"
+while IFS=$'\t' read -r group troot; do
+  [ -n "$group" ] || continue
+  for pkgdir in "stow/$group"/*/; do
+    [ -d "$pkgdir" ] || continue
+    pkgdir=${pkgdir%/}
+    name=$(basename "$pkgdir")
+    pkg_problems=0 pkg_files=0
+    while IFS= read -r -d '' file; do
+      rel=${file#"$pkgdir"/}
+      case "$group" in
+        root) target="/$rel" ;;
+        *)    target="$troot/$rel" ;;
+      esac
+      expected=$(readlink -f "$file")
+      pkg_files=$((pkg_files + 1))
+      if [ -L "$target" ]; then
+        if [ ! -e "$target" ]; then
+          bad "$group/$name: dangling → $target -> $(readlink "$target")"; pkg_problems=$((pkg_problems + 1))
+        elif [ "$(readlink -f "$target")" != "$expected" ]; then
+          bad "$group/$name: wrong link → $target -> $(readlink -f "$target") (want $expected)"; pkg_problems=$((pkg_problems + 1))
+        fi
+      elif [ -e "$target" ]; then
+        bad "$group/$name: real file shadows repo → $target"; pkg_problems=$((pkg_problems + 1))
+      else
+        bad "$group/$name: not stowed → $target"; pkg_problems=$((pkg_problems + 1))
+      fi
+    done < <(git ls-files -z -- "$pkgdir")
+    [ "$pkg_problems" -eq 0 ] && ok "$group/$name ($pkg_files files linked)"
+  done
+done < <(stow_groups)
+
+# --- 2. stow --simulate --restow is conflict-free ---------------------------
+hdr "Stow simulate (would restow cleanly?)"
+while IFS=$'\t' read -r group troot; do
+  [ -n "$group" ] || continue
+  for pkgdir in "stow/$group"/*/; do
+    [ -d "$pkgdir" ] || continue
+    name=$(basename "${pkgdir%/}")
+    out=$( (cd "stow/$group" && stow --no-folding --simulate --restow --target="$troot" "$name") 2>&1 || true )
+    out=$(printf '%s\n' "$out" | grep -v 'in simulation mode so not modifying filesystem' | grep -v '^[[:space:]]*$' || true)
+    if [ -n "$out" ]; then
+      bad "$group/$name: conflict"
+      while IFS= read -r l; do note "$l"; done <<<"$out"
+    else
+      ok "$group/$name clean"
+    fi
+  done
+done < <(stow_groups)
+
+# --- 3. shell scripts -------------------------------------------------------
+# All tracked *.sh, plus shebang'd scripts under bin/ (doctor/drift et al carry
+# no extension) — detected by shebang so the list stays source-of-truth-driven.
+hdr "Shell scripts"
+if have shellcheck; then linter="shellcheck"; else linter="bash -n (install shellcheck for real linting)"; warn "shellcheck not installed — falling back to 'bash -n' syntax check only"; fi
+info "using: $linter"
+declare -A shseen=()
+shlist=()
+while IFS= read -r -d '' f; do shseen[$f]=1; shlist+=("$f"); done < <(git ls-files -z -- '*.sh')
+while IFS= read -r -d '' f; do
+  [ -n "${shseen[$f]:-}" ] && continue
+  IFS= read -r first <"$f" || true
+  case "$first" in \#!*sh*) shlist+=("$f") ;; esac
+done < <(git ls-files -z -- 'bin/*')
+for f in "${shlist[@]}"; do
+  if have shellcheck; then
+    if out=$(shellcheck -f gcc "$f" 2>&1); then ok "$f"; else bad "$f"; while IFS= read -r l; do note "$l"; done <<<"$out"; fi
+  else
+    if err=$(bash -n "$f" 2>&1); then ok "$f"; else bad "$f"; note "$err"; fi
+  fi
+done
+
+# --- 4. JSON parse ----------------------------------------------------------
+hdr "JSON parse (jq)"
+json_bad=0 json_n=0
+while IFS= read -r -d '' f; do
+  json_n=$((json_n + 1))
+  if ! err=$(jq -e . "$f" >/dev/null 2>&1); then bad "invalid JSON: $f"; note "$(jq . "$f" 2>&1 | head -1)"; json_bad=$((json_bad + 1)); fi
+done < <(git ls-files -z -- '*.json')
+[ "$json_bad" -eq 0 ] && ok "all $json_n tracked *.json parse"
+
+# --- 5. Lua parse -----------------------------------------------------------
+hdr "Lua parse"
+if have luacheck; then lua_tool="luacheck"; else lua_tool="luac -p (install luacheck for real linting)"; fi
+info "using: $lua_tool"
+lua_bad=0 lua_n=0
+while IFS= read -r -d '' f; do
+  lua_n=$((lua_n + 1))
+  if have luacheck; then
+    if out=$(luacheck --no-color -q "$f" 2>&1); then :; else bad "$f"; while IFS= read -r l; do note "$l"; done <<<"$out"; lua_bad=$((lua_bad + 1)); fi
+  else
+    if ! err=$(luac -p "$f" 2>&1); then bad "$f"; note "$err"; lua_bad=$((lua_bad + 1)); fi
+  fi
+done < <(git ls-files -z -- '*.lua')
+[ "$lua_bad" -eq 0 ] && ok "all $lua_n tracked *.lua parse"
+
+# --- 6. runtime-churn dirty report ------------------------------------------
+# Files apps rewrite at runtime (settings/colors/state json). Dirty here is
+# usually noise, not a change to commit — flag it so it isn't staged blindly.
+hdr "Runtime-churn files"
+churn_dirty=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if [ -n "$(git status --porcelain -- "$f")" ]; then warn "dirty (runtime-rewritten — commit only if intentional): $f"; churn_dirty=$((churn_dirty + 1)); fi
+done < <(git ls-files -- '*settings.json' '*colors.json' '*state.json')
+[ "$churn_dirty" -eq 0 ] && ok "no known runtime-churn files are dirty"
+
+# --- summary ----------------------------------------------------------------
+printf '\n%s——%s %s%d failed%s, %s%d warnings%s\n' \
+  "$C_DIM" "$C_RST" \
+  "$([ "$FAILS" -gt 0 ] && printf '%s' "$C_RED" || printf '%s' "$C_GRN")" "$FAILS" "$C_RST" \
+  "$C_YEL" "$WARNS" "$C_RST"
+[ "$FAILS" -eq 0 ]
