@@ -179,11 +179,20 @@ AGENTS.md says "before committing, grep for secrets" — convention again.
 - Optional: a GitHub Action running gitleaks + shellcheck + `stow --simulate`
   on push, since the repo is published.
 
-### 7. A `Makefile`/`justfile` as the single entrypoint
+### 7. A `Makefile`/`justfile` as the single entrypoint — ✅ DONE (2026-07-02)
 
 `make stow`, `make check` (doctor), `make drift`. Self-documenting surface for
 "what can I do in this repo" — today that knowledge lives only in prose. Targets
 just call `bin/*` and `stow/stow-*.sh`; no logic in make itself.
+
+**Outcome.** `Makefile` at repo root. `.DEFAULT_GOAL := help`, so bare `make`
+prints a target index generated from `## ` comments (no hand-maintained list).
+Targets: `stow` → `stow-home.sh`, `stow-root` → `sudo stow-root.sh`, `check` →
+`bin/doctor`, `fix` → `bin/doctor --fix`, `drift` → `bin/drift` — all one-line
+wrappers, zero logic in make. Docs: README's new-machine steps and "Tasks"
+section, plus AGENTS.md, now lead with `make` (raw scripts kept as the
+underlying reference). Chose Makefile over justfile — no extra dependency
+(added `make` to the new-machine pacman line).
 
 ---
 
@@ -293,8 +302,8 @@ flagged in the P1.1 correction has since been fixed by the user.)
    then restow + verify.
 2. **P1.2 + P1.3** de-vendor plugins, gitignore `colors.json` (kills ~90% of
    future diff noise).
-3. **P2.7** + ✅ **P2.4** Makefile + doctor (the enforcement spine); fold
-   shellcheck fixes in as they surface. *(doctor done; Makefile pending.)*
+3. ✅ **P2.7** + ✅ **P2.4** Makefile + doctor (the enforcement spine); fold
+   shellcheck fixes in as they surface. *(both done.)*
 4. **P2.6** hooks; ✅ **P2.5** + **P3.8** drift + package manifest (one feature —
    drift needs the manifest to be useful). *(drift done, degrades gracefully
    until the P3.8 manifest lands; then its package-diff activates.)*
