@@ -16,6 +16,6 @@ cd "$dir"
 for pkg in */; do
   [ -d "$pkg" ] || continue
   name="${pkg%/}"
-  stow --restow --target="/" "$name"
+  stow --no-folding --restow --target="/" "$name"
   echo "stowed: root/$name -> /"
 done

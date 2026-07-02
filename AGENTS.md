@@ -63,11 +63,20 @@ symlinked into place with **GNU Stow**.
 - Adding a target group = create `stow/<group>/` **and** a matching
   `stow/stow-<group>.sh`; the script name mirrors the dir name, so the pairing
   is self-evident.
-- After stowing, `~/.config/<app>` is a **symlink into this repo**. Editing the
-  file in `~/.config` and editing it here are the same file — there is no copy
-  step and no sync to run.
-- Stow everything with `./stow/stow-home.sh` (and `sudo ./stow/stow-root.sh`
-  once `stow/root/` has packages).
+- After stowing, `~/.config/<app>` is a **real directory** whose *files* are
+  symlinks into this repo. Editing the file in `~/.config` and editing it here
+  are the same file — there is no copy step and no sync to run.
+- **Why `--no-folding`.** The driver scripts pass `--no-folding` to stow. Without
+  it, stow "folds": if a target dir doesn't exist, it symlinks the whole
+  *package directory* into the repo instead of creating a real dir with
+  per-file symlinks. Then anything else that writes a sibling into that dir
+  (another app, a system tool) writes *physically into the repo* under the wrong
+  package — state landing inside version control by accident. `--no-folding`
+  forces real dirs + per-file symlinks, so foreign writes always hit the real
+  filesystem, never the repo. This makes the `claude` package's "never track
+  state" gitignore promise correct by construction rather than by accident of
+  which dir happened to exist first.
+- Stow everything with `./stow/stow-home.sh` and `sudo ./stow/stow-root.sh`.
 
 ### Source-of-truth rule (important)
 

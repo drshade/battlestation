@@ -12,6 +12,6 @@ cd "$(dirname "$0")/home"
 for pkg in */; do
   [ -d "$pkg" ] || continue
   name="${pkg%/}"
-  stow --restow --target="$HOME" "$name"
+  stow --no-folding --restow --target="$HOME" "$name"
   echo "stowed: home/$name -> $HOME"
 done
