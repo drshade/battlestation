@@ -195,6 +195,11 @@ live in `setup/README.md`.
   launcher uses `appLauncher.terminalCommand` in its `settings.json`. These are
   independent — changing one does not change the other. We standardized on
   **kitty** in both (see `setup/debloat-00-removing-alacritty.md`).
+- **Third-party Noctalia plugins are untracked by design.** `.gitignore`
+  default-denies `…/noctalia/plugins/`; the plugin manager owns that code and
+  the tracked `plugins.json` is the registry. `!` opt-ins exist only for
+  plugins whose source of truth is this repo — see
+  `setup/noctalia-00-plugins.md` before adding one.
 - **Secrets / machine-local state** must never be committed. See `.gitignore`
   (e.g. `fish_variables`). When adding a package, scan it for tokens/state
   before staging.

@@ -44,6 +44,18 @@ stow/home/code/.config/Code - OSS/**
 !stow/home/code/.config/Code - OSS/User/
 !stow/home/code/.config/Code - OSS/User/settings.json
 
+# Noctalia plugins (~/.config/noctalia/plugins): default-deny — plugin code is
+# installed/updated by Noctalia's plugin manager, and plugins.json (tracked)
+# already records the source + enabled set; tracking third-party code here
+# duplicates upstream and churns on every update. Opt-ins are only for plugins
+# whose source of truth IS this repo. keybind-cheatsheet is temporary — it
+# carries two patches pending upstream (see setup/noctalia-00-plugins.md).
+stow/home/noctalia/.config/noctalia/plugins/*
+!stow/home/noctalia/.config/noctalia/plugins/claude-workspaces/
+!stow/home/noctalia/.config/noctalia/plugins/claude-workspaces/**
+!stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/
+!stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/**
+
 # Local scratch space — not shipped in a published repo
 scratch/
 
