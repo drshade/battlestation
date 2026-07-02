@@ -308,9 +308,17 @@ Item {
   // whose session file is gone. Dotfiles are the writer's in-flight temp files;
   // skip them. Emits ONE JSON array:
   //   [{sid, ws, status, kind, title, agents: [{id, type, description, started}]}]
-  // with `started` = the marker's mtime (subagent start time).
+  // with `started` = the marker's mtime (= start, then refreshed by the agent's
+  // own tool-call hooks). GC backstop: a subagent killed mid-turn fires NO
+  // SubagentStop (verified 2026-07-02), so its marker would leak until session
+  // end — sweep markers untouched for GC_S whose transcript is missing or
+  // equally frozen. Live agents refresh their marker every tool call; one GC'd
+  // during a >30min permission wait is recreated by the next call (self-healing).
   readonly property string pollScript: `
-import os, json
+import os, json, glob, time
+now = time.time()
+GC_S = 30 * 60
+PROJ = os.path.expanduser("~/.claude/projects")
 d = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "claude-ws")
 try:
     names = os.listdir(d)
@@ -349,9 +357,15 @@ for sid in sorted(sess):
     for aid in marks.pop(sid, []):
         mp = p + "." + aid
         try:
+            started = os.stat(mp).st_mtime
+            if now - started > GC_S:
+                tps = glob.glob(PROJ + "/*/" + sid + "/subagents/agent-" + aid + ".jsonl")
+                if not tps or now - os.stat(tps[0]).st_mtime > GC_S:
+                    rm(mp)
+                    continue
             with open(mp) as f:
                 m = json.load(f)
-            agents.append({"id": aid, "type": str(m.get("type") or ""), "description": str(m.get("description") or ""), "started": int(os.stat(mp).st_mtime)})
+            agents.append({"id": aid, "type": str(m.get("type") or ""), "description": str(m.get("description") or ""), "started": int(started)})
         except Exception:
             pass
     agents.sort(key=lambda a: (a["started"], a["id"]))

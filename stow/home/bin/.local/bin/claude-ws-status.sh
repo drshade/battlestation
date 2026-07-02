@@ -122,6 +122,45 @@ sid=$(printf '%s\n' "$meta" | sed -n 1p)
 tpath=$(printf '%s\n' "$meta" | sed -n 2p)
 [ -n "$sid" ] || sid="default"
 
+# Subagent-context events carry agent_id (Pre/PostToolUse fired from inside a
+# subagent). Refresh that agent marker: bump mtime if it exists, recreate it
+# if missing. This is what makes the widget poller's kill-leak GC safe — a
+# LIVE agent keeps its marker fresh via its own tool calls (and a marker GC'd
+# during a long permission wait comes back on the next call), while a killed
+# agent (which fires no SubagentStop — verified) goes permanently stale.
+printf '%s' "$input" | python3 -c '
+import sys, os, json
+base = sys.argv[1]
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+aid = str(d.get("agent_id") or "")
+if not aid:
+    sys.exit(0)
+sid = str(d.get("session_id") or "") or "default"
+mp = os.path.join(base, sid + "." + aid)
+if os.path.exists(mp):
+    os.utime(mp)
+    sys.exit(0)
+atype = str(d.get("agent_type") or "")
+desc = ""
+tp = str(d.get("transcript_path") or "")
+if tp:
+    meta = os.path.join(os.path.dirname(tp), sid, "subagents", "agent-" + aid + ".meta.json")
+    try:
+        with open(meta) as f:
+            m = json.load(f)
+        desc = str(m.get("description") or "")
+        atype = atype or str(m.get("agentType") or "")
+    except Exception:
+        pass
+tmp = os.path.join(base, "." + sid + "." + aid + ".tmp")
+with open(tmp, "w") as f:
+    json.dump({"type": atype, "description": desc}, f)
+os.replace(tmp, mp)
+' "$dir" 2>/dev/null
+
 if [ "$verb" = "clear" ]; then
   rm -f "$dir/$sid" "$dir/$sid".*
   exit 0
