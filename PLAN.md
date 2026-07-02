@@ -54,7 +54,7 @@ user (removed the stale link, re-ran `stow-root.sh`, restarted keyd). Doctor
 (P2.4) must still scan root targets for dangling links — this exact failure was
 invisible for two days.
 
-### 2. Stop vendoring third-party Noctalia plugins
+### 2. Stop vendoring third-party Noctalia plugins — ✅ DONE (2026-07-02)
 
 **Problem.** `keybind-cheatsheet`, `polkit-agent`, `screen-toolkit` (~2.5 MB,
 ~110 files, incl. 20 i18n files each, `preview.png`s, a compiled `.qsb` shader)
@@ -88,6 +88,18 @@ a giant meaningless diff — the same churn class as `colors.json`, ×100.
   covers: after stowing, install enabled plugins via Noctalia's plugin manager.
 - Longer term consider promoting `claude-workspaces` to its own repo and
   treating this copy as an install location.
+
+**Outcome (commit 5290828).** `.gitignore` default-denies `…/noctalia/plugins/*`
+with `!` opt-ins for `claude-workspaces` and (temporarily) `keybind-cheatsheet`;
+`polkit-agent` + `screen-toolkit` untracked via `git rm --cached` (67 files,
+−10,220 lines; files stay on disk so the running shell is untouched).
+`setup/noctalia-00-plugins.md` records the fresh-machine reinstall step and the
+de-vendor trigger with the real PR links (noctalia-dev/legacy-v4-plugins #937,
+#938 — upstream is `legacy-v4-plugins`, not `noctalia-plugins` as first
+assumed). AGENTS.md gained an untracked-by-design gotcha. `make check` green
+after (tracked JSON 55→29; screen-toolkit's ~13 scripts left the lint scope —
+**shellcheck is now safe to install**). Longer-term `claude-workspaces`
+promotion stays open above.
 
 ### 3. Runtime-rewritten configs: replace the "avoid `git add -A`" convention with tooling
 
@@ -323,8 +335,8 @@ flagged in the P1.1 correction has since been fixed by the user.)
 
 1. ✅ **P1.1** `--no-folding` (small diff, removes the standing hazard) —
    then restow + verify.
-2. **P1.2 + P1.3** de-vendor plugins, gitignore `colors.json` (kills ~90% of
-   future diff noise).
+2. ✅ **P1.2** de-vendor plugins *(done)*; **P1.3** gitignore `colors.json`
+   still open.
 3. ✅ **P2.7** + ✅ **P2.4** Makefile + doctor (the enforcement spine); fold
    shellcheck fixes in as they surface. *(both done.)*
 4. **P2.6** hooks; ✅ **P2.5** + **P3.8** drift + package manifest (one feature —
