@@ -434,7 +434,7 @@ paragraph to the source-of-truth rule, citing this exact miss. SKILL.md: intro,
 stow/*/`, naming both `home/` and `root/`. (The live `/etc/keyd` dangling link
 flagged in the P1.1 correction has since been fixed by the user.)
 
-### 14. Known follow-ups already on record
+### 14. Known follow-ups already on record — ✅ DONE (2026-07-02)
 
 - Flatpak apps missing from the launcher (README TODO) — likely `XDG_DATA_DIRS`
   not including `/var/lib/flatpak/exports/share` in the uwsm/Hyprland env;
@@ -442,6 +442,27 @@ flagged in the P1.1 correction has since been fixed by the user.)
 - Keyboard repeat/delay (README TODO) — one line in `input.lua`.
 - GTK (`gtk-3.0/4.0`), Qt (`qt5ct/qt6ct`, `xsettingsd`) theming is unmanaged —
   odd gap for a theming-centric setup; adopt once themes are deliberate.
+
+**Outcome.** All three resolved, two of them by disproving the hypothesis:
+- *Flatpak/launcher*: `XDG_DATA_DIRS` was never missing (verified in the
+  running quickshell env) — Quickshell scans desktop entries once at shell
+  start, so newly installed apps need a shell restart. AGENTS.md gotcha.
+- *Keyboard repeat*: `repeat_rate = 60`, `repeat_delay = 220` in `input.lua`
+  (defaults 25/600), tuned live.
+- *GTK/Qt theming*: investigated — **not a gap**. Every piece is provided by
+  the `cachyos-hypr-noctalia` meta (declared in the baseline manifest):
+  `adw-gtk-theme`/`breeze-icons` arrive as dependencies, the config files
+  (`gtk-3.0/settings.ini`, `qt6ct.conf`, `xsettingsd.conf`, `uwsm/env` cursor
+  exports) and the Bibata cursor theme ship via its `/etc/skel`; the user's
+  actual choices (scheme + wallpaper) live in Noctalia's **tracked**
+  `settings.json`, from which Noctalia regenerates the GTK4/Qt color files at
+  runtime. Rebuild story: install-packages → stow → Noctalia regenerates.
+  Nothing to adopt. Spin-off: `bin/drift` is now **skel-aware** — unmanaged
+  `~/.config` entries identical to `/etc/skel` are suppressed as untouched
+  installer defaults (count shown), while diverged ones are annotated
+  "differs from skel" (today's divergences are Noctalia's generated color
+  files in gtk-3.0/4.0/qt6ct, the locally-removed cachyos-hello autostart,
+  and Noctalia-written kdeglobals colors — all expected).
 
 ---
 

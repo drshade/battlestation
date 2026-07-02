@@ -44,19 +44,42 @@ managed() {
 
 is_noise() { local n=$1 x; for x in "${NOISE[@]}"; do [ "$x" = "$n" ] && return 0; done; return 1; }
 
+# Skel comparison: an unmanaged entry that is byte-identical to its
+# /etc/skel counterpart is just the installer's untouched default — not
+# customization to adopt, so suppress it (with a count). The moment it
+# DIVERGES from skel it reappears, annotated — that divergence is exactly
+# the "you changed something; adopt or revert it" signal. (Verified
+# 2026-07-02: CachyOS ships gtk/qt6ct/xsettingsd/uwsm/… via skel, owned by
+# cachyos-hypr-noctalia — see PLAN P4.14.)
+# Returns: 0 = identical to skel, 1 = no skel counterpart, 2 = diverged.
+skel_state() {
+  local rel=$1
+  local skel="/etc/skel/$rel" mine="$HOME/$rel"
+  [ -e "$skel" ] || return 1
+  diff -rq "$skel" "$mine" >/dev/null 2>&1 && return 0
+  return 2
+}
+
 # --- 1. unmanaged ~/.config -------------------------------------------------
 hdr "Unmanaged in ~/.config"
-suppressed=0 unmanaged=0
+suppressed=0 unmanaged=0 skel_same=0
 for e in "$HOME"/.config/*; do
   [ -e "$e" ] || continue
   n=$(basename "$e")
   if is_noise "$n"; then suppressed=$((suppressed + 1)); continue; fi
   if managed "$e"; then continue; fi
+  skel_state ".config/$n" && { skel_same=$((skel_same + 1)); continue; }
+  st=$?
   [ -d "$e" ] && kind="dir" || kind="file"
-  info "$n ($kind)"
+  if [ "$st" -eq 2 ]; then
+    info "$n ($kind, differs from skel)"
+  else
+    info "$n ($kind)"
+  fi
   unmanaged=$((unmanaged + 1))
 done
-[ "$unmanaged" -eq 0 ] && ok "nothing unmanaged (outside the noise filter)"
+[ "$unmanaged" -eq 0 ] && ok "nothing unmanaged (outside the noise/skel filters)"
+[ "$skel_same" -gt 0 ] && info "($skel_same untouched installer defaults suppressed: identical to /etc/skel)"
 [ "$suppressed" -gt 0 ] && info "($suppressed suppressed by the noise filter: ${NOISE[*]})"
 
 # --- 2. unmanaged ~/.local/share/applications -------------------------------
