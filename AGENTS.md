@@ -184,6 +184,13 @@ live in `setup/README.md`.
   is written by the running shell. Editing it on disk works, but if Noctalia is
   running it may overwrite your edit on its next settings-write. After editing,
   reload Noctalia (or log out/in) and re-verify with `grep`.
+- **Noctalia only scans apps (and plugin code) at shell start.** Quickshell's
+  desktop-entry service reads `XDG_DATA_DIRS`' `applications/` dirs once — a
+  newly installed app (pacman or flatpak) won't appear in the launcher until
+  the shell restarts (`Hyper+Backspace`). Same for edits to installed plugin
+  files: its file watcher covers Noctalia's own config, not the plugins dir.
+  The environment is NOT the problem — uwsm already exports the flatpak dirs
+  in `XDG_DATA_DIRS` (verified against the running process, 2026-07-02).
 - **hyprlock is the locker on every normal path.** Suspend, idle, and the
   Noctalia session menu (`Hyper+L`) all end at **hyprlock**, driven by
   **hypridle** (`hypr/.config/hypr/hyprlock.conf` + `hypridle.conf`, started from

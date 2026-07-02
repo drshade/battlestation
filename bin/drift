@@ -26,6 +26,9 @@ done
 # Runtime/state/cache dirs that are never dotfiles — a report FILTER, not a
 # correctness mechanism. Edit freely; suppressed count is always shown.
 NOISE=(pulse dconf session mozilla gh ghc uv nautilus)
+# Same idea for ~/.local/share/applications: entries written by tools about
+# themselves, not configuration to adopt.
+APP_NOISE=(claude-code-url-handler.desktop)
 
 printf '%sbattlestation drift%s  %s(read-only report)%s\n' "$C_BLD" "$C_RST" "$C_DIM" "$C_RST"
 
@@ -60,13 +63,18 @@ done
 hdr "Unmanaged desktop entries (~/.local/share/applications)"
 appdir="$HOME/.local/share/applications"
 if [ -d "$appdir" ]; then
-  app_unmanaged=0
+  app_unmanaged=0 app_noise=0
   for f in "$appdir"/*.desktop; do
     [ -e "$f" ] || continue
     if [ -L "$f" ]; then case "$(readlink -f "$f" 2>/dev/null)" in "$REPO"/*) continue ;; esac; fi
-    info "$(basename "$f")"
+    b=$(basename "$f")
+    skip=0
+    for n in "${APP_NOISE[@]}"; do [ "$b" = "$n" ] && { skip=1; break; }; done
+    if [ "$skip" -eq 1 ]; then app_noise=$((app_noise + 1)); continue; fi
+    info "$b"
     app_unmanaged=$((app_unmanaged + 1))
   done
+  [ "$app_noise" -gt 0 ] && info "($app_noise suppressed by the noise filter)"
   [ "$app_unmanaged" -eq 0 ] && ok "none"
 else
   info "no $appdir"

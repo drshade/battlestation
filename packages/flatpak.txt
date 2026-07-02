@@ -5,6 +5,7 @@
 # `flatpak list --app --columns=application`; `make install-packages`
 # applies it with `flatpak install`.
 #
-# Deliberately empty: no flatpak apps are installed (flatpak itself is
-# declared in pacman.txt). If an app shows up in `make drift`, either
-# declare it here (with a why) or uninstall it.
+# If an app shows up in `make drift`, either declare it here (with a why)
+# or uninstall it. (flatpak itself is declared in pacman.txt.)
+
+com.bambulab.BambuStudio       # 3D print slicer (Bambu Lab)
