@@ -143,19 +143,20 @@ installed here → fallbacks active, with a warn nudging to install them. Verifi
 against a synthetic broken link (fail + exit 1, then `--fix` repaired). Docs:
 AGENTS.md verify-habit + README "Checking the repo" now point here.
 
-**Review follow-ups (2026-07-02, verified in code — small fixes pending):**
-- `bin/lib.sh` has no shebang and no `# shellcheck shell=bash` directive — the
-  moment shellcheck is installed (which doctor itself nudges), `make check`
-  fails on lib.sh with SC2148. Add the directive. Ordering: de-vendor the
-  screen-toolkit scripts (P1.2) *before* installing shellcheck, or check will
-  also fail on ~13 third-party scripts.
-- JSON check uses `jq -e .`, which exits 1 on *valid* JSON whose top-level
-  value is `null`/`false` — use `jq empty` instead. (Same line: the `err=`
-  capture is dead — both redirects discard output.)
-- Churn glob (check 6) misses `plugins.json` — Noctalia rewrites it when a
-  plugin is installed/toggled; add it to the patterns.
-- `stow_groups` (lib.sh) silently assumes `$HOME` for an unknown group name —
-  warn instead of guessing.
+**Review follow-ups — ✅ resolved (2026-07-02, commit d17baa3):**
+- `bin/lib.sh` now carries `# shellcheck shell=bash` (no shebang by design;
+  without the directive, installing shellcheck — which doctor itself nudges —
+  would fail `make check` with SC2148).
+- JSON check uses `jq empty` (not `jq -e .`, which false-failed valid
+  top-level `null`/`false`) and captures stderr in one invocation.
+- Churn glob gained `*plugins.json` (Noctalia rewrites the plugin registry).
+- `stow_groups` warns on **stderr** and skips an unknown group instead of
+  silently assuming `$HOME` (stdout is machine-parsed; guessing a target root
+  that `--fix` would restow into is worse than refusing).
+- Verified post-fix: `make check` 0 failed; `null`-bodied JSON passes,
+  malformed JSON fails with the captured error.
+- Still standing: de-vendor screen-toolkit's scripts (P1.2) *before*
+  installing shellcheck, or check will fail on ~13 third-party scripts.
 
 ### 5. `bin/drift` — make the "living repo" claim inspectable — ✅ DONE (2026-07-02)
 
