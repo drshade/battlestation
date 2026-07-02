@@ -54,6 +54,19 @@ symlinked into place with **GNU Stow**.
   `~/.local/bin/` (on `PATH`) — so no package reaches into another's tree.
   Callers still reference it as `$HOME/.local/bin/<name>` rather than a bare
   name: hook/exec environments don't always inherit a full `PATH`.
+- **bsctl owns stateful protocols; shell owns glue and recovery.** `ctl/` (a
+  Rust crate, repo-tooling namespace like `bin/`) builds `~/.local/bin/bsctl`
+  via `make build`. Logic that maintains shared state across multiple
+  consumers or is hot-path/JSON-heavy belongs there (currently the whole
+  claude-ws protocol: `bsctl hook` for the Claude Code hooks, `bsctl poll`
+  for the widget; `claude-ws-status.sh` is kept as the executable reference +
+  rollback during the trial). Plain system glue stays shell — and anything
+  that must work **when the system is broken** (`restart_crashed_lock.sh`,
+  `displays-on.sh`) stays shell *as policy*: a recovery path must never
+  depend on a build artifact. bsctl is the one deployed artifact that is
+  built rather than symlinked, so it can go stale against its source —
+  doctor verifies freshness (fails when tracked `ctl/` files are newer than
+  the binary) and `make fix` rebuilds.
 - Everything inside a target group is a package, **by construction** — there is
   no ignore-list. The driver scripts sit at the `stow/` module root, never
   inside a group, so they are never stowable. Project meta (`README.md`,

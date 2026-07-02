@@ -9,7 +9,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh waiting",
+            "command": "$HOME/.local/bin/bsctl hook waiting",
             "type": "command"
           }
         ]
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh thinking",
+            "command": "$HOME/.local/bin/bsctl hook thinking",
             "type": "command"
           }
         ],
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh thinking",
+            "command": "$HOME/.local/bin/bsctl hook thinking",
             "type": "command"
           }
         ],
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh tooling",
+            "command": "$HOME/.local/bin/bsctl hook tooling",
             "type": "command"
           }
         ],
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh clear",
+            "command": "$HOME/.local/bin/bsctl hook clear",
             "type": "command"
           }
         ]
@@ -67,7 +67,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh waiting",
+            "command": "$HOME/.local/bin/bsctl hook waiting",
             "type": "command"
           }
         ]
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh waiting",
+            "command": "$HOME/.local/bin/bsctl hook waiting",
             "type": "command"
           }
         ]
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh agent-start",
+            "command": "$HOME/.local/bin/bsctl hook agent-start",
             "type": "command"
           }
         ]
@@ -100,7 +100,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh agent-stop",
+            "command": "$HOME/.local/bin/bsctl hook agent-stop",
             "type": "command"
           }
         ]
@@ -111,7 +111,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/claude-ws-status.sh thinking",
+            "command": "$HOME/.local/bin/bsctl hook thinking",
             "type": "command"
           }
         ]

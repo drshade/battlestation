@@ -62,6 +62,9 @@ stow/home/noctalia/.config/noctalia/plugins/*
 !stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/
 !stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/**
 
+# Rust build output (ctl/): cargo-generated, never tracked
+ctl/target/
+
 # Local scratch space — not shipped in a published repo
 scratch/
 

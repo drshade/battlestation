@@ -15,6 +15,7 @@ battlestation/
 │   ├── stow-home.sh       #   stow home/ into $HOME      (run as you)
 │   └── stow-root.sh       #   stow root/ into /          (run with sudo)
 ├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + aur/flatpak
+├── ctl/                   # bsctl (Rust): claude-ws protocol binary — `make build` → ~/.local/bin/bsctl
 ├── setup/                 # reproducible per-topic setup notes (never stowed)
 ├── AGENTS.md              # how to work in this repo (read this first)
 └── README.md
@@ -60,6 +61,7 @@ for f in bin/filters/*; do git config "filter.${f##*/}.clean" "$f"; done
                  # one-time: activate the git clean filters (repo-local config)
 git config core.hooksPath .githooks
                  # one-time: activate the tracked git hooks (pre-commit secret scan)
+make build       # build + install bsctl (needs the rust toolchain: rustup)
 make check       # verify everything linked correctly
 ```
 
@@ -78,6 +80,7 @@ content). Git config is repo-local, so neither can ship with the clone;
 make                   # list all targets
 make stow              # stow home packages into $HOME
 make install-packages  # install everything packages/*.txt declares (bin/install-packages)
+make build             # compile bsctl (ctl/) and install to ~/.local/bin (bin/build)
 make check             # verify deployment + parse/lint (read-only; bin/doctor)
 make fix               # repair: restow + install clean-filter config (bin/doctor --fix)
 make drift             # what the machine has that the repo doesn't manage (bin/drift)

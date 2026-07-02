@@ -5,7 +5,7 @@
 # source of truth and `make` stays a discoverable index of what you can do.
 
 .DEFAULT_GOAL := help
-.PHONY: help stow stow-root install-packages check fix drift
+.PHONY: help stow stow-root install-packages build check fix drift
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) \
@@ -19,6 +19,9 @@ stow-root: ## Stow root packages into / (prompts for sudo)
 
 install-packages: ## Install everything packages/*.txt declares (prompts for sudo)
 	@./bin/install-packages
+
+build: ## Build bsctl (ctl/) and install it to ~/.local/bin (bin/build)
+	@./bin/build
 
 check: ## Verify deployment + parse/lint — read-only (bin/doctor)
 	@./bin/doctor

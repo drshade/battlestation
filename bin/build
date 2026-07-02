@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# build — compile bsctl (ctl/) and install it into ~/.local/bin.
+#
+# Release build via cargo; installed with plain install(1), NOT `cargo
+# install` — that would strew registry metadata under ~/.local. The binary
+# lands on PATH next to the stowed scripts; consumers (hooks/widgets) opt in
+# by calling it, so installing it changes nothing until they do.
+set -euo pipefail
+
+self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
+# shellcheck source=bin/lib.sh
+. "$BIN/lib.sh"
+cd "$REPO"
+
+for a in "${@:-}"; do
+  case "$a" in
+    -h|--help) awk 'NR>1{ if(/^#/){sub(/^# ?/,"");print} else exit }' "$self"; exit 0 ;;
+    "") ;;
+    *) echo "build: unknown argument: $a (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+printf '%sbattlestation build%s\n' "$C_BLD" "$C_RST"
+
+hdr "cargo build (release)"
+if ! have cargo; then
+  bad "cargo not found — install the rust toolchain first"
+  exit 1
+fi
+cargo build --release --manifest-path ctl/Cargo.toml
+ok "built ctl/target/release/bsctl"
+
+hdr "install"
+dest="$HOME/.local/bin/bsctl"
+install -Dm755 ctl/target/release/bsctl "$dest"
+ok "installed $dest ($(du -h "$dest" | cut -f1))"

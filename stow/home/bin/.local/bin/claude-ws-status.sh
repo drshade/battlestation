@@ -1,4 +1,10 @@
 #!/usr/bin/env sh
+# SUPERSEDED (2026-07-03, trial): consumers now call `bsctl hook <verb>` —
+# the Rust port in ctl/ — instead of this script. Kept as the executable
+# protocol reference and the instant rollback path (repoint the hook commands
+# in claude settings.json back here). Behavior parity is pinned by ctl's
+# test suite; if the protocol changes, change BOTH or retire this file.
+#
 # Report THIS Claude Code instance's status for the Noctalia claude-workspaces
 # widget. State lives as small JSON files in one flat dir:
 #

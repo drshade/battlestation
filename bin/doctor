@@ -10,8 +10,9 @@
 # shell + JSON + Lua parse/lint, a runtime-churn dirty-file report (with
 # phantom stat-staleness detection on clean-filtered files), the git
 # clean-filter wiring (.gitattributes ↔ bin/filters/ ↔ repo-local config),
-# the git-hook wiring (.githooks/ ↔ core.hooksPath), and that every tracked
-# *.example has its real per-machine sibling deployed.
+# the git-hook wiring (.githooks/ ↔ core.hooksPath), that every tracked
+# *.example has its real per-machine sibling deployed, and that the deployed
+# bsctl binary is not stale against the tracked ctl/ crate.
 set -euo pipefail
 
 self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
@@ -79,6 +80,18 @@ if [ "$FIX" -eq 1 ]; then
      [ "$(git config --get core.hooksPath || true)" != ".githooks" ]; then
     git config core.hooksPath .githooks
     info "installed git config core.hooksPath = .githooks"
+  fi
+  # Rebuild bsctl if the deployed binary is missing/stale (check 10). Skipped
+  # without cargo — the check below will still fail and name the remedy.
+  if [ -n "$(git ls-files -- 'ctl/')" ] && have cargo; then
+    bsctl_bin="$HOME/.local/bin/bsctl"
+    rebuild=0
+    if [ ! -x "$bsctl_bin" ]; then rebuild=1; else
+      while IFS= read -r -d '' f; do
+        [ "$f" -nt "$bsctl_bin" ] && { rebuild=1; break; }
+      done < <(git ls-files -z -- 'ctl/')
+    fi
+    if [ "$rebuild" -eq 1 ]; then ./bin/build; fi
   fi
 fi
 
@@ -323,6 +336,32 @@ while IFS= read -r -d '' ex; do
   fi
 done < <(git ls-files -z -- '*.example')
 [ "$ex_n" -eq 0 ] && info "no tracked *.example files"
+
+# --- 10. bsctl binary (ctl/) --------------------------------------------------
+# The one deployed artifact that is BUILT, not symlinked: ~/.local/bin/bsctl
+# from the tracked ctl/ crate. A binary can silently go stale against its
+# source — the drift class stow's symlinks make impossible — so verify it
+# exists and is newer than every tracked ctl/ file ('make build' rebuilds;
+# --fix runs it when cargo is available).
+hdr "bsctl binary (ctl/)"
+if [ -z "$(git ls-files -- 'ctl/')" ]; then
+  info "no tracked ctl/ crate — nothing to build"
+else
+  bsctl_bin="$HOME/.local/bin/bsctl"
+  if [ ! -x "$bsctl_bin" ]; then
+    bad "$bsctl_bin missing — consumers (claude hooks, widget poll) are broken; run 'make build'"
+  else
+    bsctl_stale=""
+    while IFS= read -r -d '' f; do
+      [ "$f" -nt "$bsctl_bin" ] && { bsctl_stale=$f; break; }
+    done < <(git ls-files -z -- 'ctl/')
+    if [ -n "$bsctl_stale" ]; then
+      bad "$bsctl_bin is stale ($bsctl_stale is newer) — run 'make build'"
+    else
+      ok "$bsctl_bin up to date vs tracked ctl/ sources"
+    fi
+  fi
+fi
 
 # --- summary ----------------------------------------------------------------
 printf '\n%s——%s %s%d failed%s, %s%d warnings%s\n' \

@@ -301,84 +301,17 @@ Item {
     onTriggered: if (!poller.running)
       poller.running = true
   }
-  // One flat pass over the claude-ws state dir (claude-ws-status.sh documents the
-  // protocol: `<sid>` session JSON + `<sid>.<agent_id>` running-subagent markers).
-  // Self-cleaning: a session file whose pid is dead OR that doesn't parse (legacy
-  // tab-separated format) is deleted along with its markers, as are orphan markers
-  // whose session file is gone. Dotfiles are the writer's in-flight temp files;
-  // skip them. Emits ONE JSON array:
+  // The poll side lives in bsctl (repo: ctl/src/poll.rs) — the Rust binary that
+  // also implements the hook side, so the whole claude-ws protocol has one home
+  // (file formats: claude-ws-status.sh header). `bsctl poll` does one flat pass
+  // over the state dir, self-cleaning (dead-pid sessions, orphan markers, and
+  // kill-leaked stale markers via the transcript-frozen GC), and emits ONE JSON
+  // array line:
   //   [{sid, ws, status, kind, title, agents: [{id, type, description, started}]}]
-  // with `started` = the marker's mtime (= start, then refreshed by the agent's
-  // own tool-call hooks). GC backstop: a subagent killed mid-turn fires NO
-  // SubagentStop (verified 2026-07-02), so its marker would leak until session
-  // end — sweep markers untouched for GC_S whose transcript is missing or
-  // equally frozen. Live agents refresh their marker every tool call; one GC'd
-  // during a >30min permission wait is recreated by the next call (self-healing).
-  readonly property string pollScript: `
-import os, json, glob, time
-now = time.time()
-GC_S = 30 * 60
-PROJ = os.path.expanduser("~/.claude/projects")
-d = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "claude-ws")
-try:
-    names = os.listdir(d)
-except OSError:
-    names = []
-sess = []
-marks = {}
-for n in names:
-    if n.startswith(".") or n == "debug.log":
-        continue
-    if "." in n:
-        sid, aid = n.split(".", 1)
-        marks.setdefault(sid, []).append(aid)
-    else:
-        sess.append(n)
-def rm(p):
-    try:
-        os.unlink(p)
-    except OSError:
-        pass
-out = []
-for sid in sorted(sess):
-    p = os.path.join(d, sid)
-    try:
-        with open(p) as f:
-            rec = json.load(f)
-        ok = os.path.exists("/proc/%d" % int(rec["pid"]))
-    except Exception:
-        ok = False
-    if not ok:
-        rm(p)
-        for aid in marks.pop(sid, []):
-            rm(p + "." + aid)
-        continue
-    agents = []
-    for aid in marks.pop(sid, []):
-        mp = p + "." + aid
-        try:
-            started = os.stat(mp).st_mtime
-            if now - started > GC_S:
-                tps = glob.glob(PROJ + "/*/" + sid + "/subagents/agent-" + aid + ".jsonl")
-                if not tps or now - os.stat(tps[0]).st_mtime > GC_S:
-                    rm(mp)
-                    continue
-            with open(mp) as f:
-                m = json.load(f)
-            agents.append({"id": aid, "type": str(m.get("type") or ""), "description": str(m.get("description") or ""), "started": int(started)})
-        except Exception:
-            pass
-    agents.sort(key=lambda a: (a["started"], a["id"]))
-    out.append({"sid": sid, "ws": rec.get("ws"), "status": str(rec.get("status") or ""), "kind": str(rec.get("kind") or "claude"), "title": str(rec.get("title") or ""), "agents": agents})
-for sid in marks:
-    for aid in marks[sid]:
-        rm(os.path.join(d, sid + "." + aid))
-print(json.dumps(out))
-`
 
   Process {
     id: poller
-    command: ["python3", "-c", root.pollScript]
+    command: [Quickshell.env("HOME") + "/.local/bin/bsctl", "poll"]
     stdout: StdioCollector {
       onStreamFinished: {
         var recs;
