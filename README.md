@@ -58,13 +58,17 @@ make stow        # your configs -> $HOME
 make stow-root   # system configs -> /   (prompts for sudo)
 for f in bin/filters/*; do git config "filter.${f##*/}.clean" "$f"; done
                  # one-time: activate the git clean filters (repo-local config)
+git config core.hooksPath .githooks
+                 # one-time: activate the tracked git hooks (pre-commit secret scan)
 make check       # verify everything linked correctly
 ```
 
 The filter line registers each tracked `bin/filters/<name>` script as the clean
 command for its `filter=<name>` entry in `.gitattributes` (they hide runtime
-churn in app-rewritten configs — see AGENTS.md). Git config is repo-local, so
-this can't ship with the clone; `make fix` performs the same registration.
+churn in app-rewritten configs — see AGENTS.md); the hooksPath line activates
+the tracked hooks in `.githooks/` (a pre-commit secret scan over staged
+content). Git config is repo-local, so neither can ship with the clone;
+`make fix` performs both registrations.
 
 ## Tasks
 

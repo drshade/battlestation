@@ -235,7 +235,7 @@ mixed dir like `~/.config/systemd/` counts as managed via the kdeconnect wants
 link, and unmanaged siblings inside it won't surface. Acceptable heuristic;
 documented here so nobody mistakes drift's silence for full coverage.
 
-### 6. Enforced secret hygiene
+### 6. Enforced secret hygiene — ✅ DONE (2026-07-02)
 
 AGENTS.md says "before committing, grep for secrets" — convention again.
 - Track hooks in-repo: `.githooks/pre-commit` + one-time
@@ -244,6 +244,24 @@ AGENTS.md says "before committing, grep for secrets" — convention again.
   the churn-file guard from P1.3.
 - Optional: a GitHub Action running gitleaks + shellcheck + `stow --simulate`
   on push, since the repo is published.
+
+**Outcome.** `.githooks/pre-commit` (tracked, bash, sources `bin/lib.sh`):
+gitleaks over staged content only (`gitleaks git --staged --no-banner --redact
+--verbose`, with subcommand-probe fallback to the pre-8.19 `protect` form);
+when gitleaks is absent, a mechanized version of AGENTS.md's grep runs instead
+(suspicious staged filenames + credential-shaped staged blobs via `git grep
+--cached`) with a nudge to install. Findings exit 1; `--no-verify` documented
+as the emergency bypass. `gitleaks` added to packages/pacman.txt and installed.
+Wiring enforced like the clean filters: doctor check 8 fails on wrong/unset
+`core.hooksPath` or a non-executable tracked hook, warns if gitleaks missing;
+`--fix` installs the config; doctor's shell-lint now also covers shebang'd
+`.githooks/*`. Verified end-to-end including a REAL `git commit` with a
+planted AWS-shaped key — blocked through the actual hooksPath chain, redacted
+finding, exit 1. The churn-guard sub-item was already superseded by P1.3's
+clean filter; the GitHub Action remains an optional future nicety. Notable:
+gitleaks allowlists AWS's documentation key (`AKIAIOSFODNN7EXAMPLE`) — don't
+test with it — and has no generic-password rule, so the grep fallback isn't
+strictly weaker, just different.
 
 ### 7. A `Makefile`/`justfile` as the single entrypoint — ✅ DONE (2026-07-02)
 
@@ -435,9 +453,9 @@ flagged in the P1.1 correction has since been fixed by the user.)
    settings.json clean filter *(all of P1 now done)*.
 3. ✅ **P2.7** + ✅ **P2.4** Makefile + doctor (the enforcement spine); fold
    shellcheck fixes in as they surface. *(both done.)*
-4. **P2.6** hooks; ✅ **P2.5** + ✅ **P3.8** drift + package manifest (one
-   feature — drift needs the manifest to be useful). *(both done; the
-   package-diff is live.)*
+4. ✅ **P2.6** hooks; ✅ **P2.5** + ✅ **P3.8** drift + package manifest (one
+   feature — drift needs the manifest to be useful). *(all done; the
+   package-diff is live and pre-commit is enforced.)*
 5. ✅ **P3.9**, ✅ **P3.10**, ✅ **P4.11** *(done — one parallel-agent batch,
    2026-07-02)*; P4.14 follow-ups remain.
 

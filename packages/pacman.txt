@@ -17,6 +17,7 @@
 stow                           # deploys stow/ (README new-machine steps)
 github-cli                     # gh — setup/sshkeys-02-install-gh.md
 shellcheck                     # bin/doctor shell linting
+gitleaks                       # pre-commit secret scan (.githooks/pre-commit)
 
 # --- documented in setup/ notes ------------------------------------------
 code                           # setup/deps-00-vscode.md

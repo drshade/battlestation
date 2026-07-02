@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# pre-commit — block secrets from entering history. Tracked here and activated
+# by repo-local `git config core.hooksPath .githooks` (README new-machine
+# steps; doctor verifies the wiring, `make fix` installs it).
+#
+# Scans STAGED content only — never history, never the worktree — so it stays
+# fast and exits immediately when nothing is staged. Primary scanner:
+# gitleaks. Fallback when gitleaks is absent: AGENTS.md's manual secret grep,
+# mechanized — suspicious names in the staged file list plus
+# credential-shaped patterns in the staged blobs.
+#
+# Findings block the commit (exit 1). Emergency bypass:
+# `git commit --no-verify` — then scrub the secret before pushing.
+set -euo pipefail
+
+REPO=$(git rev-parse --show-toplevel)
+# shellcheck source=bin/lib.sh
+. "$REPO/bin/lib.sh"
+cd "$REPO"
+
+# Staged files whose content can introduce a secret (deletions cannot).
+# An initial commit has no HEAD — diff against the empty tree instead.
+against=$(git rev-parse --verify -q HEAD || git hash-object -t tree /dev/null)
+staged=()
+while IFS= read -r -d '' f; do staged+=("$f"); done \
+  < <(git diff --cached --name-only --diff-filter=ACMR -z "$against")
+[ "${#staged[@]}" -eq 0 ] && exit 0
+
+bypass_note() { note "emergency bypass: git commit --no-verify (then scrub the secret before pushing)"; }
+
+if have gitleaks; then
+  # The CLI changed at v8.19: `gitleaks git --staged` replaced
+  # `gitleaks protect --staged`. Probe the modern subcommand rather than
+  # parsing the version string.
+  if gitleaks git --help >/dev/null 2>&1; then
+    gl=(gitleaks git --staged)
+  else
+    gl=(gitleaks protect --staged)
+  fi
+  out=$("${gl[@]}" --no-banner --redact --verbose 2>&1) && exit 0
+  [ -n "$out" ] && printf '%s\n' "$out"
+  bad "gitleaks flagged the staged changes (findings above, values redacted)"
+  bypass_note
+  exit 1
+fi
+
+warn "gitleaks not installed — using a weaker built-in grep (install: sudo pacman -S gitleaks; declared in packages/pacman.txt)"
+
+# 1. Suspicious *names* in the staged file list (AGENTS.md's manual check).
+name_re='token|secret|fish_variables'
+for f in "${staged[@]}"; do
+  if grep -qiE "$name_re" <<<"$f"; then
+    bad "suspicious staged filename: $f"
+  fi
+done
+
+# 2. Credential-shaped *content* in the staged blobs (--cached = the index,
+#    i.e. exactly what would be committed). Assignment-shaped keyword pattern
+#    so prose merely mentioning "secret" doesn't trip it, plus well-known
+#    token formats (AWS, PEM, GitHub, Slack).
+content_re="(password|passwd|secret|token|api[_-]?key)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[^[:space:]\"']{6,}"
+content_re+="|AKIA[0-9A-Z]{16}"
+content_re+="|-----BEGIN ([A-Z]+ )?PRIVATE KEY-----"
+content_re+="|ghp_[A-Za-z0-9]{36}"
+content_re+="|xox[baprs]-[0-9A-Za-z-]{10,}"
+staged_ps=()
+for f in "${staged[@]}"; do staged_ps+=(":(literal)$f"); done
+if hits=$(git grep --cached -nIiE "$content_re" -- "${staged_ps[@]}"); then
+  bad "credential-shaped staged content:"
+  while IFS= read -r l; do note "$l"; done <<<"$hits"
+fi
+
+if [ "$FAILS" -gt 0 ]; then
+  bypass_note
+  exit 1
+fi
+exit 0

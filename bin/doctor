@@ -2,15 +2,16 @@
 # doctor — verify the repo is correctly deployed and internally sound.
 #
 # Read-only by default (dry-run). Pass --fix to repair: restow home packages
-# and install the repo-local clean-filter git config; that is the ONLY mode
-# that mutates anything.
+# and install the repo-local clean-filter + hooksPath git config; that is the
+# ONLY mode that mutates anything.
 #
 # Checks: stow linkage (every tracked leaf is a symlink resolving into this
 # repo — catches missing/shadowed/dangling links), a clean `stow --simulate`,
 # shell + JSON + Lua parse/lint, a runtime-churn dirty-file report (with
 # phantom stat-staleness detection on clean-filtered files), the git
 # clean-filter wiring (.gitattributes ↔ bin/filters/ ↔ repo-local config),
-# and that every tracked *.example has its real per-machine sibling deployed.
+# the git-hook wiring (.githooks/ ↔ core.hooksPath), and that every tracked
+# *.example has its real per-machine sibling deployed.
 set -euo pipefail
 
 self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
@@ -71,6 +72,14 @@ if [ "$FIX" -eq 1 ]; then
   if [ "${#filt_fixed_paths[@]}" -gt 0 ]; then
     note "if 'git status' still shows stale churn, renormalize: git add --renormalize ${filt_fixed_paths[*]}"
   fi
+  # Activate tracked git hooks: core.hooksPath is repo-local config, the same
+  # unclonable problem as the filter config above. Repo-local only — nothing
+  # outside .git/config.
+  if [ -n "$(git ls-files -- '.githooks/')" ] &&
+     [ "$(git config --get core.hooksPath || true)" != ".githooks" ]; then
+    git config core.hooksPath .githooks
+    info "installed git config core.hooksPath = .githooks"
+  fi
 fi
 
 # --- 1. stow linkage: every tracked leaf is a live symlink into the repo -----
@@ -125,8 +134,9 @@ while IFS=$'\t' read -r group troot; do
 done < <(stow_groups)
 
 # --- 3. shell scripts -------------------------------------------------------
-# All tracked *.sh, plus shebang'd scripts under bin/ (doctor/drift et al carry
-# no extension) — detected by shebang so the list stays source-of-truth-driven.
+# All tracked *.sh, plus shebang'd scripts under bin/ and .githooks/ (doctor,
+# drift, the git hooks et al carry no extension) — detected by shebang so the
+# list stays source-of-truth-driven.
 hdr "Shell scripts"
 if have shellcheck; then linter="shellcheck"; else linter="bash -n (install shellcheck for real linting)"; warn "shellcheck not installed — falling back to 'bash -n' syntax check only"; fi
 info "using: $linter"
@@ -137,7 +147,7 @@ while IFS= read -r -d '' f; do
   [ -n "${shseen[$f]:-}" ] && continue
   IFS= read -r first <"$f" || true
   case "$first" in \#!*sh*) shlist+=("$f") ;; esac
-done < <(git ls-files -z -- 'bin/*')
+done < <(git ls-files -z -- 'bin/*' '.githooks/*')
 for f in "${shlist[@]}"; do
   if have shellcheck; then
     # -x: follow sourced files (bin/lib.sh via the scripts' source= directives)
@@ -241,7 +251,37 @@ for fscript in bin/filters/*; do
   [ -n "${filt_paths[$fname]:-}" ] || warn "dead filter script — no tracked .gitattributes entry references it: $fscript"
 done
 
-# --- 8. example files: does the real (per-machine) sibling exist? ------------
+# --- 8. git hooks -------------------------------------------------------------
+# Tracked hooks live in .githooks/ (e.g. the pre-commit secret scan); they
+# only run if repo-local `git config core.hooksPath .githooks` points there —
+# the same unclonable-config problem as the clean filters above, so a fresh
+# clone silently loses enforcement (--fix installs the config). Git silently
+# skips a hook it cannot exec, so a non-executable tracked hook fails too.
+hdr "Git hooks (.githooks)"
+hook_files=()
+while IFS= read -r -d '' f; do hook_files+=("$f"); done < <(git ls-files -z -- '.githooks/')
+if [ "${#hook_files[@]}" -eq 0 ]; then
+  info "no tracked .githooks/ — no hooks to wire"
+else
+  hooks_path=$(git config --get core.hooksPath || true)
+  if [ "$hooks_path" = ".githooks" ]; then
+    ok "core.hooksPath = .githooks"
+  else
+    bad "core.hooksPath is ${hooks_path:-unset}${hooks_path:+ (want .githooks)} — tracked hooks never run ('make fix' sets it)"
+  fi
+  for f in "${hook_files[@]}"; do
+    if [ -x "$f" ]; then
+      ok "$f (executable)"
+    else
+      bad "$f is not executable — git silently skips it; chmod +x"
+    fi
+  done
+  if ! have gitleaks; then
+    warn "gitleaks not installed — .githooks/pre-commit falls back to a weaker grep (declared in packages/pacman.txt)"
+  fi
+fi
+
+# --- 9. example files: does the real (per-machine) sibling exist? ------------
 # Tracked *.example files are templates for gitignored per-machine siblings
 # (the sibling is unversioned truth, so its absence is silent — e.g. a fresh
 # machine missing monitors_local.lua). For a stow-managed example the real

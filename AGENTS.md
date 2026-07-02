@@ -262,7 +262,11 @@ live in `setup/README.md`.
   declared in `packages/*.txt`. Drift is normal; run it to keep it *visible*.
   Triage package drift line by line — declare (with a `# why`) or remove —
   never by pasting a `pacman -Qqe` dump into the manifest.
-- Before committing, sanity-check nothing secret was staged:
+- Secret hygiene is enforced by `.githooks/pre-commit` — gitleaks over the
+  staged content (a mechanized grep when gitleaks is absent), blocking the
+  commit on findings. It only runs via repo-local `git config core.hooksPath
+  .githooks`; doctor verifies that wiring, `make fix` installs it. The
+  underlying manual check it mechanizes:
   `git ls-files | grep -iE 'token|secret|fish_variables'`.
 - **Runtime-rewritten tracked files are handled by mechanism, not vigilance.**
   When an app churns a file at runtime, classify it and wire up the matching
