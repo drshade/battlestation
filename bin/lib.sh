@@ -1,5 +1,6 @@
 # Shared helpers for battlestation repo tooling (bin/*).
 # Sourced, never executed directly. Bash.
+# shellcheck shell=bash  # no shebang by design; tells shellcheck the dialect (SC2148).
 
 # Colour only on a real terminal and when not disabled.
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -22,8 +23,11 @@ note() { printf '      %s%s%s\n' "$C_DIM" "$1" "$C_RST"; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Iterate the stow groups: prints "<group> <target-root>" per line.
+# Iterate the stow groups: prints "<group>\t<target-root>" per line on stdout.
 # home -> $HOME, root -> / . Skips the driver scripts (stow/stow-*.sh).
+# An unknown group has no target mapping, so it's warned about on stderr and
+# skipped (no stdout line): callers machine-parse stdout, and guessing a target
+# root that --fix would then restow into is worse than refusing.
 stow_groups() {
   local d name
   for d in "$REPO"/stow/*/; do
@@ -32,7 +36,7 @@ stow_groups() {
     case "$name" in
       home) printf '%s\t%s\n' home "$HOME" ;;
       root) printf '%s\t%s\n' root / ;;
-      *)    printf '%s\t%s\n' "$name" "$HOME" ;;  # unknown group: assume $HOME
+      *)    printf "stow_groups: unknown group '%s' — no target mapping, skipping (add it in bin/lib.sh)\n" "$name" >&2 ;;
     esac
   done
 }

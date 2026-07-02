@@ -114,7 +114,7 @@ hdr "JSON parse (jq)"
 json_bad=0 json_n=0
 while IFS= read -r -d '' f; do
   json_n=$((json_n + 1))
-  if ! err=$(jq -e . "$f" >/dev/null 2>&1); then bad "invalid JSON: $f"; note "$(jq . "$f" 2>&1 | head -1)"; json_bad=$((json_bad + 1)); fi
+  if ! err=$(jq empty "$f" 2>&1 >/dev/null); then bad "invalid JSON: $f"; note "$(printf '%s' "$err" | head -1)"; json_bad=$((json_bad + 1)); fi
 done < <(git ls-files -z -- '*.json')
 [ "$json_bad" -eq 0 ] && ok "all $json_n tracked *.json parse"
 
@@ -141,7 +141,7 @@ churn_dirty=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   if [ -n "$(git status --porcelain -- "$f")" ]; then warn "dirty (runtime-rewritten — commit only if intentional): $f"; churn_dirty=$((churn_dirty + 1)); fi
-done < <(git ls-files -- '*settings.json' '*colors.json' '*state.json')
+done < <(git ls-files -- '*settings.json' '*colors.json' '*state.json' '*plugins.json')
 [ "$churn_dirty" -eq 0 ] && ok "no known runtime-churn files are dirty"
 
 # --- summary ----------------------------------------------------------------
