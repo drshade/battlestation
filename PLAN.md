@@ -2,7 +2,9 @@
 
 A working document: findings from a structural review (2026-07-02), ordered by
 priority. Each item states the problem, the evidence, and the proposed fix.
-Delete items as they land (this is a plan, not a changelog).
+Completed items are marked ✅ DONE and keep a short **Outcome** note — these
+have proven useful for post-hoc review; prune an item only once its outcome
+holds no remaining lessons.
 
 ## What already works — don't disturb
 
@@ -141,6 +143,20 @@ installed here → fallbacks active, with a warn nudging to install them. Verifi
 against a synthetic broken link (fail + exit 1, then `--fix` repaired). Docs:
 AGENTS.md verify-habit + README "Checking the repo" now point here.
 
+**Review follow-ups (2026-07-02, verified in code — small fixes pending):**
+- `bin/lib.sh` has no shebang and no `# shellcheck shell=bash` directive — the
+  moment shellcheck is installed (which doctor itself nudges), `make check`
+  fails on lib.sh with SC2148. Add the directive. Ordering: de-vendor the
+  screen-toolkit scripts (P1.2) *before* installing shellcheck, or check will
+  also fail on ~13 third-party scripts.
+- JSON check uses `jq -e .`, which exits 1 on *valid* JSON whose top-level
+  value is `null`/`false` — use `jq empty` instead. (Same line: the `err=`
+  capture is dead — both redirects discard output.)
+- Churn glob (check 6) misses `plugins.json` — Noctalia rewrites it when a
+  plugin is installed/toggled; add it to the patterns.
+- `stow_groups` (lib.sh) silently assumes `$HOME` for an unknown group name —
+  warn instead of guessing.
+
 ### 5. `bin/drift` — make the "living repo" claim inspectable — ✅ DONE (2026-07-02)
 
 The repo's stated purpose is *visibility* of the machine's customisation, but
@@ -168,6 +184,12 @@ pure runtime dirs and reports the suppressed count); (2) unmanaged
 with a P3.8 pointer** since no manifest exists yet. Always exits 0. Note: `/etc`
 enumeration intentionally omitted (all system-managed → pure noise); root-side
 drift surfaces instead as dangling links in `bin/doctor`.
+
+**Review note (2026-07-02):** `managed()` marks a whole `~/.config` entry
+managed if *any* nested symlink (≤4 levels) resolves into the repo — so a
+mixed dir like `~/.config/systemd/` counts as managed via the kdeconnect wants
+link, and unmanaged siblings inside it won't surface. Acceptable heuristic;
+documented here so nobody mistakes drift's silence for full coverage.
 
 ### 6. Enforced secret hygiene
 
