@@ -23,6 +23,10 @@ Packages are organized by **target root**: `stow/<target-group>/<package>/`, and
 each group has its own driver script `stow/stow-<group>.sh`. A package's internal
 layout mirrors its target, e.g. `stow/home/<pkg>/.config/<pkg>/` → `~/.config/<pkg>/`.
 
+Scripts consumed by more than one package live in the `bin` package
+(`stow/home/bin/.local/bin/` → `~/.local/bin/`, which is on `PATH`); helper
+scripts used by a single package stay inside that package.
+
 Why the `home/` layer at all? Because the only thing that varies between dotfiles
 is the *destination root* — everything under your home dir (`~/.config`,
 `~/.local`, `~/.bashrc`) is the **same** target and needs no split. A genuinely

@@ -35,7 +35,7 @@ Item {
   }
   Process {
     id: usageProc
-    command: ["sh", "-c", "$HOME/.config/hypr/scripts/claude-usage.sh"]
+    command: ["sh", "-c", "$HOME/.local/bin/claude-usage.sh"]
     stdout: StdioCollector {
       onStreamFinished: {
         try {

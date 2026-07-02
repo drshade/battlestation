@@ -7,8 +7,10 @@
 #
 # Checks: stow linkage (every tracked leaf is a symlink resolving into this
 # repo — catches missing/shadowed/dangling links), a clean `stow --simulate`,
-# shell + JSON + Lua parse/lint, a runtime-churn dirty-file report, and the
-# git clean-filter wiring (.gitattributes ↔ bin/filters/ ↔ repo-local config).
+# shell + JSON + Lua parse/lint, a runtime-churn dirty-file report (with
+# phantom stat-staleness detection on clean-filtered files), the git
+# clean-filter wiring (.gitattributes ↔ bin/filters/ ↔ repo-local config),
+# and that every tracked *.example has its real per-machine sibling deployed.
 set -euo pipefail
 
 self=$(readlink -f "$0"); BIN=$(dirname "$self"); REPO=$(dirname "$BIN")
@@ -172,13 +174,32 @@ done < <(git ls-files -z -- '*.lua')
 # --- 6. runtime-churn dirty report ------------------------------------------
 # Files apps rewrite at runtime (settings/colors/state json). Dirty here is
 # usually noise, not a change to commit — flag it so it isn't staged blindly.
+# Phantom churn: on a clean-filtered file, an app rewrite leaves a stale stat
+# fingerprint, so `git status` reports it modified even when the *filtered*
+# content matches the index (status never spawns external filters). Detect it
+# by comparing the filter-applied hash (git hash-object --path, read-only)
+# with the index blob: identical → informational only, not a warning.
 hdr "Runtime-churn files"
-churn_dirty=0
+churn_dirty=0 churn_phantom=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  if [ -n "$(git status --porcelain -- "$f")" ]; then warn "dirty (runtime-rewritten — commit only if intentional): $f"; churn_dirty=$((churn_dirty + 1)); fi
+  st=$(git status --porcelain -- "$f")
+  [ -n "$st" ] || continue
+  # Phantom requires BOTH: staged column clean (index == HEAD — anything
+  # staged is a real change awaiting commit, never mere stat-staleness) AND
+  # filtered worktree content identical to the index.
+  if [ "${st:0:1}" = " " ] && [ -f "$f" ] &&
+     [ "$(git hash-object --path "$f" -- "$f")" = "$(git rev-parse ":$f" 2>/dev/null || true)" ]; then
+    info "phantom churn (stat-stale only; content identical after filtering) — 'git add $f' refreshes"
+    churn_phantom=$((churn_phantom + 1))
+  else
+    warn "dirty (runtime-rewritten — commit only if intentional): $f"
+    churn_dirty=$((churn_dirty + 1))
+  fi
 done < <(git ls-files -- '*settings.json' '*colors.json' '*state.json' '*plugins.json')
-[ "$churn_dirty" -eq 0 ] && ok "no known runtime-churn files are dirty"
+if [ "$churn_dirty" -eq 0 ]; then
+  if [ "$churn_phantom" -gt 0 ]; then ok "no real runtime-churn dirt (stat-staleness only, above)"; else ok "no known runtime-churn files are dirty"; fi
+fi
 
 # --- 7. git clean filters -----------------------------------------------------
 # Three parts share one name: .gitattributes declares filter=<name>, the
@@ -219,6 +240,49 @@ for fscript in bin/filters/*; do
   fname=$(basename "$fscript")
   [ -n "${filt_paths[$fname]:-}" ] || warn "dead filter script — no tracked .gitattributes entry references it: $fscript"
 done
+
+# --- 8. example files: does the real (per-machine) sibling exist? ------------
+# Tracked *.example files are templates for gitignored per-machine siblings
+# (the sibling is unversioned truth, so its absence is silent — e.g. a fresh
+# machine missing monitors_local.lua). For a stow-managed example the real
+# sibling must exist at the *deployed* target (group → target root, same
+# mapping as check 1); an example outside stow/ expects its sibling next to
+# it in the repo. Missing sibling is a warn, not a fail: the configs are
+# written to degrade gracefully without it.
+hdr "Example files (per-machine siblings)"
+declare -A ex_troot=()
+while IFS=$'\t' read -r exg extr; do
+  [ -n "$exg" ] || continue
+  ex_troot[$exg]=$extr
+done < <(stow_groups)
+ex_n=0
+while IFS= read -r -d '' ex; do
+  ex_n=$((ex_n + 1))
+  case "$ex" in
+    stow/*/*/*)
+      rest=${ex#stow/}
+      exg=${rest%%/*}
+      rest=${rest#"$exg"/}          # <pkg>/<rel>.example
+      rel=${rest#*/}                # <rel>.example
+      rel=${rel%.example}
+      if [ -z "${ex_troot[$exg]:-}" ]; then
+        warn "cannot map to a target (unknown stow group '$exg'): $ex"
+        continue
+      fi
+      case "$exg" in
+        root) ex_target="/$rel" ;;
+        *)    ex_target="${ex_troot[$exg]}/$rel" ;;
+      esac
+      ;;
+    *) ex_target="$REPO/${ex%.example}" ;;
+  esac
+  if [ -e "$ex_target" ]; then
+    ok "real sibling exists: $ex_target"
+  else
+    warn "per-machine file missing: $ex_target — copy $ex there and adjust"
+  fi
+done < <(git ls-files -z -- '*.example')
+[ "$ex_n" -eq 0 ] && info "no tracked *.example files"
 
 # --- summary ----------------------------------------------------------------
 printf '\n%s——%s %s%d failed%s, %s%d warnings%s\n' \

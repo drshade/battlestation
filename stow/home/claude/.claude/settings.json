@@ -9,7 +9,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
+            "command": "$HOME/.local/bin/claude-ws-status.sh orange",
             "type": "command"
           }
         ]
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
+            "command": "$HOME/.local/bin/claude-ws-status.sh green",
             "type": "command"
           }
         ],
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
+            "command": "$HOME/.local/bin/claude-ws-status.sh green",
             "type": "command"
           }
         ],
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh purple",
+            "command": "$HOME/.local/bin/claude-ws-status.sh purple",
             "type": "command"
           }
         ],
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh clear",
+            "command": "$HOME/.local/bin/claude-ws-status.sh clear",
             "type": "command"
           }
         ]
@@ -67,7 +67,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
+            "command": "$HOME/.local/bin/claude-ws-status.sh orange",
             "type": "command"
           }
         ]
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh orange",
+            "command": "$HOME/.local/bin/claude-ws-status.sh orange",
             "type": "command"
           }
         ]
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.config/hypr/scripts/claude-ws-status.sh green",
+            "command": "$HOME/.local/bin/claude-ws-status.sh green",
             "type": "command"
           }
         ]

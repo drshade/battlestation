@@ -233,7 +233,7 @@ Item {
     draggingIndex = -1;
     // Persist via ws.sh so the file format has a single author shared with the
     // keybind side; the FileView below then reloads and re-resolves.
-    orderWriter.command = ["sh", "-c", "$HOME/.config/hypr/scripts/ws.sh set " + dragIds.join(" ")];
+    orderWriter.command = ["sh", "-c", "$HOME/.local/bin/ws.sh set " + dragIds.join(" ")];
     orderWriter.running = true;
     // Reflect the new order immediately so there's no flash before the reload.
     displayIds = dragIds.slice();

@@ -47,6 +47,13 @@ symlinked into place with **GNU Stow**.
 - Each directory inside a target group is a **package** whose internal layout
   mirrors that target. Example: `stow/home/<pkg>/.config/<pkg>/` →
   `~/.config/<pkg>/`.
+- **Scripts follow their consumers.** A helper used by a single package lives
+  inside that package (e.g. a hypr-only script under
+  `stow/home/hypr/.config/hypr/scripts/`). A script consumed by more than one
+  package goes in the `bin` package — `stow/home/bin/.local/bin/` →
+  `~/.local/bin/` (on `PATH`) — so no package reaches into another's tree.
+  Callers still reference it as `$HOME/.local/bin/<name>` rather than a bare
+  name: hook/exec environments don't always inherit a full `PATH`.
 - Everything inside a target group is a package, **by construction** — there is
   no ignore-list. The driver scripts sit at the `stow/` module root, never
   inside a group, so they are never stowable. Project meta (`README.md`,
@@ -119,11 +126,22 @@ live in `setup/README.md`.
 - `setup/` lives **outside `stow/`**, so it is structurally not a stow package
   and its markdown can never be symlinked into `~/.config`.
 - **A note documents only what stowing the repo does NOT already do** — i.e.
-  out-of-band system actions (`pacman -S/-Rns`, enabling a service). Config
+  out-of-band system actions (`pacman -S/-Rns`, enabling a *system* service). Config
   changes are applied by `stow`, so they live in the tracked files + git history,
   never as runbook steps. (The first `removing-alacritty` note wrongly listed
   "edit settings.json" and "git rm the package" — both already reproduced by the
   repo — leaving only `pacman -Rns alacritty` as a real step.)
+- **Repo-owned systemd *user* services are enabled by stow, never by runbook.**
+  A package that owns a user unit also carries the enablement as a relative
+  `.wants` symlink beside it — `.config/systemd/user/<target>.wants/<unit> ->
+  ../<unit>` (see `stow/home/kdeconnect`, `stow/home/ssh-agent`) — so stowing
+  *is* enabling, correct by construction. Runbook notes must not contain
+  `systemctl --user enable` for a repo-owned unit; the only out-of-band steps
+  are `systemctl --user daemon-reload` + a first `start` (or a re-login).
+  Gotcha: stow refuses absolute symlinks inside packages, so a wants link
+  cannot point at a vendor unit under `/usr/lib` — bring the unit into the
+  package (author it, like kdeconnect, or track a copy of the vendor unit,
+  like ssh-agent) and point the wants link at that.
 - Keep dotfiles themselves free of transient/setup notes — that knowledge goes
   in `setup/`, not in config-file comments.
 - It is a **runbook, not a changelog.** If a decision is reversed, update or

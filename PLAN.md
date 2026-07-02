@@ -277,13 +277,28 @@ the non-package steps (service enablement, key generation) and the reasoning —
 the *list* has one home. Seed the lists from the existing setup notes +
 `pacman -Qqe` triage.
 
-### 9. Standardize systemd user-service enablement
+### 9. Standardize systemd user-service enablement — ✅ DONE (2026-07-02)
 
 kdeconnect is enabled via a stow-managed `graphical-session.target.wants/`
 symlink (correct by construction — commit 687337c); ssh-agent is enabled via a
 `systemctl --user enable` runbook step. Two mechanisms for the same fact. Adopt
 the wants-symlink pattern for every user service this repo owns, and document it
 in AGENTS.md as *the* way; the runbook keeps only genuinely out-of-band actions.
+
+**Outcome.** Discoveries reshaped the mechanics: ssh-agent is **socket-activated**
+(`ssh-agent.socket` under `sockets.target.wants/`; the service stays `indirect`),
+and the old enablement pointed at the *vendor* unit in `/usr/lib` — which stow
+cannot reach (it refuses absolute symlinks in packages, and relative ones resolve
+from the repo). So the package now carries a tracked **copy** of the vendor
+socket unit (header documents the re-sync caveat — a deliberate
+one-source-of-truth trade) plus the relative wants link beside it, mirroring
+kdeconnect. Live swap verified: `systemctl --user disable` then restow;
+socket/service stayed active throughout, `ssh-add -l` still lists the key,
+`is-enabled` = enabled via the repo chain. AGENTS.md now states the rule
+(stow-managed `.wants` symlink beside the unit = THE way; runbooks never
+`systemctl --user enable` repo-owned units; only `daemon-reload` + first `start`
+are out-of-band) and both setup notes were rewritten — including kdeconnect's,
+whose `enable --now` step had been stale since 687337c.
 
 ### 10. Machine-local overlays are currently invisible
 
@@ -296,11 +311,23 @@ two gotcha entries. Options, in increasing weight:
   exists — don't build this speculatively.
 Pick (a) now; it also documents the expected schema.
 
+**Outcome.** (a) done: `monitors_local.lua.example` tracked beside the real
+file — header + schema docs (loaded via `pcall(require, "config.monitors_local")`,
+runs `hl.monitor({output, mode, position, scale})` per output), with this
+machine's three real monitor blocks kept as the working example, so the display
+config is effectively versioned again. Doctor gained **check 8**: every tracked
+`*.example` warns if its real sibling is missing at the *deployed* path (reuses
+check 1's group→target mapping; warn not fail — configs degrade gracefully).
+Doctor's churn check also now separates **phantom churn** (stat-stale only;
+filtered content identical to index — info + "git add refreshes" hint) from
+real dirt (warn). Review fix: phantom classification additionally requires the
+staged column clean — a staged real change must warn, never read as phantom.
+
 ---
 
 ## P4 — Hygiene
 
-### 11. Cross-cutting scripts live inside the hypr package
+### 11. Cross-cutting scripts live inside the hypr package — ✅ DONE (2026-07-02)
 
 `claude-ws-status.sh` (called from the **claude** package's hooks),
 `claude-usage.sh`, and `ws.sh` (shared with the **noctalia** claude-workspaces
@@ -309,6 +336,18 @@ internals, wired by absolute paths in `keybinds.lua` and `settings.json`.
 Add a `stow/home/bin/` package (`.local/bin/`, already on PATH) for scripts
 consumed by more than one package; hypr-only helpers stay put. Migrate the
 three above; update the referencing paths in the same commit.
+
+**Outcome.** `stow/home/bin/.local/bin/` created; the three scripts `git mv`'d
+(history preserved) and all 13 path references updated in the same change: 8
+claude hooks, `keybinds.lua`, and 3 QML call sites in the claude-workspaces
+plugin (explicit `$HOME/.local/bin/` kept — hook/exec envs don't always have
+full PATH). Restowed bin+hypr; `hyprctl reload` clean; all three scripts
+exercised live from the new location. Rule recorded in AGENTS.md ("scripts
+follow their consumers") + README layout note. Caveats: the running Noctalia
+holds the old `ws.sh` path in memory until the shell restarts (pill reorder /
+rename silently no-op till then — Quickshell's watcher doesn't cover the
+plugins dir); `~/.local/bin` pre-existed with unmanaged entries, which
+`--no-folding` coexists with fine.
 
 ### 12. Published-repo polish — ✅ DONE (2026-07-02)
 
@@ -373,7 +412,8 @@ flagged in the P1.1 correction has since been fixed by the user.)
 4. **P2.6** hooks; ✅ **P2.5** + **P3.8** drift + package manifest (one feature —
    drift needs the manifest to be useful). *(drift done, degrades gracefully
    until the P3.8 manifest lands; then its package-diff activates.)*
-5. **P3.9, P3.10, P4** as individual small commits.
+5. ✅ **P3.9**, ✅ **P3.10**, ✅ **P4.11** *(done — one parallel-agent batch,
+   2026-07-02)*; P4.14 follow-ups remain.
 
 Each step updates AGENTS.md/README in the same commit where it changes a rule
 (per principle #4).

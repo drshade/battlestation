@@ -1,0 +1,16 @@
+# Copy of openssh's /usr/lib/systemd/user/ssh-agent.socket. The repo owns this
+# unit so its enablement (sockets.target.wants/) can be a stow-managed relative
+# symlink — stow cannot deploy an absolute link to the vendor unit. Re-sync if
+# openssh changes the vendor unit.
+
+[Unit]
+ConditionEnvironment=!SSH_AGENT_PID
+Description=Socket for the OpenSSH key agent
+Documentation=man:ssh-agent(1)
+
+[Socket]
+ListenStream=%t/ssh-agent.socket
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

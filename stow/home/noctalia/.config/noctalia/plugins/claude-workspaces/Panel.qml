@@ -36,7 +36,7 @@ Item {
   function renameSubmit() {
     // Positional args keep the name opaque to the shell; ws.sh escapes it and
     // resets to the number when empty.
-    renameProc.command = ["sh", "-c", "$HOME/.config/hypr/scripts/ws.sh rename \"$1\" \"$2\"", "sh", String(wsId), renameInput.text];
+    renameProc.command = ["sh", "-c", "$HOME/.local/bin/ws.sh rename \"$1\" \"$2\"", "sh", String(wsId), renameInput.text];
     renameProc.running = true;
     close();
   }

@@ -1,0 +1,49 @@
+-- monitors_local.lua.example — template for the per-machine monitor overlay.
+--
+-- Copy to monitors_local.lua (same directory) and adjust for your outputs.
+-- The real monitors_local.lua is gitignored (per-machine truth, never
+-- committed); monitors.lua loads it with pcall(require,
+-- "config.monitors_local"), so it is a silent no-op when absent.
+--
+-- Schema: the file returns nothing — it runs for side effects, calling
+-- hl.monitor({...}) once per output to override the shared "highrr" default
+-- in monitors.lua. Fields (see https://wiki.hypr.land/Configuring/Basics/Monitors/):
+--   output   : connector ("eDP-1", "DP-1") or 'desc:<monitor description>'
+--              (stable across ports; find it with `hyprctl monitors`)
+--   mode     : "WxH@Hz" (e.g. "2880x1800@120"), or "highrr"/"preferred"
+--   position : "XxY" (e.g. "0x0") or "auto"
+--   scale    : number (e.g. 1.25) or "auto"
+--
+-- The values below are one machine's working config, kept as a concrete
+-- example of when pinning beats the "highrr" default.
+
+-- Laptop native panel: 2880x1800@120. The shared "highrr" default already
+-- resolves to this, but pin it explicitly so the mode and HiDPI scale are
+-- deterministic regardless of runtime DPMS/mode glitches.
+hl.monitor({
+    output    = "eDP-1",
+    mode      = "2880x1800@120",
+    position  = "0x0",
+    scale     = 1.25,
+})
+
+-- HP OMEN 34c ultrawide: native 3440x1440@100 (the shared "highrr" default
+-- would otherwise pick 1080p@120). Matched by description, not connector.
+hl.monitor({
+    output    = "desc:HP Inc. OMEN 34c",
+    mode      = "3440x1440@100",
+    position  = "auto",
+    scale     = "auto",
+})
+
+-- MSI G27CQ4 (work): native 2560x1440. The panel does 1440p@144, but the
+-- current USB-C DP-alt link is ~2-lane and prunes that mode, leaving 1440p@60
+-- (vs 1080p@120). "highrr" would pick the soft 1080p; pin native res instead.
+-- For 144Hz, use a direct DisplayPort cable or a 4-lane USB-C link, then bump
+-- this to 2560x1440@144.
+hl.monitor({
+    output    = "desc:Microstep MSI G27CQ4",
+    mode      = "2560x1440@60",
+    position  = "auto",
+    scale     = "auto",
+})
