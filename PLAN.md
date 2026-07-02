@@ -113,7 +113,7 @@ The repo has good rules and zero enforcement. One entrypoint + three small
 scripts close the gap. Keep them at `bin/` in the repo root (repo tooling, not
 stowable content — same reasoning as the driver scripts living outside groups).
 
-### 4. `bin/doctor` — verify the deployed state
+### 4. `bin/doctor` — verify the deployed state — ✅ DONE (2026-07-02)
 
 Checks, each a few lines:
 - every package in every group is actually stowed: for each leaf, target exists,
@@ -126,7 +126,22 @@ Checks, each a few lines:
   failing live);
 - known-churn dirty-file report (P1.3).
 
-### 5. `bin/drift` — make the "living repo" claim inspectable
+**Outcome.** `bin/doctor` (bash, sources `bin/lib.sh`). Read-only by default;
+`--fix` restows to repair (the only mutating mode — home auto, root prints the
+sudo command). Checks: (1) stow linkage per tracked leaf across **all** groups
+incl. root — catches missing / real-file-shadow / **dangling** (the keyd class,
+P1.1) / wrong-target links; (2) `stow --no-folding --simulate --restow` clean
+per package; (3) shell lint — `shellcheck` if present, else `bash -n`, over
+tracked `*.sh` **plus** shebang'd `bin/*` (so it lints itself); (4) `jq` every
+tracked `*.json`; (5) `luacheck` if present, else `luac -p`, every tracked
+`*.lua`; (6) runtime-churn report — dirty tracked `*settings.json`/`*colors.json`
+(source-of-truth-driven, no hardcoded list; caught today's `settings.json`).
+Exit non-zero on any fail; warnings don't fail. `shellcheck`/`luacheck` not
+installed here → fallbacks active, with a warn nudging to install them. Verified
+against a synthetic broken link (fail + exit 1, then `--fix` repaired). Docs:
+AGENTS.md verify-habit + README "Checking the repo" now point here.
+
+### 5. `bin/drift` — make the "living repo" claim inspectable — ✅ DONE (2026-07-02)
 
 The repo's stated purpose is *visibility* of the machine's customisation, but
 there is no way to see what the machine has that the repo doesn't:
@@ -140,6 +155,19 @@ there is no way to see what the machine has that the repo doesn't:
 Output is a triage list, not an error — drift is normal; invisible drift is the
 bug. (An in-script "known, deliberately unmanaged" list is acceptable here: it
 is a *report filter*, not a correctness mechanism.)
+
+**Outcome.** `bin/drift` (bash, read-only ALWAYS — no mutating mode by design;
+adopting a config / installing a package stays a deliberate manual step).
+Reports: (1) unmanaged `~/.config/*` — an entry is "managed" if it contains a
+symlink resolving into the repo (robust to any package→target mapping; correctly
+flags leftover `alacritty`, GTK/Qt theming, `teams-for-linux`, `uwsm`, and app
+state like `~/.config/kdeconnect`, while a small editable NOISE filter suppresses
+pure runtime dirs and reports the suppressed count); (2) unmanaged
+`~/.local/share/applications/*.desktop`; (3) package-manifest diff
+(`pacman -Qqe` / `-Qqm` / `flatpak` vs `packages/*.txt`) — **gracefully skips
+with a P3.8 pointer** since no manifest exists yet. Always exits 0. Note: `/etc`
+enumeration intentionally omitted (all system-managed → pure noise); root-side
+drift surfaces instead as dangling links in `bin/doctor`.
 
 ### 6. Enforced secret hygiene
 
@@ -265,10 +293,11 @@ flagged in the P1.1 correction has since been fixed by the user.)
    then restow + verify.
 2. **P1.2 + P1.3** de-vendor plugins, gitignore `colors.json` (kills ~90% of
    future diff noise).
-3. **P2.7 + P2.4** Makefile + doctor (the enforcement spine); fold shellcheck
-   fixes in as they surface.
-4. **P2.6** hooks; **P2.5 + P3.8** drift + package manifest (one feature —
-   drift needs the manifest to be useful).
+3. **P2.7** + ✅ **P2.4** Makefile + doctor (the enforcement spine); fold
+   shellcheck fixes in as they surface. *(doctor done; Makefile pending.)*
+4. **P2.6** hooks; ✅ **P2.5** + **P3.8** drift + package manifest (one feature —
+   drift needs the manifest to be useful). *(drift done, degrades gracefully
+   until the P3.8 manifest lands; then its package-diff activates.)*
 5. **P3.9, P3.10, P4** as individual small commits.
 
 Each step updates AGENTS.md/README in the same commit where it changes a rule
