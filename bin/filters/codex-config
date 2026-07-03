@@ -24,7 +24,11 @@
 import re
 import sys
 
-KEEP_ROOT = {"model", "model_reasoning_effort", "service_tier"}
+# model / model_reasoning_effort deliberately EXCLUDED: Codex persists the
+# session's model pick into them (observed live -- a UI model switch rewrote
+# both through the stow symlink), the same UI-managed-preference churn that
+# keeps `model` out of the claude settings whitelist.
+KEEP_ROOT = {"service_tier"}
 KEEP_SECTIONS = re.compile(r"^hooks($|[.\s\]])")  # [hooks], [[hooks.X]], ...
 
 HEADER = re.compile(r"^\s*\[\[?\s*([^]]*?)\s*\]\]?\s*(#.*)?$")

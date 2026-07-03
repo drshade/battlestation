@@ -1,5 +1,3 @@
-model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
 service_tier = "default"
 
 # battlestation-ws status hooks (see ctl/src/lib.rs for the protocol and
@@ -49,3 +47,29 @@ matcher = "*"
 [[hooks.SubagentStop.hooks]]
 type = "command"
 command = "$HOME/.local/bin/bsctl hook --kind codex agent-stop"
+
+[hooks.state]
+
+[hooks.state."/home/tom/.codex/config.toml:pre_tool_use:0:0"]
+trusted_hash = "sha256:5ec7dee63454411077aa5a9779c1c27f1c3f9034cecb7dfa9237b5ca91f515ff"
+
+[hooks.state."/home/tom/.codex/config.toml:permission_request:0:0"]
+trusted_hash = "sha256:defe6ab0562d73498349ecf33b0a7624b903a4c76ce5840bf9db4f5d8333345d"
+
+[hooks.state."/home/tom/.codex/config.toml:post_tool_use:0:0"]
+trusted_hash = "sha256:730c0f6c661d5cc1aba1526f78f583a51209fc2ed6a4a31e0160a56386d7c60b"
+
+[hooks.state."/home/tom/.codex/config.toml:session_start:0:0"]
+trusted_hash = "sha256:81dd2745e59b318f3c1394dbba9d9ba6ca96a45202c9beb09ce8e4d049a471fe"
+
+[hooks.state."/home/tom/.codex/config.toml:user_prompt_submit:0:0"]
+trusted_hash = "sha256:6e4a73411367fee468790d817db8c42db4b450b2764888de66b04a1f215635f2"
+
+[hooks.state."/home/tom/.codex/config.toml:subagent_start:0:0"]
+trusted_hash = "sha256:2245f19c8671d6f65415aa563ddcb1b48af7dbdda41da4ae70b97ef02ccf0ef7"
+
+[hooks.state."/home/tom/.codex/config.toml:subagent_stop:0:0"]
+trusted_hash = "sha256:8a26305732c66d4482af5575cab0beff00438b72dc6bf59d794c692874525845"
+
+[hooks.state."/home/tom/.codex/config.toml:stop:0:0"]
+trusted_hash = "sha256:d0583718890aed9cf96dda81e0ada468dde1963e67d58d6556838dcf1355877c"
