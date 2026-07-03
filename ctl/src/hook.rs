@@ -123,14 +123,15 @@ fn agent_stop(dir: &Path, input: &[u8]) {
 /// session's kind in the widget).
 fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str) {
     let d = proto::parse_payload(input);
-    // No session_id -> silent no-op. Falling back to a "default" session file
-    // here would FABRICATE a session: its pid would be whatever claude
+    // No session key -> silent no-op. Falling back to a "default" session
+    // file here would FABRICATE a session: its pid would be whatever claude
     // process is our ancestor, so the poller could never sweep it while that
     // process lives (observed live 2026-07-02 — a payload-less test
     // invocation planted a phantom bot on the bar). The "default" fallback
     // survives only in the marker names of agent-start/agent-stop, where an
-    // orphan is swept by the next poll.
-    let sid = proto::field(&d, "session_id");
+    // orphan is swept by the next poll. The key is session_id, or agy's
+    // camelCase conversationId (proto::session_key).
+    let sid = proto::session_key(&d);
     if sid.is_empty() {
         return;
     }

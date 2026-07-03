@@ -61,10 +61,23 @@ pub fn field_or(d: &Value, key: &str, default: &str) -> String {
 
 /// session_id with the scripts' fallback: falsy/missing -> "default".
 /// MARKER names only (agent-start/agent-stop) — the session-status verbs
-/// require an explicit session_id and no-op without one (see hook.rs), so a
+/// require an explicit session key and no-op without one (see hook.rs), so a
 /// "default" session file can never be fabricated.
 pub fn session_id(d: &Value) -> String {
     field_or(d, "session_id", "default")
+}
+
+/// The session-status verbs' session key: `session_id` (Claude Code, Codex),
+/// falling back to `conversationId` — Antigravity (`agy`) hook payloads are
+/// protojson camelCase and identify the session by conversationId only.
+/// "" when neither is present (hook.rs no-ops rather than fabricating).
+pub fn session_key(d: &Value) -> String {
+    let sid = field(d, "session_id");
+    if sid.is_empty() {
+        field(d, "conversationId")
+    } else {
+        sid
+    }
 }
 
 /// python-3 `round()`: exact halves go to the even integer (Rust's
@@ -292,6 +305,23 @@ mod tests {
         assert_eq!(session_id(&empty), "default");
         assert_eq!(field(&empty, "transcript_path"), "");
         assert_eq!(field_or(&empty, "kind", "claude"), "claude");
+    }
+
+    #[test]
+    fn session_key_falls_back_to_conversation_id() {
+        // Claude Code / Codex payloads: session_id wins.
+        let d: Value =
+            serde_json::from_str(r#"{"session_id":"s1","conversationId":"c1"}"#).unwrap();
+        assert_eq!(session_key(&d), "s1");
+        // agy payloads are protojson camelCase: conversationId only.
+        let agy: Value = serde_json::from_str(
+            r#"{"conversationId":"ec33ebf9-0cba-4100-8142-c61503f6c587","workspacePaths":["/w"],"modelName":"auto"}"#,
+        )
+        .unwrap();
+        assert_eq!(session_key(&agy), "ec33ebf9-0cba-4100-8142-c61503f6c587");
+        // neither -> "" -> hook.rs no-ops (never fabricates a session).
+        assert_eq!(session_key(&parse_payload(b"{}")), "");
+        assert_eq!(session_key(&parse_payload(b"junk")), "");
     }
 
     #[test]

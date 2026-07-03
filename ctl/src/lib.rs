@@ -65,12 +65,16 @@
 //! by clap):
 //! - `waiting`/`thinking`/`tooling` — (re)write the session file with that
 //!   status; events carrying an agent_id also refresh (or recreate/heal)
-//!   that subagent marker. A payload WITHOUT a session_id (empty/absent/bad
-//!   JSON) is a silent no-op for all four session verbs: falling back to a
-//!   "default" session file would fabricate a phantom session whose pid is
-//!   the caller's own claude ancestor, unsweepable while that process lives.
-//!   Only the marker names of agent-start/agent-stop keep the historical
-//!   "default" sid fallback (an orphan marker is swept by the next poll).
+//!   that subagent marker. The session key is `session_id`, falling back to
+//!   `conversationId` — Antigravity (`agy`) hook payloads are protojson
+//!   camelCase and identify the session by conversationId only (verified
+//!   against the contract docs embedded in the agy binary). A payload with
+//!   NEITHER (empty/absent/bad JSON) is a silent no-op for all four session
+//!   verbs: falling back to a "default" session file would fabricate a
+//!   phantom session whose pid is the caller's own claude ancestor,
+//!   unsweepable while that process lives. Only the marker names of
+//!   agent-start/agent-stop keep the historical "default" sid fallback (an
+//!   orphan marker is swept by the next poll).
 //! - `clear` — remove the session file AND its subagent markers.
 //! - `agent-start` / `agent-stop` — write/remove one subagent marker
 //!   (fast path: no hyprctl), falling back to the subagent's meta.json next

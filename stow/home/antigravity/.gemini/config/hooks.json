@@ -1,0 +1,44 @@
+{
+  "battlestation-status": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "$HOME/.local/bin/bsctl hook --kind agy thinking"
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "$HOME/.local/bin/bsctl hook --kind agy waiting"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.local/bin/bsctl hook --kind agy tooling"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.local/bin/bsctl hook --kind agy thinking"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "$HOME/.local/bin/bsctl hook --kind agy waiting"
+      }
+    ]
+  }
+}

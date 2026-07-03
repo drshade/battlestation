@@ -152,6 +152,22 @@ QtObject {
                                       "tooling": ["wiggle", "wiggle", "bounce"],
                                       "waiting": ["bounce"]
                                     }
+                                  },
+                                  "agy": {
+                                    "label": "Antigravity",
+                                    "dir": "agy",
+                                    "neutral": "waiting",
+                                    "rest": "",
+                                    "faces": {
+                                      "thinking": ["drift", "drift"],
+                                      "tooling": ["orbit", "spark"],
+                                      "waiting": ["float", "float"]
+                                    },
+                                    "motions": {
+                                      "thinking": ["bounce"],
+                                      "tooling": ["wiggle", "wiggle", "bounce"],
+                                      "waiting": ["bounce"]
+                                    }
                                   }
                                 })
   function kindDef(kind) {
@@ -183,7 +199,10 @@ QtObject {
                                      "sleepy": 1200,
                                      "spark": 600,
                                      "bracket": 700,
-                                     "pause": 1200
+                                     "pause": 1200,
+                                     "drift": 700,
+                                     "orbit": 700,
+                                     "float": 1200
                                    })
   function faceHoldMs(emote) {
     return faceHold[emote] || 700;
