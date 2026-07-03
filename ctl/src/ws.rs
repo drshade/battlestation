@@ -114,16 +114,44 @@ pub fn move_workspace_cmd(id: i64, monitor: &str) -> String {
     )
 }
 
-/// `hl.dsp.workspace.swap_monitors({ monitor1 = "A", monitor2 = "B" })` —
-/// the Lua form of legacy `swapactiveworkspaces` (verified live with a swap
-/// round-trip; an empty table replies `error: ... 'monitor1' is required` /
-/// `'monitor2' is required`, which is how the field names were discovered).
-pub fn swap_monitors_cmd(m1: &str, m2: &str) -> String {
-    format!(
-        r#"hl.dsp.workspace.swap_monitors({{ monitor1 = "{}", monitor2 = "{}" }})"#,
-        lua_escape(m1),
-        lua_escape(m2)
-    )
+/// The full dispatch sequence for swapping EVERY workspace between two
+/// displays (`swapdisplays <n>`). Not `swap_monitors`/`swapactiveworkspaces`
+/// — that Lua dispatcher exchanges only the two visible workspaces; the verb
+/// here exchanges the complete sets. Plan:
+/// 1. move all of TARGET's workspaces to the current display, then all of
+///    the current display's originals to target. One side briefly empties
+///    (Hyprland spawns a filler workspace there), but the filler is empty
+///    and loses focus at step 2, so the compositor garbage-collects it.
+/// 2. re-assert what each display SHOWS: focus the current display's old
+///    active (now living on target — target switches to it), then focus
+///    target's old active (now on current) — which also lands the keyboard
+///    back on the display the user started on, looking at the swapped-in
+///    workspace.
+///
+/// Pure: takes the two id lists + each side's old active, returns dispatch
+/// strings in order.
+pub fn swap_plan(
+    cur_mon: &str,
+    tgt_mon: &str,
+    cur_ids: &[i64],
+    tgt_ids: &[i64],
+    cur_active: Option<i64>,
+    tgt_active: Option<i64>,
+) -> Vec<String> {
+    let mut cmds = Vec::new();
+    for id in tgt_ids {
+        cmds.push(move_workspace_cmd(*id, cur_mon));
+    }
+    for id in cur_ids {
+        cmds.push(move_workspace_cmd(*id, tgt_mon));
+    }
+    if let Some(a) = cur_active {
+        cmds.push(focus_cmd(a)); // now on target: target displays it
+    }
+    if let Some(a) = tgt_active {
+        cmds.push(focus_cmd(a)); // now on current: current displays it, keyboard returns
+    }
+    cmds
 }
 
 /// One enabled output, in display order. Display numbering is a pure remap
@@ -305,21 +333,66 @@ pub fn movetodisplay(n: usize, follow: bool) -> i32 {
     }
 }
 
-pub fn swapdisplays() -> i32 {
+/// Non-special workspace ids currently on `mon` (workspaces JSON rows carry
+/// the monitor NAME in `.monitor`).
+pub fn ids_on_monitor(workspaces: &Value, mon: &str) -> Vec<i64> {
+    workspaces
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|w| {
+                    !w.get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .starts_with("special:")
+                })
+                .filter(|w| w.get("monitor").and_then(Value::as_str) == Some(mon))
+                .filter_map(|w| w.get("id").and_then(Value::as_i64))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `swapdisplays <n>`: exchange EVERY workspace between the focused display
+/// and display n (see [`swap_plan`] for the sequence). Swapping a display
+/// with itself is a no-op.
+pub fn swapdisplays(n: usize) -> i32 {
     let mons = match monitors_json() {
         Ok(v) => v,
         Err(c) => return c,
     };
     let ds = displays_from(&mons);
-    if ds.len() < 2 {
-        return 0; // nothing to swap with
-    }
+    let Some(target) = ds.get(n - 1) else {
+        return no_such_display("swapdisplays", n, &ds);
+    };
     let cur = match focused_index("swapdisplays", &ds) {
         Ok(i) => i,
         Err(c) => return c,
     };
-    let next = (cur + 1) % ds.len();
-    ipc::dispatch(&swap_monitors_cmd(&ds[cur].name, &ds[next].name))
+    if cur == n - 1 {
+        return 0; // swapping with ourselves
+    }
+    let ws = match workspaces_json() {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    let cur_ids = ids_on_monitor(&ws, &ds[cur].name);
+    let tgt_ids = ids_on_monitor(&ws, &target.name);
+    for cmd in swap_plan(
+        &ds[cur].name,
+        &target.name,
+        &cur_ids,
+        &tgt_ids,
+        ds[cur].active_ws,
+        target.active_ws,
+    ) {
+        let code = ipc::dispatch(&cmd);
+        if code != 0 {
+            eprintln!("bsctl ws swapdisplays: dispatch failed mid-swap: {cmd}");
+            return code;
+        }
+    }
+    0
 }
 
 pub fn goto(pos: usize) -> i32 {
@@ -573,14 +646,55 @@ mod tests {
             move_workspace_cmd(3, "DP-1"),
             r#"hl.dsp.workspace.move({ workspace = 3, monitor = "DP-1" })"#
         );
-        assert_eq!(
-            swap_monitors_cmd("eDP-1", "DP-1"),
-            r#"hl.dsp.workspace.swap_monitors({ monitor1 = "eDP-1", monitor2 = "DP-1" })"#
-        );
         // names ride through lua_escape like rename's
         assert_eq!(
             focus_monitor_cmd(r#"we"ird"#),
             r#"hl.dsp.focus({ monitor = "we\"ird" })"#
         );
+    }
+
+    #[test]
+    fn ids_on_monitor_filters_by_name_and_special() {
+        let ws = json!([
+            {"id": 1, "name": "one", "monitor": "eDP-1"},
+            {"id": 3, "name": "three", "monitor": "DP-1"},
+            {"id": -99, "name": "special:magic", "monitor": "DP-1"},
+            {"id": 5, "name": "five", "monitor": "DP-1"},
+        ]);
+        assert_eq!(ids_on_monitor(&ws, "DP-1"), vec![3, 5]);
+        assert_eq!(ids_on_monitor(&ws, "eDP-1"), vec![1]);
+        assert_eq!(ids_on_monitor(&ws, "HDMI-A-1"), Vec::<i64>::new());
+        assert_eq!(ids_on_monitor(&json!("junk"), "DP-1"), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn swap_plan_moves_both_sets_then_reasserts_view() {
+        // current eDP-1 {2,5} showing 5; target DP-1 {1,3} showing 3.
+        let cmds = swap_plan("eDP-1", "DP-1", &[2, 5], &[1, 3], Some(5), Some(3));
+        assert_eq!(
+            cmds,
+            vec![
+                // target's set comes over first (current never empties)...
+                r#"hl.dsp.workspace.move({ workspace = 1, monitor = "eDP-1" })"#.to_string(),
+                r#"hl.dsp.workspace.move({ workspace = 3, monitor = "eDP-1" })"#.to_string(),
+                // ...then current's originals go out (target's filler ws will
+                // be empty + unfocused after the final focuses -> GC'd)
+                r#"hl.dsp.workspace.move({ workspace = 2, monitor = "DP-1" })"#.to_string(),
+                r#"hl.dsp.workspace.move({ workspace = 5, monitor = "DP-1" })"#.to_string(),
+                // re-assert views: old-current-active shows on target,
+                // old-target-active shows on current (keyboard lands here)
+                "hl.dsp.focus({ workspace = 5 })".to_string(),
+                "hl.dsp.focus({ workspace = 3 })".to_string(),
+            ]
+        );
+        // empty sides / missing actives degrade cleanly
+        assert_eq!(
+            swap_plan("A", "B", &[], &[7], None, Some(7)),
+            vec![
+                r#"hl.dsp.workspace.move({ workspace = 7, monitor = "A" })"#.to_string(),
+                "hl.dsp.focus({ workspace = 7 })".to_string(),
+            ]
+        );
+        assert!(swap_plan("A", "B", &[], &[], None, None).is_empty());
     }
 }

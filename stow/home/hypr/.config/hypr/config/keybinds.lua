@@ -7,7 +7,8 @@
 --   SUPER+N go there · HYPER+N throw it there · HYPER+SHIFT+N throw it & go.
 -- The F-row is the same story one level up, for DISPLAYS:
 --   SUPER+Fn look at display n · HYPER+Fn take this workspace there & follow
---   · HYPER+SHIFT+Fn send it & stay · HYPER+F12 swap what the displays show.
+--   · HYPER+SHIFT+Fn send it & stay · HYPER+F(9+n) swap ALL workspaces with
+--   display n.
 --
 -- Section headers below MUST stay in the "-- N. Name" form: the noctalia
 -- keybind-cheatsheet parser uses them to categorise binds (it matches each
@@ -116,7 +117,11 @@ end
 for i = 1, 3 do
     hl.bind(hyperMod .. " + SHIFT + F" .. i, hl.dsp.exec_cmd(ws .. " movetodisplay " .. i), { description = "Send workspace to display " .. i })
 end
-hl.bind(hyperMod .. " + F12", hl.dsp.exec_cmd(ws .. " swapdisplays"), { description = "Swap displays" })
+-- F10-F12 = full exchange with display 1-3: EVERY workspace on this display
+-- trades places with every workspace on that one (self-swap is a no-op).
+for i = 1, 3 do
+    hl.bind(hyperMod .. " + F" .. (9 + i), hl.dsp.exec_cmd(ws .. " swapdisplays " .. i), { description = "Swap all workspaces with display " .. i })
+end
 
 -- 6. System · Hyper
 

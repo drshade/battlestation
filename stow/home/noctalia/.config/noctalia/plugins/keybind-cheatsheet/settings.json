@@ -342,6 +342,101 @@
       ]
     },
     {
+      "title": "Displays",
+      "binds": [
+        {
+          "keys": "Super + F1",
+          "desc": "Focus display 1",
+          "bindId": "|64|F1|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F1",
+          "_mods": "Super",
+          "_verb": ""
+        },
+        {
+          "keys": "Super + F2",
+          "desc": "Focus display 2",
+          "bindId": "|64|F2|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F2",
+          "_mods": "Super",
+          "_verb": ""
+        },
+        {
+          "keys": "Super + F3",
+          "desc": "Focus display 3",
+          "bindId": "|64|F3|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F3",
+          "_mods": "Super",
+          "_verb": ""
+        },
+        {
+          "keys": "Mod3 + F1",
+          "desc": "Send workspace to display 1 & follow",
+          "bindId": "|32|F1|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F1",
+          "_mods": "Mod3",
+          "_verb": ""
+        },
+        {
+          "keys": "Mod3 + F2",
+          "desc": "Send workspace to display 2 & follow",
+          "bindId": "|32|F2|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F2",
+          "_mods": "Mod3",
+          "_verb": ""
+        },
+        {
+          "keys": "Mod3 + F3",
+          "desc": "Send workspace to display 3 & follow",
+          "bindId": "|32|F3|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F3",
+          "_mods": "Mod3",
+          "_verb": ""
+        },
+        {
+          "keys": "Shift + Mod3 + F1",
+          "desc": "Send workspace to display 1",
+          "bindId": "|33|F1|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F1",
+          "_mods": "Shift+Mod3",
+          "_verb": ""
+        },
+        {
+          "keys": "Shift + Mod3 + F2",
+          "desc": "Send workspace to display 2",
+          "bindId": "|33|F2|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F2",
+          "_mods": "Shift+Mod3",
+          "_verb": ""
+        },
+        {
+          "keys": "Shift + Mod3 + F3",
+          "desc": "Send workspace to display 3",
+          "bindId": "|33|F3|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F3",
+          "_mods": "Shift+Mod3",
+          "_verb": ""
+        },
+        {
+          "keys": "Mod3 + F12",
+          "desc": "Swap displays",
+          "bindId": "|32|F12|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F12",
+          "_mods": "Mod3",
+          "_verb": ""
+        }
+      ]
+    },
+    {
       "title": "System · Hyper",
       "binds": [
         {

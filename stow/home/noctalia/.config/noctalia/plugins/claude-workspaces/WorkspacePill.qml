@@ -28,6 +28,10 @@ Item {
   property bool occupied: false
   property bool shown: true
   property int position: 0         // display position (1-based); shown instead of the raw id
+  // Slightly dim the active highlight when this pill's MONITOR isn't the
+  // focused one: each bar highlights what its display shows (still green),
+  // but full brightness marks where the keyboard actually is.
+  property bool dimFocus: false
 
   readonly property bool active: focused
   property int pokeNonce: 0
@@ -39,16 +43,17 @@ Item {
     poke()
 
   // Pill background follows the workspace state; Claude status shows via the bots.
+  // (Qt.darker keeps "transparent" transparent, so outline mode is unaffected.)
   function bg() {
     if (active)
-      return cfg.wsBg("focused");
+      return dimFocus ? Qt.darker(cfg.wsBg("focused"), 1.35) : cfg.wsBg("focused");
     if (occupied)
       return cfg.wsBg("occupied");
     return cfg.wsBg("empty");
   }
   function fg() {
     if (active)
-      return cfg.wsOn("focused");
+      return dimFocus ? Qt.darker(cfg.wsOn("focused"), 1.2) : cfg.wsOn("focused");
     if (occupied)
       return cfg.wsOn("occupied");
     return cfg.wsOn("empty");

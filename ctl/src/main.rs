@@ -130,8 +130,11 @@ enum WsCmd {
         #[arg(long)]
         follow: bool,
     },
-    /// Swap the active workspaces of this display and the next
-    Swapdisplays,
+    /// Swap ALL workspaces between this display and display N
+    Swapdisplays {
+        #[arg(value_parser = clap::value_parser!(u32).range(1..))]
+        n: u32,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -168,7 +171,7 @@ fn main() {
             WsCmd::Order => bsctl::ws::order(),
             WsCmd::Display { n } => bsctl::ws::display(n as usize),
             WsCmd::Movetodisplay { n, follow } => bsctl::ws::movetodisplay(n as usize, follow),
-            WsCmd::Swapdisplays => bsctl::ws::swapdisplays(),
+            WsCmd::Swapdisplays { n } => bsctl::ws::swapdisplays(n as usize),
         },
         Cmd::Usage => bsctl::usage::run(),
         Cmd::Display { cmd } => match cmd {
