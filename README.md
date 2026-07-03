@@ -115,8 +115,7 @@ registration. To add a new *target root*, create `stow/<group>/` and a matching
 
 ## Open work
 
-Smaller follow-ups live in [`TODO.md`](TODO.md); the larger structural review is
-in [`PLAN.md`](PLAN.md).
+Current plans live in [`PLAN.md`](PLAN.md).
 
 ## License
 

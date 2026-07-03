@@ -50,7 +50,7 @@ is_noise() { local n=$1 x; for x in "${NOISE[@]}"; do [ "$x" = "$n" ] && return 
 # DIVERGES from skel it reappears, annotated — that divergence is exactly
 # the "you changed something; adopt or revert it" signal. (Verified
 # 2026-07-02: CachyOS ships gtk/qt6ct/xsettingsd/uwsm/… via skel, owned by
-# cachyos-hypr-noctalia — see PLAN P4.14.)
+# cachyos-hypr-noctalia.)
 # Returns: 0 = identical to skel, 1 = no skel counterpart, 2 = diverged.
 skel_state() {
   local rel=$1
