@@ -510,7 +510,8 @@ fn scale_up_from_nothing_seeds_nearest_rung_via_socket() {
             MON_REQ.to_string(),
             WS_REQ.to_string(),
             eval,
-            WS_REQ.to_string()
+            MON_REQ.to_string(), // reflow probe: same fixture -> delta 0 -> no reflow
+            WS_REQ.to_string(),
         ]
     );
     assert!(env.log("calls.log").is_empty());
@@ -540,7 +541,8 @@ fn scale_up_prefers_saved_index_over_reported_scale() {
             MON_REQ.to_string(),
             WS_REQ.to_string(),
             eval,
-            WS_REQ.to_string()
+            MON_REQ.to_string(), // reflow probe: same fixture -> delta 0 -> no reflow
+            WS_REQ.to_string(),
         ]
     );
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"4\n");
@@ -566,7 +568,8 @@ fn scale_clamps_at_both_ends() {
             MON_REQ.to_string(),
             WS_REQ.to_string(),
             eval,
-            WS_REQ.to_string()
+            MON_REQ.to_string(), // reflow probe: same fixture -> delta 0 -> no reflow
+            WS_REQ.to_string(),
         ]
     );
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"6\n");
@@ -588,7 +591,8 @@ fn scale_clamps_at_both_ends() {
             MON_REQ.to_string(),
             WS_REQ.to_string(),
             eval,
-            WS_REQ.to_string()
+            MON_REQ.to_string(), // reflow probe: same fixture -> delta 0 -> no reflow
+            WS_REQ.to_string(),
         ]
     );
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"0\n");
@@ -615,7 +619,8 @@ fn scale_reset_deletes_state_and_evals_auto_string() {
             MON_REQ.to_string(),
             WS_REQ.to_string(),
             eval,
-            WS_REQ.to_string()
+            MON_REQ.to_string(), // reflow probe: same fixture -> delta 0 -> no reflow
+            WS_REQ.to_string(),
         ]
     );
     assert!(!env.scale_state().exists(), "reset must rm the state file");
@@ -659,6 +664,7 @@ fn scale_falls_back_to_hyprctl() {
             "hyprctl monitors -j".to_string(),
             "hyprctl workspaces -j".to_string(),
             format!("hyprctl eval {eval}"),
+            "hyprctl monitors -j".to_string(), // reflow probe (delta 0 here)
             "hyprctl workspaces -j".to_string(),
         ]
     );

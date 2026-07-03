@@ -145,6 +145,72 @@ pub fn eval_cmd(name: &str, mode: &str, position: &str, luascale: &str) -> Strin
     )
 }
 
+/// A monitor's logical right edge: `x + width/scale`.
+pub fn logical_right(mons: &Value, name: &str) -> Option<f64> {
+    let m = mons
+        .as_array()?
+        .iter()
+        .find(|m| m.get("name").and_then(Value::as_str) == Some(name))?;
+    let x = m.get("x")?.as_f64()?;
+    let w = m.get("width")?.as_f64()?;
+    let s = m.get("scale")?.as_f64()?;
+    (s > 0.0).then(|| x + w / s)
+}
+
+/// Repositioning evals for the monitors to the RIGHT of a rescaled one.
+/// A logical-width change leaves a pointer-blocking gap (or an overlap)
+/// between the scaled monitor and anything positioned past its old right
+/// edge — seen live as "the mouse can't cross monitors" after a scale reset
+/// landed on a different auto scale. Each right-neighbor's DESIRED position
+/// preserves its pre-scale offset from the scaled monitor's right edge:
+/// `new_right + (pre_x - old_right)` — computed from the PRE-eval snapshot,
+/// and dispatched only where post-eval reality disagrees. Absolute targets,
+/// not a shift: Hyprland re-flows auto-positioned neighbors ITSELF on some
+/// runtime changes but not others (both observed live), and a relative delta
+/// double-applies in the first case. X axis only; vertical arrangements are
+/// untouched.
+pub fn reflow_plan(
+    pre_mons: &Value,
+    post_mons: &Value,
+    scaled: &str,
+    old_right: f64,
+    new_right: f64,
+) -> Vec<String> {
+    let (Some(pre), Some(post)) = (pre_mons.as_array(), post_mons.as_array()) else {
+        return Vec::new();
+    };
+    pre.iter()
+        .filter(|m| m.get("name").and_then(Value::as_str) != Some(scaled))
+        .filter(|m| !m.get("disabled").and_then(Value::as_bool).unwrap_or(false))
+        .filter_map(|m| {
+            let name = m.get("name")?.as_str()?;
+            let pre_x = m.get("x")?.as_f64()?;
+            if pre_x < old_right - 0.5 {
+                return None; // left of (or under) the scaled monitor: untouched
+            }
+            let desired_x = (new_right + (pre_x - old_right)).round() as i64;
+            // Re-declare from POST-eval reality (mode/scale/y may have
+            // settled); skip when Hyprland already put it where we want it.
+            let p = post
+                .iter()
+                .find(|p| p.get("name").and_then(Value::as_str) == Some(name))?;
+            let post_x = p.get("x")?.as_f64()?;
+            if (post_x - desired_x as f64).abs() <= 0.5 {
+                return None;
+            }
+            let mode = format!(
+                "{}x{}@{}",
+                num_token(p.get("width"))?,
+                num_token(p.get("height"))?,
+                round_half_even(p.get("refreshRate")?.as_f64()?),
+            );
+            let pos = format!("{}x{}", desired_x, p.get("y")?.as_f64()?.round() as i64);
+            let scale = format_scale(p.get("scale")?.as_f64()?);
+            Some(eval_cmd(name, &mode, &pos, &scale))
+        })
+        .collect()
+}
+
 /// `${XDG_RUNTIME_DIR:-/tmp}/hypr-display-scale.<name>` (empty env counts
 /// as unset, like the sh `:-` default).
 pub fn state_path(name: &str) -> PathBuf {
@@ -210,11 +276,27 @@ pub fn run(action: Action) -> i32 {
         .iter()
         .map(|d| (d.name.clone(), d.active_ws))
         .collect();
+    let old_right = logical_right(&mons, &f.name);
 
     let code = ipc::eval(&eval_cmd(&f.name, &f.mode, &f.position, &luascale));
     if code != 0 {
         return code;
     }
+
+    // Close the gap the scale just opened: re-read reality (works for
+    // "auto" too — we can't predict what scale it resolves to) and put
+    // right-hand neighbors at their desired absolute positions. The
+    // neighbor re-declarations may evacuate THEIR workspaces;
+    // restore_strays below catches that too.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    if let (Some(old), Some(after_mons)) = (old_right, ipc::json("monitors"))
+        && let Some(new) = logical_right(&after_mons, &f.name)
+    {
+        for cmd in reflow_plan(&mons, &after_mons, &f.name, old, new) {
+            let _ = ipc::eval(&cmd);
+        }
+    }
+
     if let Some(before) = before_ws {
         restore_strays(&before, &before_actives, &f.name);
     }
@@ -398,6 +480,52 @@ mod tests {
             eval_cmd(r#"x"break"#, "1x1@1", "0x0", "1.00000"),
             r#"hl.monitor({ output = "x\"break", mode = "1x1@1", position = "0x0", scale = 1.00000 })"#
         );
+    }
+
+    #[test]
+    fn reflow_targets_absolute_positions() {
+        let pre = json!([
+            {"name": "eDP-1", "focused": true, "disabled": false, "x": 0, "y": 0,
+             "width": 2880, "height": 1800, "refreshRate": 120.0, "scale": 1.25},
+            {"name": "DP-1", "focused": false, "disabled": false, "x": 2304, "y": 0,
+             "width": 3440, "height": 1440, "refreshRate": 100.0, "scale": 1.0},
+            {"name": "LEFT-1", "focused": false, "disabled": false, "x": -1920, "y": 0,
+             "width": 1920, "height": 1080, "refreshRate": 60.0, "scale": 1.0},
+            {"name": "DEAD-1", "focused": false, "disabled": true, "x": 9000, "y": 0,
+             "width": 1920, "height": 1080, "refreshRate": 60.0, "scale": 1.0},
+        ]);
+        // eDP-1 rescaled 1.25 -> 1.8: right edge 2304 -> 1600. Hyprland did
+        // NOT move DP-1 (still at its pre position): plan puts it at 1600.
+        let post_unmoved = {
+            let mut v = pre.clone();
+            v[0]["scale"] = json!(1.8);
+            v
+        };
+        assert_eq!(logical_right(&post_unmoved, "eDP-1"), Some(1600.0));
+        assert_eq!(
+            reflow_plan(&pre, &post_unmoved, "eDP-1", 2304.0, 1600.0),
+            vec![
+                r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "1600x0", scale = 1.00000 })"#.to_string()
+            ]
+        );
+        // Hyprland ALREADY re-flowed DP-1 to 1600 itself (both behaviors
+        // observed live): desired == reality -> no dispatch, no double-shift.
+        let mut post_moved = post_unmoved.clone();
+        post_moved[1]["x"] = json!(1600);
+        assert!(reflow_plan(&pre, &post_moved, "eDP-1", 2304.0, 1600.0).is_empty());
+        // A pre-existing deliberate gap is preserved, not closed.
+        let mut pre_gap = pre.clone();
+        pre_gap[1]["x"] = json!(2504); // 200 past the old right edge
+        let mut post_gap = pre_gap.clone();
+        post_gap[0]["scale"] = json!(1.8);
+        assert_eq!(
+            reflow_plan(&pre_gap, &post_gap, "eDP-1", 2304.0, 1600.0),
+            vec![
+                r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "1800x0", scale = 1.00000 })"#.to_string()
+            ]
+        );
+        // No change in width -> desired == pre == post -> empty plan.
+        assert!(reflow_plan(&pre, &pre, "eDP-1", 2304.0, 2304.0).is_empty());
     }
 
     #[test]
