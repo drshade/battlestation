@@ -11,7 +11,7 @@
 //! # battlestation-ws status protocol (`bsctl hook` / `bsctl poll`)
 //!
 //! Reports each agent-harness instance's status for the Noctalia
-//! claude-workspaces widget. The protocol is multi-harness: ONE flat dir
+//! battlestation-workspaces widget. The protocol is multi-harness: ONE flat dir
 //! holds sessions from ANY harness (Claude Code today; codex/gemini/...
 //! write the same records via `bsctl hook --kind <harness>`), discriminated
 //! per session by `kind`. State lives as small JSON files in
@@ -122,20 +122,21 @@
 //! subcommand — one-shot debugging and the documented fallback if watch
 //! misbehaves. On acquiring the lock, the watcher also runs a best-effort
 //! one-time migration of protocol files out of the pre-rename `claude-ws`
-//! dir (see watch.rs).
+//! dir, and of the order-file state dir out of the pre-rename
+//! `claude-workspaces` dir (see watch.rs).
 //!
 //! # Workspace display order (`bsctl ws`)
 //!
 //! Navigate/move by DISPLAY POSITION instead of Hyprland's immutable
 //! workspace id. Hyprland has no way to renumber a workspace, so
 //! "reordering" is purely a display-layer remap: real ids stay put, and a
-//! persisted preference list maps position <-> real id. The claude-workspaces
-//! bar plugin renders the same order (pills are labelled by position) and
-//! writes the same file when a pill is dragged.
+//! persisted preference list maps position <-> real id. The
+//! battlestation-workspaces bar plugin renders the same order (pills are
+//! labelled by position) and writes the same file when a pill is dragged.
 //!
-//! The order file, `${XDG_STATE_HOME:-$HOME/.local/state}/claude-workspaces/
-//! order`, is just real ids in preferred order, space-separated with a
-//! trailing newline: `3 1 2 5 4\n`. The plugin FileView-watches and parses
+//! The order file, `${XDG_STATE_HOME:-$HOME/.local/state}/
+//! battlestation-workspaces/order`, is just real ids in preferred order,
+//! space-separated with a trailing newline: `3 1 2 5 4\n`. The plugin FileView-watches and parses
 //! this exact format, so writes must stay byte-compatible, and `reset`
 //! truncates the file IN PLACE (the truncation is what fires the watch).
 //!

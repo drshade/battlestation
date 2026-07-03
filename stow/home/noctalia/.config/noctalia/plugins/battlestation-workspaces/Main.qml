@@ -63,9 +63,9 @@ Item {
     });
   }
 
-  // `qs -c noctalia-shell ipc call plugin:claude-workspaces rename` (Super+Shift+R).
+  // `qs -c noctalia-shell ipc call plugin:battlestation-workspaces rename` (Super+Shift+R).
   IpcHandler {
-    target: "plugin:claude-workspaces"
+    target: "plugin:battlestation-workspaces"
     function rename() {
       root.renameActive();
     }

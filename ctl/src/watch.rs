@@ -153,6 +153,7 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
 /// ever deleted. Once the new dir has any protocol file the check is a
 /// no-op, so re-inits and failovers never re-run the move.
 fn migrate_legacy_dir(dir: &Path) {
+    migrate_legacy_state_dir();
     let Some(old) = dir.parent().map(|p| p.join("claude-ws")) else {
         return;
     };
@@ -171,6 +172,26 @@ fn migrate_legacy_dir(dir: &Path) {
         if name_triggers(&name.to_string_lossy()) {
             let _ = fs::rename(e.path(), dir.join(&name));
         }
+    }
+}
+
+/// Companion one-time move for the PERSISTENT state dir: the workspace
+/// order file lives under `.../state/battlestation-workspaces/` since the
+/// plugin rename (previously `claude-workspaces`, a sibling). Unlike the
+/// runtime dir this one survives reboots, so without the move a saved pill
+/// order would silently reset. Rename the whole old dir into place, only
+/// while the new one doesn't exist yet; best-effort, nothing deleted.
+fn migrate_legacy_state_dir() {
+    let order = crate::ws::order_file();
+    let Some(new_dir) = order.parent() else {
+        return;
+    };
+    let Some(state_root) = new_dir.parent() else {
+        return;
+    };
+    let old_dir = state_root.join("claude-workspaces");
+    if old_dir.is_dir() && !new_dir.exists() {
+        let _ = fs::rename(&old_dir, new_dir);
     }
 }
 

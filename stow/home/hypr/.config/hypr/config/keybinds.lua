@@ -100,7 +100,7 @@ for i = 1, 10 do
 end
 
 hl.bind(hyperMod .. " + S", hl.dsp.window.move({ workspace = "special" }),                  { description = "Send window to scratchpad" })
-hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noctCall .. "plugin:claude-workspaces rename"), { description = "Rename workspace" })
+hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces rename"), { description = "Rename workspace" })
 -- Clear any manual pill reordering: positions map back to 1,2,3,... (ascending id).
 hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " reset"), { description = "Reset workspace order to default" })
 

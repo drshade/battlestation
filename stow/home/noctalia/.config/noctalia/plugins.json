@@ -7,7 +7,7 @@
         }
     ],
     "states": {
-        "claude-workspaces": {
+        "battlestation-workspaces": {
             "enabled": true,
             "sourceUrl": "https://github.com/noctalia-dev/noctalia-plugins"
         },

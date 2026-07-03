@@ -1,11 +1,11 @@
 {
-  "id": "claude-workspaces",
-  "name": "Claude Workspaces",
+  "id": "battlestation-workspaces",
+  "name": "Battlestation Workspaces",
   "version": "0.4.0",
   "minNoctaliaVersion": "4.4.3",
   "author": "tom",
   "license": "MIT",
-  "description": "Workspace pills with an animated Claude Code bot per running instance, coloured by status (thinking / tool / waiting).",
+  "description": "Workspace pills with an animated bot per running agent-harness instance (Claude Code, Codex, ...), coloured by status (thinking / tool / waiting).",
   "tags": [
     "Bar"
   ],

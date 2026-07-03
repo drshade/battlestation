@@ -84,11 +84,11 @@ impl TestEnv {
     }
 
     fn order_file(&self) -> PathBuf {
-        self.state.join("claude-workspaces/order")
+        self.state.join("battlestation-workspaces/order")
     }
 
     fn write_order(&self, content: &str) {
-        fs::create_dir_all(self.state.join("claude-workspaces")).unwrap();
+        fs::create_dir_all(self.state.join("battlestation-workspaces")).unwrap();
         fs::write(self.order_file(), content).unwrap();
     }
 

@@ -119,7 +119,7 @@ Item {
         id: settingsHeader
         Layout.fillWidth: true
         NText {
-          text: "Claude Workspaces settings"
+          text: "Battlestation Workspaces settings"
           pointSize: Style.fontSizeL
           font.weight: Style.fontWeightBold
           color: Color.mOnSurface

@@ -102,7 +102,7 @@ Item {
   property var displayIds: []   // orderedIds filtered to this screen + trimmed: what the ListView shows
   property var displaySlots: [] // displaySlots[k] = 0-based slot of displayIds[k] in orderedIds (its global position)
   property var displayList: []  // [{id}] stable wrappers keyed by id
-  readonly property string orderFilePath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/claude-workspaces/order"
+  readonly property string orderFilePath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/battlestation-workspaces/order"
 
   // While a pill is being dragged we freeze displayList so a focus/occupancy
   // event can't reset the DelegateModel mid-gesture. dragIds tracks the live

@@ -10,7 +10,7 @@ the plugins enabled in `plugins.json`.
 
 Tracked exceptions (their source of truth is this repo):
 
-- `claude-workspaces` — homegrown.
+- `battlestation-workspaces` — homegrown.
 - `keybind-cheatsheet` — **temporary**: the tracked copy is exactly the union of
   two patches pending upstream in `noctalia-dev/legacy-v4-plugins`
   ([#937](https://github.com/noctalia-dev/legacy-v4-plugins/pull/937) apply

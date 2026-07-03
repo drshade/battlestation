@@ -108,7 +108,7 @@
                         "waitingColor": "error",
                         "waitingCustom": "#c97b47"
                     },
-                    "id": "plugin:claude-workspaces"
+                    "id": "plugin:battlestation-workspaces"
                 }
             ],
             "left": [

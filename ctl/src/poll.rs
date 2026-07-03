@@ -1,6 +1,6 @@
 //! `bsctl poll` — one flat pass over the battlestation-ws state dir, emitting ONE
-//! JSON array line, mirroring the pollScript python in the claude-workspaces
-//! BarWidget.qml:
+//! JSON array line, mirroring the pollScript python in the
+//! battlestation-workspaces BarWidget.qml:
 //!
 //! `[{sid, ws, status, kind, title, agents: [{id, type, description, started}]}]`
 //!

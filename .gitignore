@@ -57,8 +57,8 @@ stow/home/noctalia/.config/noctalia/colors.json
 # whose source of truth IS this repo. keybind-cheatsheet is temporary — it
 # carries two patches pending upstream (see setup/noctalia-00-plugins.md).
 stow/home/noctalia/.config/noctalia/plugins/*
-!stow/home/noctalia/.config/noctalia/plugins/claude-workspaces/
-!stow/home/noctalia/.config/noctalia/plugins/claude-workspaces/**
+!stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/
+!stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/**
 !stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/
 !stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/**
 

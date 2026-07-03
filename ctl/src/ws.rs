@@ -18,8 +18,8 @@ use serde_json::Value;
 
 use crate::ipc;
 
-/// `${XDG_STATE_HOME:-$HOME/.local/state}/claude-workspaces/order` (an empty
-/// env var counts as unset, like the sh `:-` default).
+/// `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/order`
+/// (an empty env var counts as unset, like the sh `:-` default).
 pub fn order_file() -> PathBuf {
     env::var_os("XDG_STATE_HOME")
         .filter(|v| !v.is_empty())
@@ -27,7 +27,7 @@ pub fn order_file() -> PathBuf {
         .unwrap_or_else(|| {
             PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".local/state")
         })
-        .join("claude-workspaces/order")
+        .join("battlestation-workspaces/order")
 }
 
 // ---- pure logic (proto.rs-style: deterministic, unit-tested) ---------------
