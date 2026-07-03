@@ -302,9 +302,10 @@ live in `setup/README.md`.
     runtime keys into (e.g. Claude Code's `settings.json`, where it
     inserts/updates `model` etc. and reorders keys wholesale): a **git clean
     filter**. Three parts, one name: `.gitattributes` maps the file to
-    `filter=<name>`; the tracked script `bin/filters/<name>` strips the
-    runtime keys and normalizes key order (it is the single source of truth
-    for the strip-list); and a repo-local
+    `filter=<name>`; the tracked script `bin/filters/<name>` projects the
+    file to a WHITELIST of the deliberately-configured keys, sorted (it is
+    the single source of truth for the keep-list — default-deny, so a key
+    the app invents tomorrow never churns the repo); and a repo-local
     `git config filter.<name>.clean bin/filters/<name>` activates it. Runtime
     churn then never shows as dirt, while real config edits still do. The git
     config is repo-local (not versionable), so a fresh clone needs it once —

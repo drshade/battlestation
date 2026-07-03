@@ -121,12 +121,9 @@
   "permissions": {
     "defaultMode": "auto"
   },
-  "preferredNotifChannel": "notifications_disabled",
   "statusLine": {
     "command": "bash $HOME/.claude/statusline.sh",
     "padding": 0,
     "type": "command"
-  },
-  "theme": "dark",
-  "tui": "fullscreen"
+  }
 }
