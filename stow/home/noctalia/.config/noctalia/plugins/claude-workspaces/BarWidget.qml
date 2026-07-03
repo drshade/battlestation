@@ -1,11 +1,19 @@
 // Core shell: owns the per-instance config (Cfg), the live workspace state
-// (Claude statuses + window occupancy), and lays out the usage indicator and the
+// (agent statuses + compositor state), and lays out the usage indicator and the
 // row of workspace pills. Colours/sizes live in Cfg; pills in WorkspacePill;
 // the animated bots in BotIcon.
+//
+// ONE data source: agent hooks and the compositor both flow through
+// `bsctl watch` (repo: ctl/src/watch.rs), which folds them into
+// <XDG_RUNTIME_DIR>/battlestation-ws/.widget.json; the stateFile FileView
+// below is the only state input. No compositor-service reads, no polling
+// timers, no staleness workarounds — the daemon subscribes to Hyprland's
+// event socket and rewrites the file the moment anything we render changes.
+// (CompositorService remains solely as the switch-workspace COMMAND boundary;
+// the order file keeps its own FileView — a different protocol, bsctl ws's.)
 import QtQuick
 import QtQml.Models
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Commons
 import qs.Widgets
@@ -42,47 +50,32 @@ Item {
   property var titleBySid: ({})     // { "<sid>": "<aiTitle>" }
   property var kindBySid: ({})      // { "<sid>": "claude" } -- future: codex/gemini/...
   property var agentsBySid: ({})    // { "<sid>": [{id,type,description,started}] } running subagents
-  // Occupancy computed from real windows (ExtWorkspaceService.isOccupied is unreliable).
-  property var occupiedMap: ({})
+
+  // ---- compositor state -------------------------------------------------------
+  // All of it parsed from .widget.json's `compositor` section (schema:
+  // ctl/src/lib.rs) by applyCompositor(); plain properties, no live
+  // compositor objects. `special:*` workspaces are already excluded by watch.
+  property var liveIds: []          // live workspace ids, unordered
   // Reactive lookups the pills read by id, so a pill never has to hold a
-  // (throwaway) compositor snapshot: names by id, and the highlighted id.
+  // (throwaway) snapshot: names/outputs/occupancy by id.
   property var nameById: ({})
-  property var outputById: ({})   // monitor name per id ("" = unknown -> fail open)
+  property var outputById: ({})     // monitor name per id ("" = unknown -> fail open)
+  property var occupiedMap: ({})    // windows > 0
   // THIS display's active workspace — what the pill highlight shows.
   // Per-screen, not the global focus (each monitor has an active workspace;
-  // only the focused monitor's is isFocused). Bound DIRECTLY to Quickshell's
-  // reactive Hyprland API rather than CompositorService's rows: the service
-  // re-snapshots on raw events / model membership changes, but a workspace
-  // moving between monitors only flips `active` PROPERTIES on existing
-  // objects, which can settle after the last snapshot — leaving a stale
-  // highlight until the next workspace switch (seen live twice after
-  // movetodisplay --follow). monitorFor(screen).activeWorkspace notifies the
-  // moment the compositor settles, no snapshot in between. (This makes the
-  // widget explicitly Hyprland-only, which it already is in practice — every
-  // command it runs speaks Hyprland IPC.)
-  readonly property var hlMonitor: Hyprland.monitorFor(root.screen)
-  // This monitor's active workspace id — used for trailing-trim pinning even
-  // while the scratchpad covers it (the workspace hasn't gone anywhere).
-  readonly property int monActiveId: (hlMonitor && hlMonitor.activeWorkspace) ? hlMonitor.activeWorkspace.id : -1
-  onMonActiveIdChanged: rebuildDisplay()   // re-evaluate highlight + trailing-trim pinning
+  // only the focused monitor's is `focused`). Also used for trailing-trim
+  // pinning even while the scratchpad covers it (the workspace hasn't gone
+  // anywhere). -1 when this screen has no compositor.monitors entry.
+  property int monActiveId: -1
   // A special workspace (scratchpad) showing on this monitor: no pill is
-  // "current", so the highlight clears. lastIpcObject (the raw hyprctl
-  // monitor JSON) is the only place Quickshell exposes specialWorkspace;
-  // it notifies, and the refreshMonitors nudge keeps it fresh the same way
-  // it does activeWorkspace.
-  readonly property bool specialShowing: {
-    var o = hlMonitor ? hlMonitor.lastIpcObject : null;
-    return !!(o && o.specialWorkspace && (o.specialWorkspace.name || "") !== "");
-  }
-  onSpecialShowingChanged: rebuildDisplay()
+  // "current", so the highlight clears.
+  property bool specialShowing: false
   // What the pill highlight compares against (-1 while the scratchpad is up).
   readonly property int activeId: specialShowing ? -1 : monActiveId
   // Whether the keyboard is on THIS monitor — the unfocused display's active
-  // pill renders slightly dimmed. Compared via the Hyprland.focusedMonitor
-  // singleton (object identity; notifies on focus moves) — the per-monitor
-  // `focused` property read false on every monitor here, so it can't be
-  // trusted on this Quickshell version.
-  readonly property bool monitorFocused: !hlMonitor || Hyprland.focusedMonitor === hlMonitor
+  // pill renders slightly dimmed. Straight from the compositor's own
+  // monitors[].focused (missing entry fails open to focused/undimmed).
+  property bool monitorFocused: true
   // Highest FILTERED position that must stay visible (occupied or active).
   property int maxVisiblePos: 999
 
@@ -98,12 +91,12 @@ Item {
   // pills before it live on another display. A workspace whose output is
   // unknown fails OPEN (every bar shows it) rather than silently vanishing.
   //
-  // The compositor rebuilds its workspace ListModel (handing us fresh throwaway
-  // row snapshots) on every Hyprland event, so we keep only plain ids and look
-  // everything else up by id. displayList -- the DelegateModel's model -- is
-  // rebuilt ONLY when the visible id SEQUENCE changes, so pills (and the bots
-  // inside them) survive churn instead of being recreated, which used to reset
-  // every bot's breathing/emote timer and freeze animation on a busy workspace.
+  // Every state-file reload hands us fresh throwaway JSON, so we keep only
+  // plain ids and look everything else up by id. displayList -- the
+  // DelegateModel's model -- is rebuilt ONLY when the visible id SEQUENCE
+  // changes, so pills (and the bots inside them) survive churn instead of
+  // being recreated, which used to reset every bot's breathing/emote timer
+  // and freeze animation on a busy workspace.
   property var prefOrder: []
   property var orderedIds: []   // resolved GLOBAL order (all displays), real ids
   property var displayIds: []   // orderedIds filtered to this screen + trimmed: what the ListView shows
@@ -127,30 +120,13 @@ Item {
     recomputeOrder();
   }
 
+  // Resolve orderedIds from prefOrder against the compositor's live ids
+  // (both plain data — prefOrder from the order file, liveIds from the state
+  // file), then rebuild the visible row.
   function recomputeOrder() {
-    // Workspace->output mapping comes from Quickshell's LIVE Hyprland objects,
-    // not CompositorService's rows: the rows are snapshots that miss
-    // property-only changes (a workspace MOVED between monitors keeps the
-    // model's membership, so no re-snapshot fires — seen live as pills left
-    // dangling on the old bar after swapdisplays until the next event). The
-    // live objects' .monitor is current at read time; the settle timer below
-    // re-reads after each burst.
-    var liveOuts = {};
-    var hws = Hyprland.workspaces ? Hyprland.workspaces.values : [];
-    for (var h = 0; h < hws.length; h++)
-      liveOuts[String(hws[h].id)] = (hws[h].monitor && hws[h].monitor.name) ? hws[h].monitor.name : "";
     var present = {};
-    var live = [];
-    var names = {};
-    var outs = {};
-    for (var i = 0; i < CompositorService.workspaces.count; i++) {
-      var w = CompositorService.workspaces.get(i);
-      present[String(w.id)] = true;
-      live.push(w.id);
-      names[String(w.id)] = w.name || "";
-      var lo = liveOuts[String(w.id)];
-      outs[String(w.id)] = (lo !== undefined) ? lo : (w.output || "");
-    }
+    for (var i = 0; i < liveIds.length; i++)
+      present[String(liveIds[i])] = true;
     var out = [];
     var seen = {};
     for (var p = 0; p < prefOrder.length; p++) {
@@ -160,7 +136,7 @@ Item {
         seen[id] = true;
       }
     }
-    live.sort(function (a, b) {
+    var live = liveIds.slice().sort(function (a, b) {
       return a - b;
     });
     for (var k = 0; k < live.length; k++) {
@@ -171,28 +147,11 @@ Item {
       }
     }
     orderedIds = out;
-    if (!sameKeySet(names, nameById))
-      nameById = names;
-    if (!sameKeySet(outs, outputById))
-      outputById = outs;
-    recomputeOccupancy();
-  }
-
-  function recomputeOccupancy() {
-    var m = {};
-    for (var i = 0; i < CompositorService.windows.count; i++) {
-      var wid = CompositorService.windows.get(i).workspaceId;
-      if (wid !== undefined && wid !== null)
-        m[String(wid)] = true;
-    }
-    if (!sameKeySet(m, occupiedMap))
-      occupiedMap = m;
-    // activeId is a reactive binding (Hyprland.monitorFor), not computed here.
     // maxVisiblePos is computed in rebuildDisplay, over the FILTERED list.
     rebuildDisplay();
   }
 
-  // Equality guards so state-file reloads and the occupancy poller only reassign
+  // Equality guards so state-file reloads only reassign
   // a reactive structure when its content actually changed -- otherwise
   // identical-but-new values churn the consumers (and rebuilding displayList
   // would recreate every pill + bot).
@@ -335,7 +294,7 @@ Item {
     orderWriter.command = ["sh", "-c", "$HOME/.local/bin/bsctl ws set " + full.join(" ")];
     orderWriter.running = true;
     // Reflect the new order immediately so there's no flash before the reload
-    // (orderedIds too, so the 500ms occupancy tick can't rebuild from the
+    // (orderedIds too, so a state-file reload can't rebuild from the
     // pre-drag order in the write->inotify window). The dragged ids keep the
     // same slot SET, so displaySlots stays valid as-is.
     orderedIds = full;
@@ -347,50 +306,8 @@ Item {
     });
   }
 
-  // Re-resolve whenever the workspace set changes or bsctl ws/a drag rewrites the file.
-  Connections {
-    target: CompositorService
-    function onWorkspacesChanged() {
-      // Noctalia's HyprlandService refreshes workspaces + toplevels on every
-      // raw event but NEVER monitors, so HyprlandMonitor.activeWorkspace goes
-      // stale when a workspace is moved to a monitor without a focus change
-      // (seen live: highlight stuck on the destination display's previous
-      // workspace). Nudge the monitors refresh ourselves; its async result
-      // fires activeWorkspaceChanged and the reactive activeId binding does
-      // the rest. Harmless when already current.
-      Hyprland.refreshMonitors();
-      root.recomputeOrder();
-      settleTimer.begin();
-    }
-  }
-
-  // Trailing re-reads after each event burst: the refresh queries are async,
-  // so the last recomputeOrder of a burst (e.g. swapdisplays' 12 dispatches)
-  // can run before the final data lands — and a property-only settle fires
-  // NO further event to catch it (dangling pills until the next mouse-over;
-  // a single 300ms tap was observed losing this race live). So keep
-  // re-querying + re-reading every 300ms for up to 10 rounds (~3s) after the
-  // last event. Each pass is cheap (pure JS over ~10 workspaces); a new
-  // event restarts the schedule.
-  Timer {
-    id: settleTimer
-    property int rounds: 0
-    interval: 300
-    repeat: true
-    onTriggered: {
-      Hyprland.refreshWorkspaces();
-      Hyprland.refreshMonitors();
-      root.recomputeOrder();
-      rounds++;
-      if (rounds >= 10)
-        stop();
-    }
-    function begin() {
-      rounds = 0;
-      restart();
-    }
-  }
-
+  // The order file: bsctl ws's protocol, re-resolved whenever a keybind or a
+  // drag rewrites it. (Workspace-set changes arrive through the state file.)
   FileView {
     id: orderFile
     path: root.orderFilePath
@@ -421,19 +338,26 @@ Item {
 
   // ---- state watcher ----------------------------------------------------------
   // Event-driven, not polled: `bsctl watch` (repo: ctl/src/watch.rs) is a
-  // long-lived daemon that inotify-watches the battlestation-ws state dir and keeps
-  // <XDG_RUNTIME_DIR>/battlestation-ws/.widget.json equal to `bsctl poll`'s output —
-  // one flat self-cleaning pass (dead-pid sessions, orphan markers,
-  // kill-leaked stale markers via the transcript-frozen GC) emitting ONE JSON
-  // array (protocol spec: ctl/src/lib.rs):
-  //   [{sid, ws, status, kind, title, agents: [{id, type, description, started}]}]
-  // rewritten atomically only when the content changes, plus a 10s tick for
-  // what inotify can't see (dying pids, markers aging out). Every bar instance
+  // long-lived daemon that inotify-watches the battlestation-ws state dir AND
+  // subscribes to Hyprland's .socket2.sock event stream, folding both into
+  // <XDG_RUNTIME_DIR>/battlestation-ws/.widget.json — one JSON object
+  // (protocol spec: ctl/src/lib.rs):
+  //   {"sessions": [{sid, ws, status, kind, title,
+  //                  agents: [{id, type, description, started}]}],
+  //    "compositor": {"workspaces": [{id, name, monitor, windows}],
+  //                   "monitors": [{name, x, y, focused, activeWs,
+  //                                 specialShowing}]}}
+  // `sessions` is the self-cleaning poll pass (dead-pid sessions, orphan
+  // markers, kill-leaked stale markers via the transcript-frozen GC);
+  // `compositor` is queried fresh per recompute (null when Hyprland is
+  // unreachable — we keep the previous compositor state). Rewritten
+  // atomically only when the content changes, plus a 10s tick for what
+  // inotify can't see (dying pids, markers aging out). Every bar instance
   // runs one watcher; an exclusive flock makes one the writer and the rest hot
   // standbys that take over if it dies, so multi-monitor needs no coordination
   // here. The FileView reload()s on each write and feeds applyRecs(); `bsctl
-  // poll` remains available as a one-shot debugging fallback if watch
-  // misbehaves.
+  // poll` remains available as a one-shot debugging fallback (sessions
+  // array only, by contract) if watch misbehaves.
   readonly property string stateFilePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/battlestation-ws/.widget.json"
   property bool stateEverLoaded: false
 
@@ -470,13 +394,21 @@ Item {
     }
   }
 
+  // Parse one .widget.json payload: compositor section first (a null
+  // compositor — Hyprland unreachable mid-restart — keeps the previous
+  // compositor state), then the sessions array.
   function applyRecs(txt) {
-    var recs;
+    var data;
     try {
-      recs = JSON.parse(txt);
+      data = JSON.parse(txt);
     } catch (e) {
-      recs = null;
+      data = null;
     }
+    if (!data)
+      return;
+    if (data.compositor)
+      applyCompositor(data.compositor);
+    var recs = data.sessions;
     if (!recs || recs.length === undefined)
       return;
     var statusBySid = {};
@@ -538,12 +470,46 @@ Item {
       root.agentsBySid = agentsBySid;
   }
 
-  Timer {
-    interval: 500
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: root.recomputeOccupancy()
+  // Fold the compositor section into the plain-data properties, then
+  // re-resolve the row. Equality guards keep identical-but-new maps from
+  // churning the pills (rebuilding displayList would recreate every bot).
+  function applyCompositor(c) {
+    var wss = c.workspaces || [];
+    var live = [];
+    var names = {};
+    var outs = {};
+    var occ = {};
+    for (var i = 0; i < wss.length; i++) {
+      var w = wss[i];
+      live.push(w.id);
+      names[String(w.id)] = w.name || "";
+      outs[String(w.id)] = w.monitor || "";
+      if (w.windows > 0)
+        occ[String(w.id)] = true;
+    }
+    liveIds = live;
+    if (!sameKeySet(names, nameById))
+      nameById = names;
+    if (!sameKeySet(outs, outputById))
+      outputById = outs;
+    if (!sameKeySet(occ, occupiedMap))
+      occupiedMap = occ;
+    // This bar's monitor = the entry named like root.screen. A missing entry
+    // fails OPEN (no highlight suppression, no dimming) like the output
+    // filtering above.
+    var mine = null;
+    var mons = c.monitors || [];
+    var myName = (root.screen && root.screen.name) ? root.screen.name : "";
+    for (var m = 0; m < mons.length; m++) {
+      if (mons[m].name === myName) {
+        mine = mons[m];
+        break;
+      }
+    }
+    monActiveId = (mine && mine.activeWs !== null && mine.activeWs !== undefined) ? mine.activeWs : -1;
+    specialShowing = !!(mine && mine.specialShowing === true);
+    monitorFocused = !mine || mine.focused === true;
+    recomputeOrder();
   }
 
   // Right-click on empty bar area -> widget menu (pills handle their own right-click).
@@ -580,8 +546,9 @@ Item {
     PanelService.showContextMenu(contextMenu, root, root.screen, anchorItem);
   }
 
-  // Click-to-switch: look the live workspace up by id (we only keep ids, not the
-  // compositor's throwaway snapshots) and hand it to the backend.
+  // Click-to-switch: look the live workspace up by id and hand it to the
+  // backend. The one remaining CompositorService use — a COMMAND, not state;
+  // everything rendered comes from .widget.json.
   function switchToId(id) {
     for (var i = 0; i < CompositorService.workspaces.count; i++) {
       var w = CompositorService.workspaces.get(i);

@@ -1,25 +1,33 @@
 //! `bsctl watch` — long-lived daemon keeping `<state-dir>/.widget.json`
-//! equal to `bsctl poll`'s output, so the widget FileView-watches ONE file
-//! instead of running the poll on a timer. The poll pass itself is reused
-//! wholesale ([`poll::poll`]); this module only owns *when* to run it and
-//! the single-writer/failover discipline (contract in lib.rs).
+//! current, so the widget FileView-watches ONE file instead of polling
+//! anything. Two event sources fold into one output: the agent-state dir
+//! (inotify; the sessions section reuses [`poll::poll`] wholesale) and
+//! Hyprland's `.socket2.sock` event stream (the compositor section, built
+//! fresh per recompute from `j/workspaces` + `j/monitors`). This module only
+//! owns *when* to recompute and the single-writer/failover discipline
+//! (contract + output schema in lib.rs).
 //!
 //! Never crash-loops: any transient error (state dir vanishing, inotify fd
-//! error) is logged to stderr once, then re-initialized — including the
-//! flock, so a wounded winner cleanly hands over to a blocked standby.
+//! error, socket2 disconnect on compositor restart) is logged to stderr
+//! once, then re-initialized — including the flock, so a wounded winner
+//! cleanly hands over to a blocked standby. If socket2 can't connect at all
+//! (no Hyprland running), watch still works DEGRADED: agent-state events
+//! keep flowing, the compositor section rides the queries' failure path
+//! (null) — see [`EventSock::connect`].
 
 use std::convert::Infallible;
 use std::ffi::CString;
 use std::fs;
-use std::io;
-use std::os::fd::RawFd;
+use std::io::{self, Read};
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
-use crate::{poll, sys};
+use crate::{ipc, poll, sys};
 
 /// The consolidated widget state file. Dot-prefixed on purpose: `poll`'s
 /// dotfile skip and `clear`'s `<sid>.*` sweep can never touch it.
@@ -58,7 +66,9 @@ pub fn run() -> i32 {
 
 /// One lock-acquisition-to-error lifetime: acquire the flock (blocking —
 /// this is where standbys park), write the state once, then loop on
-/// inotify + the slow tick. Only ever returns an error; the caller re-inits.
+/// inotify + the compositor event socket + the slow tick. Only ever returns
+/// an error; the caller re-inits — which is also the socket2 reconnect path
+/// after a compositor restart (its EOF surfaces as an error here).
 fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
     fs::create_dir_all(dir)?;
     // Single writer with seamless failover: the winner proceeds; losers
@@ -72,31 +82,62 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
     }
     migrate_legacy_dir(dir);
     let ino = Inotify::new(dir)?;
+    // Compositor events; None = degraded mode (no Hyprland), agent-only.
+    let mut sock = EventSock::connect();
     // On acquiring the lock (winner or successor): write once immediately.
     let mut prev: Option<String> = None;
-    recompute(dir, proj, &mut prev)?;
+    recompute(dir, proj, compositor_state, &mut prev)?;
 
     let mut deadline = Instant::now() + TICK;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        if !ino.wait(remaining.as_millis().min(i32::MAX as u128) as i32)? {
+        let ready = wait2(
+            ino.fd,
+            sock.as_ref().map(|s| s.stream.as_raw_fd()),
+            remaining.as_millis().min(i32::MAX as u128) as i32,
+        )?;
+        let Some((ino_ready, sock_ready)) = ready else {
             // Slow tick (poll(2) timeout expired).
-            recompute(dir, proj, &mut prev)?;
+            recompute(dir, proj, compositor_state, &mut prev)?;
             deadline = Instant::now() + TICK;
             continue;
+        };
+        let mut triggered = false;
+        if ino_ready {
+            triggered |= ino.drain()?;
         }
-        if !ino.drain()? {
-            // Dotfile/debug.log churn only (incl. our own output writes):
-            // no recompute, and the tick deadline keeps running.
+        if sock_ready {
+            // A socket error here (EOF = compositor restart/exit) propagates
+            // to the re-init path, which reconnects — or degrades if the
+            // compositor is really gone.
+            triggered |= sock.as_mut().unwrap().drain()?;
+        }
+        if !triggered {
+            // Dotfile/debug.log churn or irrelevant compositor events only
+            // (incl. our own output writes): no recompute, and the tick
+            // deadline keeps running.
             continue;
         }
-        // Coalesce the burst before recomputing once.
+        // Coalesce the burst (from EITHER source) before recomputing once.
         let mut rounds = 0;
-        while rounds < COALESCE_ROUNDS && ino.wait(COALESCE_MS)? {
-            ino.drain()?;
+        while rounds < COALESCE_ROUNDS {
+            let Some((i, s)) = wait2(
+                ino.fd,
+                sock.as_ref().map(|s| s.stream.as_raw_fd()),
+                COALESCE_MS,
+            )?
+            else {
+                break;
+            };
+            if i {
+                ino.drain()?;
+            }
+            if s {
+                sock.as_mut().unwrap().drain()?;
+            }
             rounds += 1;
         }
-        recompute(dir, proj, &mut prev)?;
+        recompute(dir, proj, compositor_state, &mut prev)?;
         deadline = Instant::now() + TICK;
     }
 }
@@ -133,19 +174,85 @@ fn migrate_legacy_dir(dir: &Path) {
     }
 }
 
-/// Run the poll pass and rewrite the output file — but only when the
-/// serialization changed (a FileView reload on every tick would wake the
-/// widget pointlessly), or when the file is missing (manual deletion; the
-/// no-change short-circuit would otherwise leave it gone until the state
-/// next changes). Content is EXACTLY `bsctl poll`'s stdout: the compact
-/// JSON array + trailing newline.
-fn recompute(dir: &Path, proj: &Path, prev: &mut Option<String>) -> io::Result<()> {
-    let content = format!("{}\n", Value::Array(poll::poll(sys::now_f64(), dir, proj)));
+/// Run the poll pass, fetch fresh compositor state, and rewrite the output
+/// file — but only when the serialization changed (a FileView reload on
+/// every tick would wake the widget pointlessly), or when the file is
+/// missing (manual deletion; the no-change short-circuit would otherwise
+/// leave it gone until the state next changes). Content is one compact JSON
+/// object + trailing newline (schema in lib.rs): `sessions` is EXACTLY
+/// `bsctl poll`'s array; `compositor` is the fetcher's value (null on query
+/// failure — the widget keeps its last compositor state). The fetcher is
+/// injected so tests never touch a real compositor.
+fn recompute(
+    dir: &Path,
+    proj: &Path,
+    fetch_compositor: impl Fn() -> Value,
+    prev: &mut Option<String>,
+) -> io::Result<()> {
+    let out = json!({
+        "sessions": Value::Array(poll::poll(sys::now_f64(), dir, proj)),
+        "compositor": fetch_compositor(),
+    });
+    let content = format!("{out}\n");
     if prev.as_deref() != Some(content.as_str()) || !dir.join(OUTPUT_NAME).exists() {
         write_atomic(dir, &content)?;
     }
     *prev = Some(content);
     Ok(())
+}
+
+/// The compositor section, built fresh from `j/workspaces` + `j/monitors`
+/// (~1ms socket queries; the hyprctl fallback inside [`ipc::json`] covers
+/// wire drift). Null when either query fails outright — degraded mode or a
+/// mid-restart compositor; the widget keeps its last state. Workspaces
+/// whose name starts with `special:` are excluded (the bar never renders
+/// them — same rule as `bsctl ws`); a monitor's `specialShowing` covers the
+/// scratchpad-visible case instead.
+fn compositor_state() -> Value {
+    let (Some(ws), Some(mons)) = (ipc::json("workspaces"), ipc::json("monitors")) else {
+        return Value::Null;
+    };
+    let (Some(ws), Some(mons)) = (ws.as_array(), mons.as_array()) else {
+        return Value::Null;
+    };
+    let workspaces: Vec<Value> = ws
+        .iter()
+        .filter(|w| {
+            !w.get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .starts_with("special:")
+        })
+        .map(|w| {
+            json!({
+                "id": w.get("id").cloned().unwrap_or(Value::Null),
+                "name": w.get("name").and_then(Value::as_str).unwrap_or(""),
+                "monitor": w.get("monitor").and_then(Value::as_str).unwrap_or(""),
+                "windows": w.get("windows").and_then(Value::as_i64).unwrap_or(0),
+            })
+        })
+        .collect();
+    let monitors: Vec<Value> = mons
+        .iter()
+        .map(|m| {
+            json!({
+                "name": m.get("name").and_then(Value::as_str).unwrap_or(""),
+                "x": m.get("x").cloned().unwrap_or(Value::Null),
+                "y": m.get("y").cloned().unwrap_or(Value::Null),
+                "focused": m.get("focused").and_then(Value::as_bool).unwrap_or(false),
+                "activeWs": m
+                    .pointer("/activeWorkspace/id")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "specialShowing": !m
+                    .pointer("/specialWorkspace/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .is_empty(),
+            })
+        })
+        .collect();
+    json!({ "workspaces": workspaces, "monitors": monitors })
 }
 
 /// Temp file + rename in the same dir (the crate's atomic-write pattern);
@@ -188,6 +295,130 @@ pub fn parse_events(buf: &[u8]) -> Vec<(u32, String)> {
     out
 }
 
+/// Which compositor events warrant a recompute: anything that can change
+/// what the widget renders — workspace existence/name/monitor/active state,
+/// monitor set/focus, window counts (occupancy = `windows` per workspace,
+/// which open/close/movewindow cover), the scratchpad, and config reloads
+/// (monitor layout may change). Deliberately NOT here: `windowtitle*` and
+/// `activewindow*` — nothing rendered depends on titles or the focused
+/// window, and they are by far the noisiest events. Unknown events: ignore.
+pub fn event_triggers(line: &str) -> bool {
+    const RELEVANT: &[&str] = &[
+        "workspace",
+        "workspacev2",
+        "createworkspace",
+        "createworkspacev2",
+        "destroyworkspace",
+        "destroyworkspacev2",
+        "moveworkspace",
+        "moveworkspacev2",
+        "renameworkspace",
+        "focusedmon",
+        "focusedmonv2",
+        "monitoradded",
+        "monitoraddedv2",
+        "monitorremoved",
+        "monitorremovedv2",
+        "openwindow",
+        "closewindow",
+        "movewindow",
+        "movewindowv2",
+        "activespecial",
+        "activespecialv2",
+        "configreloaded",
+    ];
+    let name = line.split_once(">>").map_or(line, |(n, _)| n);
+    RELEVANT.contains(&name)
+}
+
+/// poll(2) on the inotify fd plus (optionally) the event socket:
+/// Ok(None) = timeout hit, Ok(Some((inotify_ready, socket_ready)))
+/// otherwise. EINTR retries (conservatively with the full timeout —
+/// precision on a coalesce window or the slow tick doesn't matter).
+fn wait2(
+    ino_fd: RawFd,
+    sock_fd: Option<RawFd>,
+    timeout_ms: i32,
+) -> io::Result<Option<(bool, bool)>> {
+    let mut pfds = [
+        libc::pollfd {
+            fd: ino_fd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            // poll(2) ignores negative fds — the degraded-mode slot.
+            fd: sock_fd.unwrap_or(-1),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    loop {
+        let r = unsafe { libc::poll(pfds.as_mut_ptr(), pfds.len() as libc::nfds_t, timeout_ms) };
+        if r == 0 {
+            return Ok(None);
+        }
+        if r > 0 {
+            // POLLHUP/POLLERR count as readable: the next read returns the
+            // remaining data then EOF/error, which is the re-init signal.
+            let ready =
+                |p: &libc::pollfd| p.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0;
+            return Ok(Some((ready(&pfds[0]), ready(&pfds[1]))));
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() != io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
+/// A connected `.socket2.sock` event stream: nonblocking, with a carry
+/// buffer for the partial line a read(2) may end on.
+struct EventSock {
+    stream: UnixStream,
+    pending: Vec<u8>,
+}
+
+impl EventSock {
+    /// None = degraded mode: no instance dir or the compositor isn't
+    /// accepting — watch keeps running on agent state alone (the compositor
+    /// section then rides `compositor_state`'s own failure path to null).
+    /// Retried naturally on every re-init, so a compositor that appears
+    /// later is picked up after the next transient error; the common
+    /// restart case goes through the disconnect-EOF -> re-init path anyway.
+    fn connect() -> Option<Self> {
+        let stream = UnixStream::connect(ipc::event_socket_path()?).ok()?;
+        stream.set_nonblocking(true).ok()?;
+        Some(EventSock {
+            stream,
+            pending: Vec::new(),
+        })
+    }
+
+    /// Read everything available (call only after poll said readable);
+    /// Ok(true) when any COMPLETE line is a relevant event. EOF is an error
+    /// on purpose — a closed event stream means the compositor went away,
+    /// and the caller's re-init is the reconnect path.
+    fn drain(&mut self) -> io::Result<bool> {
+        let mut buf = [0u8; 4096];
+        loop {
+            match self.stream.read(&mut buf) {
+                Ok(0) => return Err(io::Error::other("event socket closed (compositor gone)")),
+                Ok(n) => self.pending.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        let mut triggered = false;
+        while let Some(nl) = self.pending.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.pending.drain(..=nl).collect();
+            triggered |= event_triggers(&String::from_utf8_lossy(&line[..nl]));
+        }
+        Ok(triggered)
+    }
+}
+
 /// Thin RAII wrapper over an inotify fd watching ONE directory.
 struct Inotify {
     fd: RawFd,
@@ -212,27 +443,6 @@ impl Inotify {
             return Err(io::Error::last_os_error());
         }
         Ok(ino)
-    }
-
-    /// poll(2) on the fd: Ok(true) = readable, Ok(false) = timeout hit.
-    /// EINTR retries (conservatively with the full timeout — precision on a
-    /// coalesce window or the slow tick doesn't matter).
-    fn wait(&self, timeout_ms: i32) -> io::Result<bool> {
-        let mut pfd = libc::pollfd {
-            fd: self.fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        loop {
-            let r = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
-            if r >= 0 {
-                return Ok(r > 0);
-            }
-            let e = io::Error::last_os_error();
-            if e.kind() != io::ErrorKind::Interrupted {
-                return Err(e);
-            }
-        }
     }
 
     /// One read(2)'s worth of queued events (call only after `wait` said
@@ -328,10 +538,16 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let proj = dir.join("no-projects");
         let out = dir.join(OUTPUT_NAME);
+        let no_comp = || Value::Null; // degraded-mode fetcher
 
         let mut prev = None;
-        recompute(&dir, &proj, &mut prev).unwrap();
-        assert_eq!(fs::read(&out).unwrap(), b"[]\n"); // poll's array + newline
+        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
+        // The object schema: poll's array nested under "sessions",
+        // compositor null in degraded mode, trailing newline.
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            b"{\"compositor\":null,\"sessions\":[]}\n"
+        );
 
         // Unchanged output + file still present -> the write is skipped.
         // Provable without sleeping: a skipped write can't restore mtime, so
@@ -344,7 +560,7 @@ mod tests {
             .unwrap()
             .set_times(times)
             .unwrap();
-        recompute(&dir, &proj, &mut prev).unwrap();
+        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
         assert_eq!(
             fs::metadata(&out).unwrap().modified().unwrap(),
             past,
@@ -353,8 +569,11 @@ mod tests {
 
         // Missing output file -> rewritten even though the content matches.
         fs::remove_file(&out).unwrap();
-        recompute(&dir, &proj, &mut prev).unwrap();
-        assert_eq!(fs::read(&out).unwrap(), b"[]\n");
+        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            b"{\"compositor\":null,\"sessions\":[]}\n"
+        );
 
         // A state change -> rewritten with the new content.
         fs::write(
@@ -362,11 +581,53 @@ mod tests {
             r#"{"ws":7,"status":"waiting","kind":"claude","title":"T","pid":1}"#,
         )
         .unwrap();
-        recompute(&dir, &proj, &mut prev).unwrap();
+        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
         let v: Value = serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
-        assert_eq!(v[0]["sid"], "s1");
-        assert_eq!(v[0]["ws"], 7);
+        assert_eq!(v["sessions"][0]["sid"], "s1");
+        assert_eq!(v["sessions"][0]["ws"], 7);
+
+        // A compositor change alone -> rewritten too.
+        let comp = json!({"workspaces": [], "monitors": []});
+        recompute(&dir, &proj, || comp.clone(), &mut prev).unwrap();
+        let v: Value = serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
+        assert_eq!(v["compositor"], comp);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn event_filter_relevant_vs_noise() {
+        // Everything the recompute set covers, with and without payload.
+        for ev in [
+            "workspacev2>>3,name",
+            "workspace>>3",
+            "createworkspacev2>>11,11",
+            "destroyworkspacev2>>11,11",
+            "moveworkspacev2>>3,name,DP-1",
+            "renameworkspace>>3,newname",
+            "focusedmonv2>>DP-1,3",
+            "monitoraddedv2>>1,DP-2,desc",
+            "monitorremovedv2>>1,DP-2,desc",
+            "openwindow>>abc123,3,kitty,fish",
+            "closewindow>>abc123",
+            "movewindowv2>>abc123,3,name",
+            "activespecial>>special:magic,DP-1",
+            "configreloaded>>",
+        ] {
+            assert!(event_triggers(ev), "{ev} must trigger");
+        }
+        // The documented noise + unknown events are ignored.
+        for ev in [
+            "windowtitle>>abc123",
+            "windowtitlev2>>abc123,new title",
+            "activewindow>>kitty,fish",
+            "activewindowv2>>abc123",
+            "openlayer>>noctalia-bar",
+            "somefutureevent>>data",
+            "not an event line",
+            "",
+        ] {
+            assert!(!event_triggers(ev), "{ev} must not trigger");
+        }
     }
 }

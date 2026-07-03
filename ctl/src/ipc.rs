@@ -78,13 +78,12 @@ pub fn newest_instance(entries: &[(String, f64)]) -> Option<&str> {
         .map(|(name, _)| name.as_str())
 }
 
-/// The request socket: `<runtime>/hypr/<instance>/.socket.sock`. None only
-/// when discovery itself fails (no `hypr/` dir, no instance dirs) — callers
-/// then fall straight back to hyprctl.
-fn socket_path() -> Option<PathBuf> {
+/// The instance dir holding both sockets: `<runtime>/hypr/<instance>/`.
+/// None only when discovery itself fails (no `hypr/` dir, no instance dirs).
+fn instance_dir() -> Option<PathBuf> {
     let hypr = runtime_dir().join("hypr");
-    let dir = match env::var_os("HYPRLAND_INSTANCE_SIGNATURE").filter(|v| !v.is_empty()) {
-        Some(his) => hypr.join(his),
+    match env::var_os("HYPRLAND_INSTANCE_SIGNATURE").filter(|v| !v.is_empty()) {
+        Some(his) => Some(hypr.join(his)),
         None => {
             let entries: Vec<(String, f64)> = fs::read_dir(&hypr)
                 .ok()?
@@ -95,10 +94,25 @@ fn socket_path() -> Option<PathBuf> {
                     Some((e.file_name().to_string_lossy().into_owned(), mtime))
                 })
                 .collect();
-            hypr.join(newest_instance(&entries)?)
+            Some(hypr.join(newest_instance(&entries)?))
         }
-    };
-    Some(dir.join(".socket.sock"))
+    }
+}
+
+/// The request socket: `<instance>/.socket.sock`. None when discovery fails —
+/// callers then fall straight back to hyprctl.
+fn socket_path() -> Option<PathBuf> {
+    Some(instance_dir()?.join(".socket.sock"))
+}
+
+/// The EVENT socket, `<instance>/.socket2.sock` — same instance dir as the
+/// request socket. Protocol (verified live, Hyprland 0.55.4): connect, send
+/// nothing, read newline-delimited `EVENT>>DATA` lines forever; the
+/// compositor closes the stream only when it exits. `bsctl watch` is the
+/// consumer; there is no hyprctl fallback for a *stream*, so None (or a
+/// failed connect) means running without compositor events.
+pub fn event_socket_path() -> Option<PathBuf> {
+    Some(instance_dir()?.join(".socket2.sock"))
 }
 
 /// One request per connection: write the command, shutdown the write side,

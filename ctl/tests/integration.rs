@@ -42,11 +42,14 @@ impl TestEnv {
         for d in [&run, &home, &fakebin] {
             fs::create_dir_all(d).unwrap();
         }
-        // Fake hyprctl: one client per ancestor pid of the caller, all on ws 42.
+        // Fake hyprctl: one client per ancestor pid of the caller, all on
+        // ws 42. Any OTHER query fails (exit 1, no output) so watch's
+        // compositor queries take the degraded path (compositor: null)
+        // instead of parsing a clients-shaped answer as workspaces.
         let stub = fakebin.join("hyprctl");
         fs::write(
             &stub,
-            "#!/bin/sh\npid=$PPID\nsep=''\nprintf '['\nwhile [ \"${pid:-0}\" -gt 1 ]; do\n  printf '%s{\"pid\": %s, \"workspace\": {\"id\": 42}}' \"$sep\" \"$pid\"\n  sep=,\n  pid=$(ps -o ppid= -p \"$pid\" 2>/dev/null | tr -d ' ')\ndone\nprintf ']'\n",
+            "#!/bin/sh\n[ \"$1\" = clients ] || exit 1\npid=$PPID\nsep=''\nprintf '['\nwhile [ \"${pid:-0}\" -gt 1 ]; do\n  printf '%s{\"pid\": %s, \"workspace\": {\"id\": 42}}' \"$sep\" \"$pid\"\n  sep=,\n  pid=$(ps -o ppid= -p \"$pid\" 2>/dev/null | tr -d ' ')\ndone\nprintf ']'\n",
         )
         .unwrap();
         let mut perm = fs::metadata(&stub).unwrap().permissions();
@@ -74,7 +77,10 @@ impl TestEnv {
         c.env("XDG_RUNTIME_DIR", &self.run)
             .env("HOME", &self.home)
             .env("PATH", &self.path)
-            .env_remove("CLAUDE_WS_DEBUG");
+            .env_remove("CLAUDE_WS_DEBUG")
+            // Socket discovery must scan THIS env's <run>/hypr, not resolve
+            // the developer machine's live instance under the test dir.
+            .env_remove("HYPRLAND_INSTANCE_SIGNATURE");
         c
     }
 
@@ -533,13 +539,17 @@ fn watch_converges_to_poll_output() {
     let _w = Watcher::spawn(&env);
 
     // On acquiring the lock the daemon writes once immediately, even with
-    // an empty (freshly created) state dir.
+    // an empty (freshly created) state dir. No Hyprland in this env, so the
+    // compositor section is null (degraded mode).
     wait_for(
-        || widget_json(&env) == Some(json!([])),
+        || widget_json(&env).is_some_and(|v| v["sessions"] == json!([])),
         "initial empty .widget.json",
     );
     let raw = fs::read(env.state_dir().join(".widget.json")).unwrap();
-    assert_eq!(raw, b"[]\n", "exactly poll's array + trailing newline");
+    assert_eq!(
+        raw, b"{\"compositor\":null,\"sessions\":[]}\n",
+        "exactly the object schema + trailing newline"
+    );
 
     // A session file appearing (what a hook write looks like) must show up.
     env.write_state(
@@ -547,31 +557,35 @@ fn watch_converges_to_poll_output() {
         r#"{"ws":5,"status":"thinking","kind":"claude","title":"T","pid":1}"#,
     );
     wait_for(
-        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("w1")),
+        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("w1")),
         "session w1 in .widget.json",
     );
 
-    // A marker touched in -> agents list converges; and the whole file must
-    // equal a fresh `poll` over the same dir.
+    // A marker touched in -> agents list converges; and the sessions section
+    // must equal a fresh `poll` (still the bare array — the documented
+    // divergence) over the same dir.
     env.write_state("w1.a1", r#"{"type":"explore","description":"d"}"#);
     wait_for(
         || {
-            widget_json(&env)
-                .is_some_and(|v| v[0]["agents"].as_array().is_some_and(|a| a.len() == 1))
+            widget_json(&env).is_some_and(|v| {
+                v["sessions"][0]["agents"]
+                    .as_array()
+                    .is_some_and(|a| a.len() == 1)
+            })
         },
         "marker w1.a1 in .widget.json",
     );
-    assert_eq!(widget_json(&env).unwrap(), env.poll());
+    assert_eq!(widget_json(&env).unwrap()["sessions"], env.poll());
 
     // Marker removed -> agents empty; session removed -> back to [].
     fs::remove_file(env.state_dir().join("w1.a1")).unwrap();
     wait_for(
-        || widget_json(&env).is_some_and(|v| v[0]["agents"] == json!([])),
+        || widget_json(&env).is_some_and(|v| v["sessions"][0]["agents"] == json!([])),
         "marker removal reflected",
     );
     fs::remove_file(env.state_dir().join("w1")).unwrap();
     wait_for(
-        || widget_json(&env) == Some(json!([])),
+        || widget_json(&env).is_some_and(|v| v["sessions"] == json!([])),
         "session removal reflected",
     );
 }
@@ -615,7 +629,7 @@ fn watch_failover_between_two_instances() {
         r#"{"ws":1,"status":"waiting","kind":"claude","title":"","pid":1}"#,
     );
     wait_for(
-        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("f1")),
+        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("f1")),
         "winner tracking state",
     );
 
@@ -629,7 +643,8 @@ fn watch_failover_between_two_instances() {
     wait_for(
         || {
             widget_json(&env).is_some_and(|v| {
-                v.as_array()
+                v["sessions"]
+                    .as_array()
                     .is_some_and(|arr| arr.iter().any(|s| s["sid"] == json!("f2")))
             })
         },
@@ -655,7 +670,7 @@ fn watch_migrates_legacy_state_dir_once() {
 
     let _w = Watcher::spawn(&env);
     wait_for(
-        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("m1")),
+        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("m1")),
         "migrated session in .widget.json",
     );
     let sd = env.state_dir();
@@ -679,11 +694,219 @@ fn watch_migrates_legacy_state_dir_once() {
     fs::remove_file(sd.join(".widget.json")).unwrap();
     let _w2 = Watcher::spawn(&env);
     wait_for(
-        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("m1")),
+        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("m1")),
         "successor writing the new dir",
     );
     assert!(old.join("m2").exists(), "second start must not migrate");
     assert!(!sd.join("m2").exists());
+}
+
+// ---- watch: compositor events (fake socket2) --------------------------------
+// A fake Hyprland instance dir under <run>/hypr/<name>/ with BOTH sockets:
+// `.socket.sock` answers `j/workspaces` / `j/monitors` from mutable canned
+// JSON (one request per connection, like the real wire), `.socket2.sock`
+// accepts the watch daemon and lets the test push `EVENT>>DATA` lines.
+
+struct FakeHypr {
+    ws_json: std::sync::Arc<std::sync::Mutex<String>>,
+    mon_json: std::sync::Arc<std::sync::Mutex<String>>,
+    events: std::os::unix::net::UnixListener,
+}
+
+impl FakeHypr {
+    fn start(env: &TestEnv) -> Self {
+        use std::io::Read;
+        let inst = env.run.join("hypr/fake-instance");
+        fs::create_dir_all(&inst).unwrap();
+        let ws_json = std::sync::Arc::new(std::sync::Mutex::new(String::from("[]")));
+        let mon_json = std::sync::Arc::new(std::sync::Mutex::new(String::from("[]")));
+        let req = std::os::unix::net::UnixListener::bind(inst.join(".socket.sock")).unwrap();
+        let (ws, mon) = (ws_json.clone(), mon_json.clone());
+        // Request server: read to EOF (the client shuts down its write
+        // side), answer, close. The thread parks in accept at test end and
+        // dies with the process.
+        std::thread::spawn(move || {
+            for stream in req.incoming() {
+                let Ok(mut s) = stream else { break };
+                let mut cmd = String::new();
+                if s.read_to_string(&mut cmd).is_err() {
+                    continue;
+                }
+                let reply = match cmd.as_str() {
+                    "j/workspaces" => ws.lock().unwrap().clone(),
+                    "j/monitors" => mon.lock().unwrap().clone(),
+                    _ => String::from("unknown request"),
+                };
+                let _ = s.write_all(reply.as_bytes());
+            }
+        });
+        let events = std::os::unix::net::UnixListener::bind(inst.join(".socket2.sock")).unwrap();
+        FakeHypr {
+            ws_json,
+            mon_json,
+            events,
+        }
+    }
+
+    fn set_state(&self, workspaces: &Value, monitors: &Value) {
+        *self.ws_json.lock().unwrap() = workspaces.to_string();
+        *self.mon_json.lock().unwrap() = monitors.to_string();
+    }
+
+    /// The watch daemon's socket2 connection (bounded, so a daemon that
+    /// never connects fails the test instead of hanging it).
+    fn accept_event_client(&self) -> std::os::unix::net::UnixStream {
+        self.events.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match self.events.accept() {
+                Ok((s, _)) => {
+                    s.set_nonblocking(false).unwrap();
+                    return s;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "watch never connected to .socket2.sock"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("accept: {e}"),
+            }
+        }
+    }
+}
+
+/// Raw hyprctl-shaped compositor JSON (extra fields included, to prove the
+/// projection) for two states A and B; only B has workspace 7 on DP-2.
+fn fake_state_a() -> (Value, Value) {
+    (
+        json!([
+            {"id": 7, "name": "seven", "monitor": "DP-1", "monitorID": 0,
+             "windows": 2, "hasfullscreen": false},
+            {"id": -98, "name": "special:magic", "monitor": "DP-1",
+             "monitorID": 0, "windows": 1, "hasfullscreen": false},
+        ]),
+        json!([
+            {"name": "DP-1", "x": 0, "y": 0, "focused": true, "scale": 1.0,
+             "activeWorkspace": {"id": 7, "name": "seven"},
+             "specialWorkspace": {"id": 0, "name": ""}},
+        ]),
+    )
+}
+
+fn fake_state_b() -> (Value, Value) {
+    (
+        json!([
+            {"id": 7, "name": "seven", "monitor": "DP-2", "monitorID": 1,
+             "windows": 2, "hasfullscreen": false},
+        ]),
+        json!([
+            {"name": "DP-1", "x": 0, "y": 0, "focused": false, "scale": 1.0,
+             "activeWorkspace": {"id": 1, "name": "1"},
+             "specialWorkspace": {"id": -99, "name": "special:magic"}},
+            {"name": "DP-2", "x": 2304, "y": 0, "focused": true, "scale": 1.0,
+             "activeWorkspace": {"id": 7, "name": "seven"},
+             "specialWorkspace": {"id": 0, "name": ""}},
+        ]),
+    )
+}
+
+#[test]
+fn watch_socket2_event_refreshes_compositor_section() {
+    let env = TestEnv::new("watch-socket2");
+    let fake = FakeHypr::start(&env);
+    let (ws_a, mon_a) = fake_state_a();
+    fake.set_state(&ws_a, &mon_a);
+    let _w = Watcher::spawn(&env);
+    let mut conn = fake.accept_event_client();
+
+    // Initial write already carries the compositor section, PROJECTED to
+    // the schema (special:* workspaces excluded, extra fields dropped,
+    // activeWs/specialShowing derived).
+    let comp_a = json!({
+        "workspaces": [{"id": 7, "name": "seven", "monitor": "DP-1", "windows": 2}],
+        "monitors": [{"name": "DP-1", "x": 0, "y": 0, "focused": true,
+                      "activeWs": 7, "specialShowing": false}],
+    });
+    wait_for(
+        || widget_json(&env).is_some_and(|v| v["compositor"] == comp_a),
+        "initial compositor section",
+    );
+
+    // Serve fresh state, then push a relevant event: the recompute must
+    // re-query and land state B — no widget/timer involvement anywhere.
+    let (ws_b, mon_b) = fake_state_b();
+    fake.set_state(&ws_b, &mon_b);
+    conn.write_all(b"moveworkspacev2>>7,seven,DP-2\n").unwrap();
+    let comp_b = json!({
+        "workspaces": [{"id": 7, "name": "seven", "monitor": "DP-2", "windows": 2}],
+        "monitors": [{"name": "DP-1", "x": 0, "y": 0, "focused": false,
+                      "activeWs": 1, "specialShowing": true},
+                     {"name": "DP-2", "x": 2304, "y": 0, "focused": true,
+                      "activeWs": 7, "specialShowing": false}],
+    });
+    wait_for(
+        || widget_json(&env).is_some_and(|v| v["compositor"] == comp_b),
+        "moveworkspace event refreshing the compositor section",
+    );
+    // Sessions ride along untouched (empty here).
+    assert_eq!(widget_json(&env).unwrap()["sessions"], json!([]));
+}
+
+#[test]
+fn watch_socket2_irrelevant_events_do_not_write() {
+    let env = TestEnv::new("watch-socket2-noise");
+    let fake = FakeHypr::start(&env);
+    let (ws_a, mon_a) = fake_state_a();
+    fake.set_state(&ws_a, &mon_a);
+    let _w = Watcher::spawn(&env);
+    let mut conn = fake.accept_event_client();
+    wait_for(|| widget_json(&env).is_some(), "initial .widget.json");
+
+    // Sentinel mtime, then only IGNORED events: no rewrite may happen even
+    // though the lines arrive on the socket (same absence-proof pattern as
+    // the dotfile test — a bounded sleep is unavoidable).
+    let past = SystemTime::now() - Duration::from_secs(1000);
+    env.set_mtime(".widget.json", past);
+    conn.write_all(
+        b"windowtitle>>555abc\nwindowtitlev2>>555abc,New Title\nactivewindow>>kitty,fish\n",
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        fs::metadata(env.state_dir().join(".widget.json"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        past,
+        "irrelevant socket2 events must not rewrite the output"
+    );
+}
+
+#[test]
+fn watch_without_socket2_degrades_to_sessions_only() {
+    // No fake instance dir at all: socket2 can't connect (degraded mode)
+    // and the compositor queries fail (stub hyprctl rejects them) -> the
+    // agent-state side must keep working with compositor: null.
+    let env = TestEnv::new("watch-degraded");
+    let _w = Watcher::spawn(&env);
+    wait_for(
+        || widget_json(&env) == Some(json!({"sessions": [], "compositor": null})),
+        "degraded initial write",
+    );
+    env.write_state(
+        "d1",
+        r#"{"ws":3,"status":"waiting","kind":"claude","title":"","pid":1}"#,
+    );
+    wait_for(
+        || {
+            widget_json(&env).is_some_and(|v| {
+                v["sessions"][0]["sid"] == json!("d1") && v["compositor"].is_null()
+            })
+        },
+        "sessions flowing in degraded mode",
+    );
 }
 
 #[test]

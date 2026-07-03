@@ -69,25 +69,50 @@
 //! Poll side (`bsctl poll`): one flat pass emitting a single JSON array line
 //! (`[{sid, ws, status, kind, title, agents: [{id, type, description,
 //! started}]}]`), sweeping dead-pid sessions, orphan markers and stale
-//! subagent markers on the way.
+//! subagent markers on the way. NOTE the deliberate divergence from watch:
+//! poll stays this bare sessions array (a stable one-shot debugging tool);
+//! watch nests the same array inside an object.
 //!
-//! Watch side (`bsctl watch`): a long-lived daemon keeping
-//! `<state-dir>/.widget.json` equal to `bsctl poll`'s output (the same
-//! array plus trailing newline, written atomically), so the widget FileView-watches
-//! one file instead of polling on a timer. The dot-prefixed name makes it
-//! structurally invisible to poll's dotfile skip and clear's `<sid>.*`
-//! sweep. Single writer with seamless failover: an exclusive flock on
-//! `<state-dir>/.widget.lock` — every bar instance runs one watcher, losers
-//! block in flock as hot standbys and take over the moment the winner dies
-//! (on acquiring: write once, then loop). Rewrites are driven by inotify
-//! events on non-dot entries (coalesced ~50ms) plus a 10s tick (pid death
-//! and marker aging are invisible to inotify), and land only when the
-//! serialization actually changed, so the widget is never woken for nothing.
-//! Transient errors never crash-loop: log to stderr once, sleep 1s, re-init
-//! (lock included). `bsctl poll` remains a subcommand — one-shot debugging
-//! and the documented fallback if watch misbehaves. On acquiring the lock,
-//! the watcher also runs a best-effort one-time migration of protocol files
-//! out of the pre-rename `claude-ws` dir (see watch.rs).
+//! Watch side (`bsctl watch`): a long-lived daemon folding BOTH state
+//! sources the widget renders — agent state and compositor state — into
+//! `<state-dir>/.widget.json`, so the widget FileView-watches one file
+//! instead of polling anything. The file is one compact JSON object plus
+//! trailing newline, written atomically:
+//!
+//! `{"sessions": [ ...exactly poll's array... ],
+//!   "compositor": {"workspaces": [{id, name, monitor, windows}],
+//!                  "monitors": [{name, x, y, focused, activeWs,
+//!                                specialShowing}]}}`
+//!
+//! The compositor section is built fresh each recompute from
+//! `ipc::json("workspaces")` + `ipc::json("monitors")` (~1ms socket
+//! queries). Workspaces exclude `special:*` names (the bar's rule);
+//! `activeWs` is the monitor's activeWorkspace id; `specialShowing` is
+//! whether its specialWorkspace name is non-empty. If either query fails,
+//! `"compositor": null` is emitted and the widget keeps its last compositor
+//! state. The dot-prefixed output name makes it structurally invisible to
+//! poll's dotfile skip and clear's `<sid>.*` sweep. Single writer with
+//! seamless failover: an exclusive flock on `<state-dir>/.widget.lock` —
+//! every bar instance runs one watcher, losers block in flock as hot
+//! standbys and take over the moment the winner dies (on acquiring: write
+//! once, then loop). Rewrites are driven by inotify events on non-dot state
+//! entries AND by Hyprland's `.socket2.sock` event stream (both coalesced
+//! ~50ms), plus a 10s tick (pid death and marker aging are invisible to
+//! inotify), and land only when the serialization actually changed, so the
+//! widget is never woken for nothing. The socket2 events that trigger a
+//! recompute: workspace(v2), createworkspace(v2), destroyworkspace(v2),
+//! moveworkspace(v2), renameworkspace, focusedmon(v2), monitoradded(v2),
+//! monitorremoved(v2), openwindow, closewindow, movewindow(v2),
+//! activespecial(v2), configreloaded; everything else — notably the noisy
+//! windowtitle*/activewindow*, which nothing rendered depends on — is
+//! ignored. A socket2 disconnect (compositor restart) rides the transient
+//! error path: log to stderr once, sleep 1s, re-init (lock included) and
+//! reconnect. If socket2 can't connect at all (no Hyprland), watch runs
+//! DEGRADED — agent state only, compositor null. `bsctl poll` remains a
+//! subcommand — one-shot debugging and the documented fallback if watch
+//! misbehaves. On acquiring the lock, the watcher also runs a best-effort
+//! one-time migration of protocol files out of the pre-rename `claude-ws`
+//! dir (see watch.rs).
 //!
 //! # Workspace display order (`bsctl ws`)
 //!
@@ -177,6 +202,12 @@
 //! which always speaks the running compositor's protocol on this rolling
 //! release — the safety net for wire-format drift. A non-ok reply means the
 //! request was rejected, not half-executed, so the retry cannot double-fire.
+//!
+//! The EVENT socket, `.socket2.sock` (same instance dir), is exposed via
+//! `ipc::event_socket_path()`: connect, send nothing, read newline-delimited
+//! `EVENT>>DATA` lines forever (verified live, Hyprland 0.55.4). It has no
+//! hyprctl fallback — it is a stream, not a request — so its one consumer
+//! (`bsctl watch`) treats connect failure as degraded mode.
 //!
 //! # Display management (`bsctl display`)
 //!
