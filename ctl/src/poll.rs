@@ -28,7 +28,8 @@ pub fn run() -> i32 {
 /// `os.path.expanduser("~/.claude/projects")` — via $HOME. ($HOME is always
 /// set under a session; if it somehow isn't, the glob just never matches and
 /// stale markers lose their transcript rescue, same as a bogus HOME.)
-fn projects_dir() -> PathBuf {
+/// pub(crate): `watch` runs the same pass against the same roots.
+pub(crate) fn projects_dir() -> PathBuf {
     std::env::var_os("HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)

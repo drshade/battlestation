@@ -33,6 +33,8 @@ enum Cmd {
     },
     /// Emit the claude-ws state dir as one JSON array line (widget poll side)
     Poll,
+    /// Daemon: keep <state-dir>/.widget.json equal to `poll`'s output
+    Watch,
     /// Workspace display-order commands (navigate/move by display position)
     Ws {
         #[command(subcommand)]
@@ -133,6 +135,7 @@ fn main() {
             bsctl::hook::run(verb.as_deref(), &argv)
         }
         Cmd::Poll => bsctl::poll::run(),
+        Cmd::Watch => bsctl::watch::run(),
         Cmd::Ws { cmd } => match cmd {
             WsCmd::Goto { pos } => bsctl::ws::goto(pos as usize),
             WsCmd::Movewindow { pos, follow } => bsctl::ws::movewindow(pos as usize, follow),

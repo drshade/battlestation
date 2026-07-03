@@ -148,9 +148,10 @@ Item {
     rebuildDisplay();
   }
 
-  // Equality guards so the 400/500 ms pollers only reassign a reactive structure
-  // when its content actually changed -- otherwise identical-but-new values churn
-  // the consumers (and rebuilding displayList would recreate every pill + bot).
+  // Equality guards so state-file reloads and the occupancy poller only reassign
+  // a reactive structure when its content actually changed -- otherwise
+  // identical-but-new values churn the consumers (and rebuilding displayList
+  // would recreate every pill + bot).
   function sameIntList(a, b) {
     if (!a || !b || a.length !== b.length)
       return false;
@@ -293,95 +294,125 @@ Item {
     id: orderWriter
   }
 
-  // ---- pollers --------------------------------------------------------------
-  Timer {
-    interval: 400
-    running: true
-    repeat: true
-    onTriggered: if (!poller.running)
-      poller.running = true
-  }
-  // The poll side lives in bsctl (repo: ctl/src/poll.rs) — the Rust binary that
-  // also implements the hook side, so the whole claude-ws protocol has one home
-  // (protocol spec: ctl/src/lib.rs). `bsctl poll` does one flat pass
-  // over the state dir, self-cleaning (dead-pid sessions, orphan markers, and
-  // kill-leaked stale markers via the transcript-frozen GC), and emits ONE JSON
-  // array line:
+  // ---- state watcher ----------------------------------------------------------
+  // Event-driven, not polled: `bsctl watch` (repo: ctl/src/watch.rs) is a
+  // long-lived daemon that inotify-watches the claude-ws state dir and keeps
+  // <XDG_RUNTIME_DIR>/claude-ws/.widget.json equal to `bsctl poll`'s output —
+  // one flat self-cleaning pass (dead-pid sessions, orphan markers,
+  // kill-leaked stale markers via the transcript-frozen GC) emitting ONE JSON
+  // array (protocol spec: ctl/src/lib.rs):
   //   [{sid, ws, status, kind, title, agents: [{id, type, description, started}]}]
+  // rewritten atomically only when the content changes, plus a 10s tick for
+  // what inotify can't see (dying pids, markers aging out). Every bar instance
+  // runs one watcher; an exclusive flock makes one the writer and the rest hot
+  // standbys that take over if it dies, so multi-monitor needs no coordination
+  // here. The FileView reload()s on each write and feeds applyRecs(); `bsctl
+  // poll` remains available as a one-shot debugging fallback if watch
+  // misbehaves.
+  readonly property string stateFilePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/claude-ws/.widget.json"
+  property bool stateEverLoaded: false
 
   Process {
-    id: poller
-    command: [Quickshell.env("HOME") + "/.local/bin/bsctl", "poll"]
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var recs;
-        try {
-          recs = JSON.parse(text);
-        } catch (e) {
-          recs = null;
-        }
-        if (!recs || recs.length === undefined)
-          return;
-        var statusBySid = {};
-        var titleBySid = {};
-        var kindBySid = {};
-        var agentsBySid = {};
-        var seen = {};      // wsid -> { sid: true } present this poll
-        var fresh = {};     // wsid -> [sid] in poll order (for appending new bots)
-        for (var i = 0; i < recs.length; i++) {
-          var r = recs[i];
-          if (!r || !r.sid)
-            continue;
-          var sid = r.sid, ws = String(r.ws);
-          statusBySid[sid] = r.status || "";
-          kindBySid[sid] = r.kind || "claude";
-          titleBySid[sid] = r.title || "";
-          // Reuse the prior list instance when its content is unchanged, so the
-          // sub-bot Repeater bound to it never sees a new model on a mere re-poll.
-          var list = r.agents || [];
-          var prior = root.agentsBySid[sid];
-          agentsBySid[sid] = root.sameAgentList(prior, list) ? prior : list;
-          if (!seen[ws]) {
-            seen[ws] = {};
-            fresh[ws] = [];
-          }
-          if (!seen[ws][sid]) {
-            seen[ws][sid] = true;
-            fresh[ws].push(sid);
-          }
-        }
-        // Keep each workspace's existing bot order, drop sids that vanished, and
-        // append newly-seen ones at the end -- so a status/title change never
-        // reshuffles a live bot's slot (only a start/stop touches the sequence).
-        var sidsByWs = {};
-        for (var ws2 in fresh) {
-          var priorSids = root.sidsByWs[ws2] || [];
-          var out = [];
-          for (var a = 0; a < priorSids.length; a++)
-            if (seen[ws2][priorSids[a]])
-              out.push(priorSids[a]);
-          for (var b = 0; b < fresh[ws2].length; b++)
-            if (out.indexOf(fresh[ws2][b]) === -1)
-              out.push(fresh[ws2][b]);
-          sidsByWs[ws2] = out;
-        }
-        // sidsByWs is a map of string arrays (sameInstances handles that shape);
-        // the value maps churn only when a status/title/kind actually changes.
-        if (!root.sameInstances(sidsByWs, root.sidsByWs))
-          root.sidsByWs = sidsByWs;
-        if (!root.sameKeySet(statusBySid, root.statusBySid))
-          root.statusBySid = statusBySid;
-        if (!root.sameKeySet(titleBySid, root.titleBySid))
-          root.titleBySid = titleBySid;
-        if (!root.sameKeySet(kindBySid, root.kindBySid))
-          root.kindBySid = kindBySid;
-        // Identity compare is sound here: unchanged agent lists were reused above,
-        // so a differing value instance means the list's content really changed.
-        if (!root.sameKeySet(agentsBySid, root.agentsBySid))
-          root.agentsBySid = agentsBySid;
-      }
+    id: watcher
+    command: [Quickshell.env("HOME") + "/.local/bin/bsctl", "watch"]
+    running: true
+  }
+  // Respawn guard — sparse, because the daemon is meant to live forever; this
+  // only picks it back up after a crash or a `make build` binary swap. Also
+  // nudges the FileView until its first successful load: the file may not
+  // exist yet while the daemon is starting (missing file = no update, wait).
+  Timer {
+    interval: 5000
+    running: true
+    repeat: true
+    onTriggered: {
+      if (!watcher.running)
+        watcher.running = true;
+      if (!root.stateEverLoaded)
+        stateFile.reload();
     }
   }
+
+  FileView {
+    id: stateFile
+    path: root.stateFilePath
+    watchChanges: true
+    printErrors: false // missing until the daemon's first write — not an error
+    onFileChanged: reload()
+    onLoaded: {
+      root.stateEverLoaded = true;
+      root.applyRecs(text());
+    }
+  }
+
+  function applyRecs(txt) {
+    var recs;
+    try {
+      recs = JSON.parse(txt);
+    } catch (e) {
+      recs = null;
+    }
+    if (!recs || recs.length === undefined)
+      return;
+    var statusBySid = {};
+    var titleBySid = {};
+    var kindBySid = {};
+    var agentsBySid = {};
+    var seen = {};      // wsid -> { sid: true } present this poll
+    var fresh = {};     // wsid -> [sid] in poll order (for appending new bots)
+    for (var i = 0; i < recs.length; i++) {
+      var r = recs[i];
+      if (!r || !r.sid)
+        continue;
+      var sid = r.sid, ws = String(r.ws);
+      statusBySid[sid] = r.status || "";
+      kindBySid[sid] = r.kind || "claude";
+      titleBySid[sid] = r.title || "";
+      // Reuse the prior list instance when its content is unchanged, so the
+      // sub-bot Repeater bound to it never sees a new model on a mere reload.
+      var list = r.agents || [];
+      var prior = root.agentsBySid[sid];
+      agentsBySid[sid] = root.sameAgentList(prior, list) ? prior : list;
+      if (!seen[ws]) {
+        seen[ws] = {};
+        fresh[ws] = [];
+      }
+      if (!seen[ws][sid]) {
+        seen[ws][sid] = true;
+        fresh[ws].push(sid);
+      }
+    }
+    // Keep each workspace's existing bot order, drop sids that vanished, and
+    // append newly-seen ones at the end -- so a status/title change never
+    // reshuffles a live bot's slot (only a start/stop touches the sequence).
+    var sidsByWs = {};
+    for (var ws2 in fresh) {
+      var priorSids = root.sidsByWs[ws2] || [];
+      var out = [];
+      for (var a = 0; a < priorSids.length; a++)
+        if (seen[ws2][priorSids[a]])
+          out.push(priorSids[a]);
+      for (var b = 0; b < fresh[ws2].length; b++)
+        if (out.indexOf(fresh[ws2][b]) === -1)
+          out.push(fresh[ws2][b]);
+      sidsByWs[ws2] = out;
+    }
+    // sidsByWs is a map of string arrays (sameInstances handles that shape);
+    // the value maps churn only when a status/title/kind actually changes.
+    if (!root.sameInstances(sidsByWs, root.sidsByWs))
+      root.sidsByWs = sidsByWs;
+    if (!root.sameKeySet(statusBySid, root.statusBySid))
+      root.statusBySid = statusBySid;
+    if (!root.sameKeySet(titleBySid, root.titleBySid))
+      root.titleBySid = titleBySid;
+    if (!root.sameKeySet(kindBySid, root.kindBySid))
+      root.kindBySid = kindBySid;
+    // Identity compare is sound here: unchanged agent lists were reused above,
+    // so a differing value instance means the list's content really changed.
+    if (!root.sameKeySet(agentsBySid, root.agentsBySid))
+      root.agentsBySid = agentsBySid;
+  }
+
   Timer {
     interval: 500
     running: true

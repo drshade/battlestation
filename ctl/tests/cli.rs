@@ -43,7 +43,7 @@ fn help_lists_all_subcommands() {
     let out = bsctl(&["--help"]);
     assert_eq!(out.status.code(), Some(0));
     let help = String::from_utf8_lossy(&out.stdout);
-    for sub in ["hook", "poll", "ws", "usage", "completions"] {
+    for sub in ["hook", "poll", "watch", "ws", "usage", "completions"] {
         assert!(help.contains(sub), "--help must mention {sub}: {help}");
     }
 }

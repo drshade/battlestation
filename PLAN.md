@@ -124,6 +124,17 @@ recovery boundary.
   2s poll. With the IPC module it can also subscribe to `.socket2.sock`
   events (workspace/monitor changes) — the real-time primitive everything
   else wants.
+
+  **Outcome (2026-07-03).** `bsctl watch` done: reuses `poll::poll()`
+  wholesale; inotify (raw libc, alignment-free wire parser) + 10s tick for
+  what inotify can't see (pid deaths, marker GC aging); 50ms coalescing;
+  writes only on change; single-writer flock with hot-standby failover
+  (losers block; kill-the-winner tested). Live: 52ms hook-write→widget-state
+  latency vs the old worst-case 2s. Widget migrated to a long-lived watch
+  Process + FileView (parse logic untouched); `bsctl poll` remains the
+  one-shot fallback. `display scale` also done same day (8/8 byte parity,
+  `ipc::eval` added, keybinds repointed, script retired). 106 tests.
+  `.socket2.sock` event subscription remains the open future extension.
 - **Multi-monitor workspace model** (requirements captured 2026-07-03,
   design-for-now/implement-later): today all 10 bound workspaces live on
   monitor 1; a second monitor spawns ws 11-20 which have no keybinds and no

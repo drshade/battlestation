@@ -442,6 +442,166 @@ fn bsctl_now() -> f64 {
         .as_secs_f64()
 }
 
+// ---- watch ---------------------------------------------------------------
+// The daemon side: spawn the built binary's `watch` against the TestEnv
+// state dir, poke the dir, and assert `.widget.json` CONVERGES (bounded
+// waits on conditions, not fixed sleeps) to what `poll` would emit.
+
+/// A spawned `bsctl watch`, killed on drop so a panicking test never leaks
+/// a daemon holding the lock.
+struct Watcher(std::process::Child);
+
+impl Watcher {
+    fn spawn(env: &TestEnv) -> Self {
+        Watcher(
+            env.cmd()
+                .arg("watch")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        )
+    }
+    fn kill(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+/// Poll `cond` every 10ms for up to 5s; panic with `what` on timeout.
+fn wait_for(mut cond: impl FnMut() -> bool, what: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if cond() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("timed out waiting for {what}");
+}
+
+/// Parsed `.widget.json`, or None while missing/in-flight.
+fn widget_json(env: &TestEnv) -> Option<Value> {
+    let b = fs::read(env.state_dir().join(".widget.json")).ok()?;
+    serde_json::from_slice(&b).ok()
+}
+
+#[test]
+fn watch_converges_to_poll_output() {
+    let env = TestEnv::new("watch-converge");
+    let _w = Watcher::spawn(&env);
+
+    // On acquiring the lock the daemon writes once immediately, even with
+    // an empty (freshly created) state dir.
+    wait_for(
+        || widget_json(&env) == Some(json!([])),
+        "initial empty .widget.json",
+    );
+    let raw = fs::read(env.state_dir().join(".widget.json")).unwrap();
+    assert_eq!(raw, b"[]\n", "exactly poll's array + trailing newline");
+
+    // A session file appearing (what a hook write looks like) must show up.
+    env.write_state(
+        "w1",
+        r#"{"ws":5,"status":"thinking","kind":"claude","title":"T","pid":1}"#,
+    );
+    wait_for(
+        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("w1")),
+        "session w1 in .widget.json",
+    );
+
+    // A marker touched in -> agents list converges; and the whole file must
+    // equal a fresh `poll` over the same dir.
+    env.write_state("w1.a1", r#"{"type":"explore","description":"d"}"#);
+    wait_for(
+        || {
+            widget_json(&env)
+                .is_some_and(|v| v[0]["agents"].as_array().is_some_and(|a| a.len() == 1))
+        },
+        "marker w1.a1 in .widget.json",
+    );
+    assert_eq!(widget_json(&env).unwrap(), env.poll());
+
+    // Marker removed -> agents empty; session removed -> back to [].
+    fs::remove_file(env.state_dir().join("w1.a1")).unwrap();
+    wait_for(
+        || widget_json(&env).is_some_and(|v| v[0]["agents"] == json!([])),
+        "marker removal reflected",
+    );
+    fs::remove_file(env.state_dir().join("w1")).unwrap();
+    wait_for(
+        || widget_json(&env) == Some(json!([])),
+        "session removal reflected",
+    );
+}
+
+#[test]
+fn watch_ignores_dotfiles_and_unchanged_output() {
+    let env = TestEnv::new("watch-dotfiles");
+    let _w = Watcher::spawn(&env);
+    wait_for(|| widget_json(&env).is_some(), "initial .widget.json");
+
+    // Plant a sentinel mtime on the output, then churn only names the
+    // filter must ignore. A rewrite would clobber the sentinel, so a
+    // surviving sentinel proves no rewrite happened (the one spot a bounded
+    // sleep is unavoidable — we're asserting an absence).
+    let past = SystemTime::now() - Duration::from_secs(1000);
+    env.set_mtime(".widget.json", past);
+    env.write_state(".scratch.tmp", "{}");
+    env.write_state("debug.log", "=== noise");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        fs::metadata(env.state_dir().join(".widget.json"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        past,
+        "dotfile/debug.log events must not rewrite the output"
+    );
+}
+
+#[test]
+fn watch_failover_between_two_instances() {
+    let env = TestEnv::new("watch-failover");
+    let mut a = Watcher::spawn(&env);
+    // A wins the lock (proven by the file appearing) ...
+    wait_for(|| widget_json(&env).is_some(), "winner's first write");
+    // ... so B can only block in flock as the standby.
+    let _b = Watcher::spawn(&env);
+
+    env.write_state(
+        "f1",
+        r#"{"ws":1,"status":"waiting","kind":"claude","title":"","pid":1}"#,
+    );
+    wait_for(
+        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("f1")),
+        "winner tracking state",
+    );
+
+    // Kill the winner; the standby must acquire the lock and take over —
+    // only B is alive to observe this write.
+    a.kill();
+    env.write_state(
+        "f2",
+        r#"{"ws":2,"status":"tooling","kind":"claude","title":"","pid":1}"#,
+    );
+    wait_for(
+        || {
+            widget_json(&env).is_some_and(|v| {
+                v.as_array()
+                    .is_some_and(|arr| arr.iter().any(|s| s["sid"] == json!("f2")))
+            })
+        },
+        "survivor taking over the file",
+    );
+}
+
 #[test]
 fn tool_verb_heals_empty_marker_fields_from_meta() {
     // SubagentStart can fire before the agent's meta.json exists (live race,

@@ -63,6 +63,22 @@
 //! started}]}]`), sweeping dead-pid sessions, orphan markers and stale
 //! subagent markers on the way.
 //!
+//! Watch side (`bsctl watch`): a long-lived daemon keeping
+//! `<state-dir>/.widget.json` equal to `bsctl poll`'s output (the same
+//! array plus trailing newline, written atomically), so the widget FileView-watches
+//! one file instead of polling on a timer. The dot-prefixed name makes it
+//! structurally invisible to poll's dotfile skip and clear's `<sid>.*`
+//! sweep. Single writer with seamless failover: an exclusive flock on
+//! `<state-dir>/.widget.lock` — every bar instance runs one watcher, losers
+//! block in flock as hot standbys and take over the moment the winner dies
+//! (on acquiring: write once, then loop). Rewrites are driven by inotify
+//! events on non-dot entries (coalesced ~50ms) plus a 10s tick (pid death
+//! and marker aging are invisible to inotify), and land only when the
+//! serialization actually changed, so the widget is never woken for nothing.
+//! Transient errors never crash-loop: log to stderr once, sleep 1s, re-init
+//! (lock included). `bsctl poll` remains a subcommand — one-shot debugging
+//! and the documented fallback if watch misbehaves.
+//!
 //! # Workspace display order (`bsctl ws`)
 //!
 //! Navigate/move by DISPLAY POSITION instead of Hyprland's immutable
@@ -194,4 +210,5 @@ pub mod proto;
 pub mod scale;
 pub mod sys;
 pub mod usage;
+pub mod watch;
 pub mod ws;
