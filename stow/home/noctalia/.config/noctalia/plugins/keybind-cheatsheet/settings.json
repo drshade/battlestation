@@ -426,8 +426,26 @@
           "_verb": ""
         },
         {
+          "keys": "Mod3 + F10",
+          "desc": "Swap all workspaces with display 1",
+          "bindId": "|32|F10|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F10",
+          "_mods": "Mod3",
+          "_verb": ""
+        },
+        {
+          "keys": "Mod3 + F11",
+          "desc": "Swap all workspaces with display 2",
+          "bindId": "|32|F11|000|__lua",
+          "undescribed": false,
+          "_mainKey": "F11",
+          "_mods": "Mod3",
+          "_verb": ""
+        },
+        {
           "keys": "Mod3 + F12",
-          "desc": "Swap displays",
+          "desc": "Swap all workspaces with display 3",
           "bindId": "|32|F12|000|__lua",
           "undescribed": false,
           "_mainKey": "F12",
