@@ -56,7 +56,7 @@ Item {
 
     Image {
       anchors.verticalCenter: parent.verticalCenter
-      source: Qt.resolvedUrl("assets/claude.svg")
+      source: usage.cfg.kindIcon("claude") // the Anthropic mark -- this indicator is Claude-plan-specific
       width: cfg.d
       height: cfg.d
       sourceSize.width: Math.round(cfg.d * 2)

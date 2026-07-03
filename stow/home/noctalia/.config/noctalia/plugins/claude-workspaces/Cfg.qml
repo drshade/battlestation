@@ -99,24 +99,113 @@ QtObject {
     return wsKeyOn(wsKeyFor(role));
   }
 
-  // ---- bot icon URLs --------------------------------------------------------
+  // ---- per-kind (harness) presentation registry -------------------------------
+  // THE single point of definition for how an agent kind looks. Adding a new
+  // harness (gemini, opencode, ...) = one entry here + an assets/<dir>/ holding
+  // the files the entry names -- nothing else changes: every consumer
+  // (statusIcon/faceUrl/restIcon, BotIcon's emote pool and tooltip label, the
+  // usage icon) resolves through kindDef(). An unknown kind falls back to the
+  // claude entry, so a harness with no assets yet renders as a Claude bot
+  // instead of breaking.
+  //
+  // Per entry:
+  //   label    tooltip name shown while a session has no title
+  //   dir      assets/<dir>/: icon.svg (brand mark), <status>.svg per status,
+  //            and <status>-<face>.svg for every face named below
+  //   neutral  file stem rendered for an unknown/empty status
+  //   rest     face a commander (bot with subagents) rests on between emotes,
+  //            watching its squad; needs <status>-<rest>.svg for EVERY status.
+  //            "" = no such face, rest on the plain status icon instead.
+  //   faces    per status: face-swap emotes the random emote picker may draw
+  //   motions  per status: transform emotes (bounce/wiggle -- kind-agnostic
+  //            mechanics living in BotIcon) mixed into the same pool
+  // A status's pool = faces[status] ++ motions[status]; repeats are weights.
+  readonly property var kinds: ({
+                                  "claude": {
+                                    "label": "Claude Code",
+                                    "dir": "claude",
+                                    "neutral": "base",
+                                    "rest": "look",
+                                    "faces": {
+                                      "thinking": ["squint", "look", "happy", "blink"],
+                                      "tooling": ["surprised", "blink"],
+                                      "waiting": ["blink", "sleepy", "look"]
+                                    },
+                                    "motions": {
+                                      "thinking": ["bounce", "bounce"],
+                                      "tooling": ["wiggle", "wiggle", "bounce"],
+                                      "waiting": ["bounce"]
+                                    }
+                                  },
+                                  "codex": {
+                                    "label": "Codex",
+                                    "dir": "codex",
+                                    "neutral": "waiting",
+                                    "rest": "",
+                                    "faces": {
+                                      "thinking": ["spark", "spark"],
+                                      "tooling": ["bracket", "spark"],
+                                      "waiting": ["pause", "pause"]
+                                    },
+                                    "motions": {
+                                      "thinking": ["bounce"],
+                                      "tooling": ["wiggle", "wiggle", "bounce"],
+                                      "waiting": ["bounce"]
+                                    }
+                                  }
+                                })
+  function kindDef(kind) {
+    return kinds[kind] || kinds["claude"];
+  }
+  function kindLabel(kind) {
+    return kindDef(kind).label;
+  }
+  function kindIcon(kind) {
+    return Qt.resolvedUrl("assets/" + kindDef(kind).dir + "/icon.svg");
+  }
+
   // The protocol's statuses are semantic (thinking/tooling/waiting); mapping a
-  // state to its presentation -- the green/purple/orange asset families -- is
+  // status to its on-disk stem -- the green/purple/orange asset families -- is
   // this table's job, and every status-string consumer routes through it.
-  readonly property var statusAsset: ({
-                                        "thinking": "claudecode-thinking", // green
-                                        "tooling": "claudecode-tool",      // purple
-                                        "waiting": "claudecode-waiting"    // orange
-                                      })
-  function statusIcon(status) {
-    var a = statusAsset[status];
-    return Qt.resolvedUrl("assets/" + (a || "claudecode") + ".svg");
+  readonly property var statusStem: ({
+                                       "thinking": "thinking", // green
+                                       "tooling": "tool",      // purple
+                                       "waiting": "waiting"    // orange
+                                     })
+  // How long each face emote holds before the bot returns to its status icon.
+  // Keyed by face name across all kinds (blink is a flicker, sleepy/pause a yawn).
+  readonly property var faceHold: ({
+                                     "blink": 150,
+                                     "squint": 700,
+                                     "look": 700,
+                                     "happy": 700,
+                                     "surprised": 600,
+                                     "sleepy": 1200,
+                                     "spark": 600,
+                                     "bracket": 700,
+                                     "pause": 1200
+                                   })
+  function faceHoldMs(emote) {
+    return faceHold[emote] || 700;
   }
-  function statusPrefix(status) {
-    return statusAsset[status] || "claudecode-waiting";
+  function statusIcon(kind, status) {
+    var def = kindDef(kind);
+    return Qt.resolvedUrl("assets/" + def.dir + "/" + (statusStem[status] || def.neutral) + ".svg");
   }
-  function faceUrl(status, emote) {
-    return Qt.resolvedUrl("assets/" + statusPrefix(status) + "-" + emote + ".svg");
+  function faceUrl(kind, status, emote) {
+    // Unknown status wears the calm (waiting) family, like statusIcon's neutral.
+    return Qt.resolvedUrl("assets/" + kindDef(kind).dir + "/" + (statusStem[status] || "waiting") + "-" + emote + ".svg");
+  }
+  // Commander rest face (or the plain status icon for kinds without one).
+  function restIcon(kind, status) {
+    var def = kindDef(kind);
+    return def.rest !== "" ? faceUrl(kind, status, def.rest) : statusIcon(kind, status);
+  }
+  // Weighted emote vocabulary for one kind+status (see the registry above).
+  function emotePool(kind, status) {
+    var def = kindDef(kind);
+    var key = statusStem[status] ? status : "waiting";
+    return def.faces[key].concat(def.motions[key]);
   }
 
   // ---- misc helpers ---------------------------------------------------------

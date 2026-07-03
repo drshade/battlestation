@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+# codex-config — git clean filter for stow/home/codex/.codex/config.toml.
+#
+# Codex rewrites its config at runtime: it inserts [projects."<path>"] trust
+# tables and [tui.*] UI state into the same file that carries the deliberate
+# config. The tracked form is a WHITELIST projection — default-deny, so a
+# table Codex invents tomorrow never churns the repo. Kept: root-table keys
+# in KEEP_ROOT and every section under [hooks] (the battlestation-ws status
+# hooks), plus the comments/blanks attached to kept content. The live file
+# keeps everything; only what git sees is projected.
+#
+# Why python and line/section-based: jq doesn't parse TOML, and stdlib
+# tomllib parses but cannot serialize (a serializing round-trip would also
+# reformat the file wholesale). Projecting whole sections by header keeps the
+# output byte-identical to the kept input lines. Limitation: a kept ROOT key
+# must be single-line (section bodies are kept verbatim, so multi-line values
+# inside [hooks.*] are fine) — true of every key in KEEP_ROOT.
+#
+# This script is the single source of truth for the keep-list. Wired up via
+# .gitattributes (filter=codex-config) + repo-local git config:
+#   git config filter.codex-config.clean 'bin/filters/codex-config'
+# No smudge filter: checkout produces the projected form, and Codex re-adds
+# its runtime tables on next run.
+import re
+import sys
+
+KEEP_ROOT = {"model", "model_reasoning_effort", "service_tier"}
+KEEP_SECTIONS = re.compile(r"^hooks($|[.\s\]])")  # [hooks], [[hooks.X]], ...
+
+HEADER = re.compile(r"^\s*\[\[?\s*([^]]*?)\s*\]\]?\s*(#.*)?$")
+ROOT_KEY = re.compile(r"^\s*([A-Za-z0-9_-]+|\"[^\"]*\"|'[^']*')\s*=")
+
+out = []
+pending = []  # comments/blanks awaiting a keep/drop decision
+in_root = True
+keeping = False  # current section kept?
+for line in sys.stdin:
+    stripped = line.strip()
+    if stripped == "" or stripped.startswith("#"):
+        pending.append(line)
+        continue
+    m = HEADER.match(line)
+    if m:
+        in_root = False
+        keeping = bool(KEEP_SECTIONS.match(m.group(1)))
+        if keeping:
+            out.extend(pending)
+            out.append(line)
+        pending = []
+        continue
+    if in_root:
+        k = ROOT_KEY.match(line)
+        if k and k.group(1).strip("\"'") in KEEP_ROOT:
+            out.extend(pending)
+            out.append(line)
+        pending = []
+    elif keeping:
+        out.extend(pending)
+        out.append(line)
+        pending = []
+    else:
+        pending = []
+
+sys.stdout.writelines(out)

@@ -1,0 +1,51 @@
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+service_tier = "default"
+
+# battlestation-ws status hooks (see ctl/src/lib.rs for the protocol and
+# CODEX_HOOKS.md for the Codex hook surface). Non-managed command hooks must
+# be reviewed and trusted once with /hooks before they run.
+[[hooks.SessionStart]]
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex waiting"
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex thinking"
+
+[[hooks.PreToolUse]]
+matcher = "*"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex tooling"
+
+[[hooks.PostToolUse]]
+matcher = "*"
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex thinking"
+
+[[hooks.PermissionRequest]]
+matcher = "*"
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex waiting"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex waiting"
+
+[[hooks.SubagentStart]]
+matcher = "*"
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex agent-start"
+
+[[hooks.SubagentStop]]
+matcher = "*"
+[[hooks.SubagentStop.hooks]]
+type = "command"
+command = "$HOME/.local/bin/bsctl hook --kind codex agent-stop"

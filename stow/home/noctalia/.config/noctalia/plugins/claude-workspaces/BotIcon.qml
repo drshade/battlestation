@@ -1,6 +1,8 @@
-// Animations: one expressive Claude Code bot for a single Claude instance.
-// Random emote events (faces + bounce/wiggle), idle breathing, and a forced
-// "poke" emote when pokeNonce changes (workspace clicked / switched to).
+// Animations: one expressive bot for a single agent instance. Random emote
+// events (faces + bounce/wiggle), idle breathing, and a forced "poke" emote
+// when pokeNonce changes (workspace clicked / switched to). The mechanics here
+// are kind-agnostic; which faces/motions a kind uses (and its assets + label)
+// comes from Cfg's kind registry.
 import QtQuick
 import qs.Commons
 import qs.Services.UI
@@ -13,7 +15,7 @@ Item {
   property int pokeNonce: 0     // bump to force an emote
 
   property string title: ""        // hover tooltip: session aiTitle, or the sub-bot's "<type> — <description>"
-  property string kind: "claude"   // agent kind -- future: "codex" | "gemini" | ...
+  property string kind: "claude"   // agent kind; presentation resolved via Cfg's kind registry
 
   // A squad's commander (running subagents) turns to face its line of sub-bots.
   // Sub-bots are `subordinate`: smaller (sizeScale), pop in on spawn.
@@ -24,15 +26,9 @@ Item {
 
   property string faceOverride: ""
 
-  // Readable agent name, shown when the session has no title yet. The emote
-  // vocabulary + assets are still Claude-only (see Cfg); when other kinds land,
-  // switch those on `kind` too.
+  // Readable agent name, shown when the session has no title yet.
   function kindLabel() {
-    if (kind === "codex")
-      return "Codex";
-    if (kind === "gemini")
-      return "Gemini";
-    return "Claude Code";
+    return cfg.kindLabel(kind);
   }
 
   width: d + 2
@@ -70,13 +66,9 @@ Item {
   function rnd(lo, hi) {
     return lo + Math.random() * (hi - lo);
   }
-  // Emote vocabulary per status (weighted by repetition).
+  // Emote vocabulary per kind+status (weighted by repetition; Cfg's registry).
   function emotePool() {
-    if (status === "thinking")
-      return ["bounce", "squint", "look", "happy", "blink", "bounce"];
-    if (status === "tooling")
-      return ["wiggle", "wiggle", "surprised", "blink", "bounce"];
-    return ["blink", "sleepy", "look", "bounce"];
+    return cfg.emotePool(kind, status);
   }
   // Cadence: thinking/tools lively, waiting calm. Each gap is jittered ±cfg.jitter.
   function nextDelay() {
@@ -93,9 +85,9 @@ Item {
     breathDown.duration = dur;
     breathAnim.start();
   }
-  function showFace(emote, ms) {
-    bot.faceOverride = cfg.faceUrl(status, emote);
-    faceTimer.interval = ms;
+  function showFace(emote) {
+    bot.faceOverride = cfg.faceUrl(kind, status, emote);
+    faceTimer.interval = cfg.faceHoldMs(emote);
     faceTimer.restart();
   }
   function performEmote(force) {
@@ -103,32 +95,15 @@ Item {
     if (!force && (faceTimer.running || bounceAnim.running || wiggleAnim.running))
       return;
     var pool = emotePool();
-    switch (pool[Math.floor(Math.random() * pool.length)]) {
-    case "squint":
-      showFace("squint", 700);
-      break;
-    case "look":
-      showFace("look", 700);
-      break;
-    case "happy":
-      showFace("happy", 700);
-      break;
-    case "surprised":
-      showFace("surprised", 600);
-      break;
-    case "sleepy":
-      showFace("sleepy", 1200);
-      break;
-    case "blink":
-      showFace("blink", 150);
-      break;
-    case "bounce":
+    var emote = pool[Math.floor(Math.random() * pool.length)];
+    // Motions are the two kind-agnostic transforms below; anything else the
+    // registry names is a face asset of this kind.
+    if (emote === "bounce")
       bounceAnim.restart();
-      break;
-    case "wiggle":
+    else if (emote === "wiggle")
       wiggleAnim.restart();
-      break;
-    }
+    else
+      showFace(emote);
   }
 
   Timer {
@@ -168,10 +143,11 @@ Item {
   Image {
     id: botImg
     anchors.centerIn: parent
-    // Commander rests on the "look" face (watching the squad) between its own
-    // transient emotes; a plain bot rests on its status icon. Each status has a
-    // -look asset (the tool one has star eyes), so this holds in every state.
-    source: bot.faceOverride !== "" ? bot.faceOverride : (bot.commander ? cfg.faceUrl(bot.status, "look") : cfg.statusIcon(bot.status))
+    // Commander rests on its kind's `rest` face (watching the squad) between
+    // its own transient emotes -- claude's is "look", present for every status
+    // (the tool one has star eyes); a kind without one, and every plain bot,
+    // rests on the status icon.
+    source: bot.faceOverride !== "" ? bot.faceOverride : (bot.commander ? cfg.restIcon(bot.kind, bot.status) : cfg.statusIcon(bot.kind, bot.status))
     width: bot.d + 2
     height: bot.d + 2
     sourceSize.width: Math.round(bot.d * 2)

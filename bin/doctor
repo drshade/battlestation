@@ -195,7 +195,8 @@ done < <(git ls-files -z -- '*.lua')
 [ "$lua_bad" -eq 0 ] && ok "all $lua_n tracked *.lua parse"
 
 # --- 6. runtime-churn dirty report ------------------------------------------
-# Files apps rewrite at runtime (settings/colors/state json). Dirty here is
+# Files apps rewrite at runtime (settings/colors/state json, codex's
+# config.toml). Dirty here is
 # usually noise, not a change to commit — flag it so it isn't staged blindly.
 # Phantom churn: on a clean-filtered file, an app rewrite leaves a stale stat
 # fingerprint, so `git status` reports it modified even when the *filtered*
@@ -219,7 +220,7 @@ while IFS= read -r f; do
     warn "dirty (runtime-rewritten — commit only if intentional): $f"
     churn_dirty=$((churn_dirty + 1))
   fi
-done < <(git ls-files -- '*settings.json' '*colors.json' '*state.json' '*plugins.json')
+done < <(git ls-files -- '*settings.json' '*colors.json' '*state.json' '*plugins.json' '*config.toml')
 if [ "$churn_dirty" -eq 0 ]; then
   if [ "$churn_phantom" -gt 0 ]; then ok "no real runtime-churn dirt (stat-staleness only, above)"; else ok "no known runtime-churn files are dirty"; fi
 fi
