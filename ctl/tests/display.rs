@@ -469,7 +469,7 @@ const MON_REQ: &str = "j/monitors";
 /// what display-scale.sh hands `hyprctl eval`.
 fn scale_eval_req(luascale: &str) -> String {
     format!(
-        r#"eval hl.monitor({{ output = "DP-1", mode = "3440x1440@100", position = "auto", scale = {luascale} }})"#
+        r#"eval hl.monitor({{ output = "DP-1", mode = "3440x1440@100", position = "0x0", scale = {luascale} }})"#
     )
 }
 
@@ -581,7 +581,7 @@ fn scale_falls_back_to_hyprctl() {
 
     let out = env.display(&["scale", "up"]);
     assert_eq!(out.status.code(), Some(0));
-    let eval = r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "auto", scale = 1.25000 })"#;
+    let eval = r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "0x0", scale = 1.25000 })"#;
     assert_eq!(
         env.log("calls.log"),
         vec![

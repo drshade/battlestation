@@ -36,7 +36,8 @@ pub enum Action {
 /// array (the ENABLED-only view — the script's `hyprctl monitors -j`).
 pub struct Focused {
     pub name: String,
-    pub mode: String, // WxH@RR, RR python-rounded — preserved by the dispatch
+    pub mode: String,     // WxH@RR, RR python-rounded — preserved by the dispatch
+    pub position: String, // "XxY" — preserved by the dispatch (see eval_cmd)
     pub scale: f64,
 }
 
@@ -57,6 +58,7 @@ pub fn focused_from(monitors: &Value) -> Option<Focused> {
             num_token(m.get("height"))?,
             round_half_even(m.get("refreshRate")?.as_f64()?),
         ),
+        position: format!("{}x{}", num_token(m.get("x"))?, num_token(m.get("y"))?),
         scale: m.get("scale")?.as_f64()?,
     })
 }
@@ -121,16 +123,24 @@ pub fn format_scale(v: f64) -> String {
     format!("{v:.5}")
 }
 
-/// The eval chunk, byte-identical to the script's: mode preserved, position
-/// "auto", scale a bare Lua number ("1.25000") for ladder rungs or the
-/// quoted Lua STRING `"auto"` for reset — the quoting is the semantic.
-/// (lua_escape is a safe superset of the script for hostile names; connector
-/// names never contain `"` or `\`, so real commands are byte-identical.)
-pub fn eval_cmd(name: &str, mode: &str, luascale: &str) -> String {
+/// The eval chunk: mode AND position preserved, scale a bare Lua number
+/// ("1.25000") for ladder rungs or the quoted Lua STRING `"auto"` for reset —
+/// the quoting is the semantic.
+///
+/// DELIBERATE DIVERGENCE from the sh reference: the script sent
+/// `position = "auto"`, written in the single-monitor era where auto was
+/// harmless. With a second monitor attached, re-declaring an output with
+/// auto position makes Hyprland RE-PLACE it (appending to the right of the
+/// others) and migrate its workspaces — a scale keystroke rearranged the
+/// desk (seen live 2026-07-03). Pinning the monitor's current "XxY" keeps
+/// scaling a scale-only operation. (Adjacent auto-positioned monitors may
+/// still re-flow because the logical size changed — that part is inherent.)
+pub fn eval_cmd(name: &str, mode: &str, position: &str, luascale: &str) -> String {
     format!(
-        r#"hl.monitor({{ output = "{}", mode = "{}", position = "auto", scale = {} }})"#,
+        r#"hl.monitor({{ output = "{}", mode = "{}", position = "{}", scale = {} }})"#,
         lua_escape(name),
         mode,
+        position,
         luascale
     )
 }
@@ -189,7 +199,7 @@ pub fn run(action: Action) -> i32 {
             format_scale(LADDER[idx])
         }
     };
-    ipc::eval(&eval_cmd(&f.name, &f.mode, &luascale))
+    ipc::eval(&eval_cmd(&f.name, &f.mode, &f.position, &luascale))
 }
 
 #[cfg(test)]
@@ -202,7 +212,7 @@ mod tests {
         json!([
             {"id": 1, "name": "DP-1", "description": "HP Inc. OMEN 34c CNC32023FL",
              "focused": true, "disabled": false, "width": 3440, "height": 1440,
-             "refreshRate": 100.0, "scale": 1.0},
+             "x": 2304, "y": 0, "refreshRate": 100.0, "scale": 1.0},
         ])
     }
 
@@ -211,21 +221,31 @@ mod tests {
         let f = focused_from(&mons_fixture()).unwrap();
         assert_eq!(f.name, "DP-1");
         assert_eq!(f.mode, "3440x1440@100");
+        assert_eq!(f.position, "2304x0");
         assert_eq!(f.scale, 1.0);
         // the internal panel's live 120.001 rounds like python round()
         let f = focused_from(&json!([
             {"name": "eDP-1", "focused": true, "width": 2880, "height": 1800,
-             "refreshRate": 120.001, "scale": 1.25}
+             "x": 0, "y": 0, "refreshRate": 120.001, "scale": 1.25}
         ]))
         .unwrap();
         assert_eq!(f.mode, "2880x1800@120");
+        assert_eq!(f.position, "0x0");
         // half-rates go to even (python banker's rounding)
         let f = focused_from(&json!([
             {"name": "X", "focused": true, "width": 1, "height": 1,
-             "refreshRate": 59.5, "scale": 1.0}
+             "x": 0, "y": 0, "refreshRate": 59.5, "scale": 1.0}
         ]))
         .unwrap();
         assert_eq!(f.mode, "1x1@60");
+        // missing x/y = malformed monitors data -> None (silent no-op path)
+        assert!(
+            focused_from(&json!([
+                {"name": "X", "focused": true, "width": 1, "height": 1,
+                 "refreshRate": 60.0, "scale": 1.0}
+            ]))
+            .is_none()
+        );
     }
 
     #[test]
@@ -301,20 +321,22 @@ mod tests {
     }
 
     #[test]
-    fn eval_chunk_is_byte_identical_to_the_script() {
+    fn eval_chunk_pins_mode_and_position() {
+        // Position is the monitor's CURRENT "XxY", never "auto" — the one
+        // deliberate divergence from the sh reference (see eval_cmd's doc).
         assert_eq!(
-            eval_cmd("DP-1", "3440x1440@100", "1.25000"),
-            r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "auto", scale = 1.25000 })"#
+            eval_cmd("DP-1", "3440x1440@100", "2304x0", "1.25000"),
+            r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "2304x0", scale = 1.25000 })"#
         );
-        // reset: the quoted Lua STRING "auto", not a bare word
+        // reset: the quoted Lua STRING "auto" for the SCALE, not a bare word
         assert_eq!(
-            eval_cmd("DP-1", "3440x1440@100", r#""auto""#),
-            r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "auto", scale = "auto" })"#
+            eval_cmd("DP-1", "3440x1440@100", "0x0", r#""auto""#),
+            r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "0x0", scale = "auto" })"#
         );
         // hostile names can't break out of the Lua string
         assert_eq!(
-            eval_cmd(r#"x"break"#, "1x1@1", "1.00000"),
-            r#"hl.monitor({ output = "x\"break", mode = "1x1@1", position = "auto", scale = 1.00000 })"#
+            eval_cmd(r#"x"break"#, "1x1@1", "0x0", "1.00000"),
+            r#"hl.monitor({ output = "x\"break", mode = "1x1@1", position = "0x0", scale = 1.00000 })"#
         );
     }
 
