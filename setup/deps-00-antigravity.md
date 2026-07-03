@@ -22,6 +22,7 @@ agy does not rewrite `hooks.json` at runtime, so no clean filter is needed.
   SubagentStart/SubagentStop events (they are ignored in `hooks.json`), so
   the status widget shows an agy commander bot but never its squad.
 - **Between-turns status is approximate.** agy fires a trailing PostToolUse
-  (→ thinking) after Stop (→ clear), so an idle interactive session can
-  linger as a "thinking" bot until the next event or process exit; the
+  (→ thinking) after Stop — which is why Stop maps to `waiting` rather than
+  `clear` (a clear would be resurrected as "thinking" moments later). An
+  idle session can still briefly read "thinking" until the next event; the
   session file is swept when the `agy` process dies.
