@@ -353,6 +353,47 @@ pub fn ids_on_monitor(workspaces: &Value, mon: &str) -> Vec<i64> {
         .unwrap_or_default()
 }
 
+/// id -> monitor for every non-special workspace, sorted by id — the
+/// placement snapshot [`restore_plan`] diffs.
+pub fn monitor_map(workspaces: &Value) -> Vec<(i64, String)> {
+    let mut out: Vec<(i64, String)> = workspaces
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|w| {
+                    !w.get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .starts_with("special:")
+                })
+                .filter_map(|w| {
+                    Some((
+                        w.get("id").and_then(Value::as_i64)?,
+                        w.get("monitor").and_then(Value::as_str)?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort_by_key(|(id, _)| *id);
+    out
+}
+
+/// Move-back commands for every workspace that STRAYED: present in both
+/// snapshots but now on a different monitor. Hyprland evacuates a monitor's
+/// workspaces when it is re-applied (a scale/geometry change can transiently
+/// cycle a neighbor), and never moves them back — this plan does. Workspaces
+/// that appeared or vanished between snapshots are left alone.
+pub fn restore_plan(before: &[(i64, String)], after: &[(i64, String)]) -> Vec<String> {
+    after
+        .iter()
+        .filter_map(|(id, mon)| {
+            let (_, want) = before.iter().find(|(bid, _)| bid == id)?;
+            (want != mon).then(|| move_workspace_cmd(*id, want))
+        })
+        .collect()
+}
+
 /// `swapdisplays <n>`: exchange EVERY workspace between the focused display
 /// and display n (see [`swap_plan`] for the sequence). Swapping a display
 /// with itself is a no-op.
@@ -665,6 +706,28 @@ mod tests {
         assert_eq!(ids_on_monitor(&ws, "eDP-1"), vec![1]);
         assert_eq!(ids_on_monitor(&ws, "HDMI-A-1"), Vec::<i64>::new());
         assert_eq!(ids_on_monitor(&json!("junk"), "DP-1"), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn monitor_map_and_restore_plan() {
+        let mk = |pairs: &[(i64, &str)]| -> Vec<(i64, String)> {
+            pairs.iter().map(|(i, m)| (*i, m.to_string())).collect()
+        };
+        let ws = json!([
+            {"id": 3, "name": "three", "monitor": "DP-1"},
+            {"id": 1, "name": "one", "monitor": "eDP-1"},
+            {"id": -99, "name": "special:magic", "monitor": "DP-1"},
+        ]);
+        assert_eq!(monitor_map(&ws), mk(&[(1, "eDP-1"), (3, "DP-1")]));
+
+        // strays go home; ids that appeared/vanished are left alone
+        let before = mk(&[(1, "eDP-1"), (3, "DP-1"), (9, "DP-1")]);
+        let after = mk(&[(1, "eDP-1"), (3, "eDP-1"), (12, "eDP-1")]);
+        assert_eq!(
+            restore_plan(&before, &after),
+            vec![r#"hl.dsp.workspace.move({ workspace = 3, monitor = "DP-1" })"#.to_string()]
+        );
+        assert!(restore_plan(&before, &before).is_empty());
     }
 
     #[test]

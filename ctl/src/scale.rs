@@ -199,7 +199,67 @@ pub fn run(action: Action) -> i32 {
             format_scale(LADDER[idx])
         }
     };
-    ipc::eval(&eval_cmd(&f.name, &f.mode, &f.position, &luascale))
+    // Snapshot workspace placement + what each display shows BEFORE the eval:
+    // a scale change re-flows auto-positioned neighbors, and a re-applied
+    // monitor gets its workspaces evacuated to the focused display with no
+    // return path (seen live: scaling the laptop pulled every external
+    // workspace onto it). The pinned position above protects the scaled
+    // monitor itself; the restore below protects its neighbors.
+    let before_ws = ipc::json("workspaces").map(|w| crate::ws::monitor_map(&w));
+    let before_actives: Vec<(String, Option<i64>)> = crate::ws::displays_from(&mons)
+        .iter()
+        .map(|d| (d.name.clone(), d.active_ws))
+        .collect();
+
+    let code = ipc::eval(&eval_cmd(&f.name, &f.mode, &f.position, &luascale));
+    if code != 0 {
+        return code;
+    }
+    if let Some(before) = before_ws {
+        restore_strays(&before, &before_actives, &f.name);
+    }
+    0
+}
+
+/// Bounded settle-and-restore: re-read placement every 200ms (the monitor
+/// re-application lands async), move each strayed workspace home, and stop
+/// after a clean pass. Then re-assert what each display SHOWS (its
+/// pre-scale active workspace), ending on the scaled/focused monitor so the
+/// keyboard stays put. Best-effort by design — scale itself already
+/// succeeded, so failures here only log.
+fn restore_strays(
+    before: &[(i64, String)],
+    before_actives: &[(String, Option<i64>)],
+    focused_mon: &str,
+) {
+    let mut restored_any = false;
+    for _ in 0..5 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let Some(after) = ipc::json("workspaces").map(|w| crate::ws::monitor_map(&w)) else {
+            break;
+        };
+        let plan = crate::ws::restore_plan(before, &after);
+        if plan.is_empty() {
+            break;
+        }
+        restored_any = true;
+        for cmd in plan {
+            let _ = ipc::dispatch(&cmd);
+        }
+    }
+    if !restored_any {
+        return; // nothing strayed: don't churn focus for no reason
+    }
+    // Unfocused displays first, the focused monitor's own active last.
+    for (mon, active) in before_actives.iter().filter(|(m, _)| m != focused_mon) {
+        if let Some(id) = active {
+            let _ = ipc::dispatch(&crate::ws::focus_cmd(*id));
+        }
+        let _ = mon;
+    }
+    if let Some((_, Some(id))) = before_actives.iter().find(|(m, _)| m == focused_mon) {
+        let _ = ipc::dispatch(&crate::ws::focus_cmd(*id));
+    }
 }
 
 #[cfg(test)]

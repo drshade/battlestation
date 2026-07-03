@@ -87,6 +87,8 @@ impl TestEnv {
                  case \"$1\" in\n\
                    monitors)\n\
                      if [ \"$2\" = all ]; then cat '{fix}/monitors_all.json'; else cat '{fix}/monitors.json'; fi ;;\n\
+                   workspaces)\n\
+                     cat '{fix}/workspaces.json' 2>/dev/null ;;\n\
                    dispatch)\n\
                      printf '%s\\n' \"$2\" >> '{fix}/dispatch.log'\n\
                      if [ -f '{fix}/monitors.after.json' ]; then mv '{fix}/monitors.after.json' '{fix}/monitors.json'; fi ;;\n\
@@ -464,6 +466,14 @@ fn scale_mons_fixture(scale: f64) -> String {
 }
 
 const MON_REQ: &str = "j/monitors";
+const WS_REQ: &str = "j/workspaces";
+
+/// Stable workspace placement for the stray-restore guard: the settle read
+/// matches the snapshot, so the guard exits after one clean pass with no
+/// restore dispatches.
+fn scale_ws_fixture() -> String {
+    json!([{"id": 1, "name": "one", "monitor": "DP-1"}]).to_string()
+}
 
 /// The socket wire form of the scale dispatch for DP-1 — byte-identical to
 /// what display-scale.sh hands `hyprctl eval`.
@@ -485,12 +495,24 @@ fn scale_up_from_nothing_seeds_nearest_rung_via_socket() {
     let env = TestEnv::new("scale-up-fresh");
     let fixture = scale_mons_fixture(1.0);
     let eval = scale_eval_req("1.25000");
-    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+    let ws = scale_ws_fixture();
+    env.start_socket(
+        "testinst",
+        &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
+    );
 
     let out = env.display(&["scale", "up"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty(), "script parity: silent on success");
-    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(
+        env.log("socket.log"),
+        vec![
+            MON_REQ.to_string(),
+            WS_REQ.to_string(),
+            eval,
+            WS_REQ.to_string()
+        ]
+    );
     assert!(env.log("calls.log").is_empty());
     // the new rung index is persisted, index + newline
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"1\n");
@@ -504,11 +526,23 @@ fn scale_up_prefers_saved_index_over_reported_scale() {
     fs::write(env.scale_state(), "3\n").unwrap();
     let fixture = scale_mons_fixture(1.0);
     let eval = scale_eval_req("2.00000");
-    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+    let ws = scale_ws_fixture();
+    env.start_socket(
+        "testinst",
+        &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
+    );
 
     let out = env.display(&["scale", "up"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(
+        env.log("socket.log"),
+        vec![
+            MON_REQ.to_string(),
+            WS_REQ.to_string(),
+            eval,
+            WS_REQ.to_string()
+        ]
+    );
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"4\n");
 }
 
@@ -519,20 +553,44 @@ fn scale_clamps_at_both_ends() {
     fs::write(env.scale_state(), "6\n").unwrap();
     let fixture = scale_mons_fixture(3.0);
     let eval = scale_eval_req("3.00000");
-    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+    let ws = scale_ws_fixture();
+    env.start_socket(
+        "testinst",
+        &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
+    );
     let out = env.display(&["scale", "up"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(
+        env.log("socket.log"),
+        vec![
+            MON_REQ.to_string(),
+            WS_REQ.to_string(),
+            eval,
+            WS_REQ.to_string()
+        ]
+    );
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"6\n");
 
     // Bottom rung + down, seeded from the reported scale (no state file).
     let env = TestEnv::new("scale-clamp-bottom");
     let fixture = scale_mons_fixture(1.0);
     let eval = scale_eval_req("1.00000");
-    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+    let ws = scale_ws_fixture();
+    env.start_socket(
+        "testinst",
+        &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
+    );
     let out = env.display(&["scale", "down"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(
+        env.log("socket.log"),
+        vec![
+            MON_REQ.to_string(),
+            WS_REQ.to_string(),
+            eval,
+            WS_REQ.to_string()
+        ]
+    );
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"0\n");
 }
 
@@ -543,11 +601,23 @@ fn scale_reset_deletes_state_and_evals_auto_string() {
     let fixture = scale_mons_fixture(1.5);
     // scale = "auto" — the QUOTED Lua string, not a bare number
     let eval = scale_eval_req(r#""auto""#);
-    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+    let ws = scale_ws_fixture();
+    env.start_socket(
+        "testinst",
+        &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
+    );
 
     let out = env.display(&["scale", "reset"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(
+        env.log("socket.log"),
+        vec![
+            MON_REQ.to_string(),
+            WS_REQ.to_string(),
+            eval,
+            WS_REQ.to_string()
+        ]
+    );
     assert!(!env.scale_state().exists(), "reset must rm the state file");
     // reset with no state file is equally fine (rm -f)
     let out = env.display(&["scale", "reset"]);
@@ -578,6 +648,7 @@ fn scale_falls_back_to_hyprctl() {
     // fake hyprctl, with the script's exact argv shape.
     let env = TestEnv::new("scale-fallback");
     fs::write(env.fix.join("monitors.json"), scale_mons_fixture(1.0)).unwrap();
+    fs::write(env.fix.join("workspaces.json"), scale_ws_fixture()).unwrap();
 
     let out = env.display(&["scale", "up"]);
     assert_eq!(out.status.code(), Some(0));
@@ -586,7 +657,9 @@ fn scale_falls_back_to_hyprctl() {
         env.log("calls.log"),
         vec![
             "hyprctl monitors -j".to_string(),
-            format!("hyprctl eval {eval}")
+            "hyprctl workspaces -j".to_string(),
+            format!("hyprctl eval {eval}"),
+            "hyprctl workspaces -j".to_string(),
         ]
     );
     assert_eq!(env.log("eval.log"), vec![eval]);
