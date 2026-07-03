@@ -7,6 +7,20 @@ publish = false
 
 [dependencies]
 serde_json = "1"
+# Default features minus `color` (would pull the anstream stack, ~6 crates)
+# and `suggestions` (strsim) — plain-text errors are fine for a personal tool
+# and every extra crate slows the `make fix` rebuild path.
+clap = { version = "4", default-features = false, features = [
+    "derive",
+    "std",
+    "help",
+    "usage",
+    "error-context",
+] }
+clap_complete = "4"
+# One flock(2) call for the usage cache; libc is the smallest crate that
+# provides it (rustix would add bitflags + linux-raw-sys for one syscall).
+libc = "0.2"
 
 [profile.release]
 strip = true

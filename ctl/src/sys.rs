@@ -114,6 +114,50 @@ pub fn workspace_for_pids(pids: &[i64]) -> Option<i64> {
     }
 }
 
+/// hyprctl JSON boundary for `bsctl ws` — `hyprctl <args>` parsed as JSON.
+/// None on any failure (hyprctl absent, bad JSON); unlike the hook's silent
+/// [`workspace_for_pids`], the ws callers report it and exit non-zero, since
+/// ws is a human/keybind-facing CLI (the sh reference dies under `set -e`).
+pub fn hyprctl_json(args: &[&str]) -> Option<Value> {
+    let out = std::process::Command::new("hyprctl")
+        .args(args)
+        .output()
+        .ok()?;
+    serde_json::from_slice(&out.stdout).ok()
+}
+
+/// `hyprctl dispatch <cmd> >/dev/null` — stdout (hyprctl's "ok") discarded,
+/// stderr passed through, exit code propagated like the script's set -e.
+pub fn hyprctl_dispatch(cmd: &str) -> i32 {
+    match std::process::Command::new("hyprctl")
+        .args(["dispatch", cmd])
+        .stdout(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(_) => {
+            eprintln!("bsctl: hyprctl not found");
+            127 // what sh reports for a missing command
+        }
+    }
+}
+
+/// flock(2) on an open file — the usage cache's cross-process serialization
+/// (sh reference: flock(1) on fd 9). Blocking mode retries on EINTR, like
+/// flock(1); the lock is released when `f` closes (process exit).
+pub fn flock_exclusive(f: &fs::File, nonblocking: bool) -> bool {
+    use std::os::fd::AsRawFd;
+    let op = libc::LOCK_EX | if nonblocking { libc::LOCK_NB } else { 0 };
+    loop {
+        if unsafe { libc::flock(f.as_raw_fd(), op) } == 0 {
+            return true;
+        }
+        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
+}
+
 /// UTC "%F %T" for debug.log lines. (The sh reference logs local time via
 /// date(1); UTC here keeps the binary dependency-free. debug.log is
 /// diagnostics, not protocol — the poll side skips it by name.)

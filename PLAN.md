@@ -33,7 +33,11 @@ switched, ~31× faster per hook event, plus one behavior the sh version lacked
 `settings.json` at `claude-ws-status.sh`, revert the widget's Process command
 to the embedded python (git history has it). One commit.
 
-## 2. On trial success: phase 3 — `bsctl ws` + `bsctl usage`
+**Outcome.** Passed after one day of live use ("really happy, working well"
+— user, 2026-07-03); no widget misbehavior, no parity gaps surfaced, the
+staleness/`make fix` loop proved comfortable. Proceeded to phase 3 same day.
+
+## 2. On trial success: phase 3 — `bsctl ws` + `bsctl usage` — ✅ DONE (2026-07-03)
 
 - Port `ws.sh` (workspace position↔id mapping over the persisted order file —
   hot path on every workspace keybind, protocol shared with the widget) and
@@ -46,6 +50,19 @@ to the embedded python (git history has it). One commit.
   ~15 crates only slow the `make fix` rebuild path.
 - Retire `claude-ws-status.sh`, `ws.sh`, `claude-usage.sh` once their
   consumers are switched and the protocol reference moves to ctl/ docs.
+
+**Outcome.** `bsctl ws` (verb-for-verb, byte-identical Lua dispatch strings,
+32/32 parity incl. the script's exit-1 off-the-end quirk and textual
+pref-token matching) and `bsctl usage` (ttl/flock semantics preserved, 10/10
+parity, banker's-rounding replicated; one deliberate improvement — the OAuth
+token now travels on curl's stdin, never argv where /proc exposed it).
+clap adopted (color/suggestions features dropped to keep rebuilds fast;
+Cargo.lock 12→20 crates, binary 604K→1.3M); `bsctl completions` +
+`bin/build`-generated fish completions. Consumers switched: `keybinds.lua`,
+BarWidget/Panel/UsageIndicator QML. All three scripts retired and the empty
+`bin` stow package dissolved with them; protocol contracts now live in
+`ctl/src/lib.rs`. 59 tests; live goto round-trip verified through the real
+compositor.
 
 ## 3. Ideas parked behind phase 3
 
@@ -64,7 +81,7 @@ to the embedded python (git history has it). One commit.
   install location. If that happens, keep the widget's bsctl dependency
   optional (the state-file protocol is simple enough to consume directly).
 - De-vendor `keybind-cheatsheet` when upstream PRs merge — trigger and links
-  live in `setup/noctalia-00-plugins.md`.
+  live in `setup/noctalia-00-plugins.md`. (https://github.com/noctalia-dev/legacy-v4-plugins/pull/937)
 - Optional CI (gitleaks + shellcheck + `stow --simulate` + `cargo test` on
   push) — the repo is published.
 - Drift triage of remaining unmanaged `~/.config` entries as they catch the

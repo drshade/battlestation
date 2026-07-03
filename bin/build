@@ -34,3 +34,11 @@ hdr "install"
 dest="$HOME/.local/bin/bsctl"
 install -Dm755 ctl/target/release/bsctl "$dest"
 ok "installed $dest ($(du -h "$dest" | cut -f1))"
+
+hdr "fish completions"
+# Untracked build artifact, same class as the binary itself: regenerated from
+# the installed binary on every build, never stowed or tracked.
+comp="$HOME/.config/fish/completions/bsctl.fish"
+mkdir -p "$(dirname "$comp")"
+"$dest" completions fish > "$comp"
+ok "generated $comp"

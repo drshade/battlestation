@@ -51,9 +51,9 @@ Item {
   property int maxVisiblePos: 999
 
   // ---- virtual ordering -----------------------------------------------------
-  // Preferred order as real workspace ids (ws.sh's state file). Pills render in
+  // Preferred order as real workspace ids (bsctl ws's state file). Pills render in
   // this order and are LABELLED BY POSITION, not by Hyprland id. The resolve
-  // rule mirrors ws.sh: preferred ids that exist (in order), then any remaining
+  // rule mirrors bsctl ws: preferred ids that exist (in order), then any remaining
   // live workspaces ascending. Missing/empty file => identity order.
   //
   // The compositor rebuilds its workspace ListModel (handing us fresh throwaway
@@ -244,9 +244,9 @@ Item {
   function commitOrder() {
     reordering = false;
     draggingIndex = -1;
-    // Persist via ws.sh so the file format has a single author shared with the
+    // Persist via bsctl ws so the file format has a single author shared with the
     // keybind side; the FileView below then reloads and re-resolves.
-    orderWriter.command = ["sh", "-c", "$HOME/.local/bin/ws.sh set " + dragIds.join(" ")];
+    orderWriter.command = ["sh", "-c", "$HOME/.local/bin/bsctl ws set " + dragIds.join(" ")];
     orderWriter.running = true;
     // Reflect the new order immediately so there's no flash before the reload.
     displayIds = dragIds.slice();
@@ -257,7 +257,7 @@ Item {
     });
   }
 
-  // Re-resolve whenever the workspace set changes or ws.sh/a drag rewrites the file.
+  // Re-resolve whenever the workspace set changes or bsctl ws/a drag rewrites the file.
   Connections {
     target: CompositorService
     function onWorkspacesChanged() {
@@ -303,7 +303,7 @@ Item {
   }
   // The poll side lives in bsctl (repo: ctl/src/poll.rs) — the Rust binary that
   // also implements the hook side, so the whole claude-ws protocol has one home
-  // (file formats: claude-ws-status.sh header). `bsctl poll` does one flat pass
+  // (protocol spec: ctl/src/lib.rs). `bsctl poll` does one flat pass
   // over the state dir, self-cleaning (dead-pid sessions, orphan markers, and
   // kill-leaked stale markers via the transcript-frozen GC), and emits ONE JSON
   // array line:

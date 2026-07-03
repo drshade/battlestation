@@ -17,7 +17,7 @@ local launchPrefix = "uwsm app -- " -- if you are not using UWSM, make this empt
 -- Workspace navigation by DISPLAY POSITION rather than raw Hyprland id: ws.sh
 -- maps position <-> real id through a persisted order the bar plugin can reorder.
 -- So "workspace N" below means the Nth pill, not necessarily Hyprland's ws N.
-local ws = "$HOME/.local/bin/ws.sh"
+local ws = "$HOME/.local/bin/bsctl ws"
 
 -- Universal copy/paste/cut: send Ctrl+Insert / Shift+Insert, honored by GUI apps
 -- AND terminals (and Ctrl+Insert avoids Ctrl+C = SIGINT). down -> 50ms -> up

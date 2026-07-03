@@ -57,10 +57,11 @@ symlinked into place with **GNU Stow**.
 - **bsctl owns stateful protocols; shell owns glue and recovery.** `ctl/` (a
   Rust crate, repo-tooling namespace like `bin/`) builds `~/.local/bin/bsctl`
   via `make build`. Logic that maintains shared state across multiple
-  consumers or is hot-path/JSON-heavy belongs there (currently the whole
-  claude-ws protocol: `bsctl hook` for the Claude Code hooks, `bsctl poll`
-  for the widget; `claude-ws-status.sh` is kept as the executable reference +
-  rollback during the trial). Plain system glue stays shell — and anything
+  consumers or is hot-path/JSON-heavy belongs there: the claude-ws protocol
+  (`bsctl hook` behind the Claude Code hooks, `bsctl poll` behind the
+  widget), the workspace display order (`bsctl ws`, driven by keybinds and
+  the widget) and the usage cache (`bsctl usage`). Protocol contracts are
+  specified in `ctl/src/lib.rs`. Plain system glue stays shell — and anything
   that must work **when the system is broken** (`restart_crashed_lock.sh`,
   `displays-on.sh`) stays shell *as policy*: a recovery path must never
   depend on a build artifact. bsctl is the one deployed artifact that is

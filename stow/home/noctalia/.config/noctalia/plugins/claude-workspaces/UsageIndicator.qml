@@ -1,5 +1,5 @@
 // Claude plan-usage indicator: the Anthropic sunburst + usage %, with a hover
-// tooltip. Polls claude-usage.sh on its own (cached script, ~5 min).
+// tooltip. Polls bsctl usage on its own (cached, ~5 min).
 import QtQuick
 import Quickshell.Io
 import qs.Commons
@@ -35,7 +35,7 @@ Item {
   }
   Process {
     id: usageProc
-    command: ["sh", "-c", "$HOME/.local/bin/claude-usage.sh"]
+    command: ["sh", "-c", "$HOME/.local/bin/bsctl usage"]
     stdout: StdioCollector {
       onStreamFinished: {
         try {
