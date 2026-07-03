@@ -1,11 +1,9 @@
 # hyprlock + hypridle (suspend/idle locker)
 
-Moves the **suspend/idle** lock surface off the Noctalia shell onto a dedicated
-locker. Noctalia drew the lock itself, so a shell crash on resume left the
-compositor holding an `ext-session-lock` with nothing rendering the password
-prompt — a black screen indistinguishable from a failed resume (and a wrong
-guess at that point — a short power-key tap — cleanly powers the machine off,
-losing the session). A separate locker process can't share that fate.
+hyprlock/hypridle own the **suspend/idle** lock instead of Noctalia's in-shell
+locker: a separate locker process can't share the shell's fate — an in-shell
+lock whose shell crashes leaves the compositor holding an `ext-session-lock`
+with nothing rendering the password prompt (see AGENTS.md gotchas).
 
 ```sh
 sudo pacman -S hyprlock hypridle

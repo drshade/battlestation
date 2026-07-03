@@ -1,6 +1,6 @@
 # vscode (default editor)
 
-Code editor installed by default. The CachyOS/Arch package is `code` (the
+The editor on this machine. The CachyOS/Arch package is `code` (the
 freely-licensed OSS build):
 
 ```sh
