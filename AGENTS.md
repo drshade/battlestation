@@ -57,7 +57,7 @@ symlinked into place with **GNU Stow**.
 - **bsctl owns stateful protocols; shell owns glue and recovery.** `ctl/` (a
   Rust crate, repo-tooling namespace like `bin/`) builds `~/.local/bin/bsctl`
   via `make build`. Logic that maintains shared state across multiple
-  consumers or is hot-path/JSON-heavy belongs there: the claude-ws protocol
+  consumers or is hot-path/JSON-heavy belongs there: the battlestation-ws protocol
   (`bsctl hook` behind the Claude Code hooks, `bsctl poll` behind the
   widget), the workspace display order (`bsctl ws`, driven by keybinds and
   the widget) and the usage cache (`bsctl usage`). Protocol contracts are

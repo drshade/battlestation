@@ -66,7 +66,7 @@ impl TestEnv {
     }
 
     fn state_dir(&self) -> PathBuf {
-        self.run.join("claude-ws")
+        self.run.join("battlestation-ws")
     }
 
     fn cmd(&self) -> Command {
@@ -79,9 +79,13 @@ impl TestEnv {
     }
 
     fn hook(&self, verb: &str, payload: &str) -> i32 {
+        self.hook_args(&["hook", verb], payload)
+    }
+
+    fn hook_args(&self, args: &[&str], payload: &str) -> i32 {
         let mut child = self
             .cmd()
-            .args(["hook", verb])
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -167,6 +171,28 @@ fn session_write_with_title_and_injected_ws() {
         Path::new(&format!("/proc/{pid}")).exists(),
         "pid must be a live ancestor"
     );
+}
+
+#[test]
+fn session_write_with_kind_codex() {
+    let env = TestEnv::new("session-kind");
+    let payload = json!({"session_id": "sess-k"}).to_string();
+    assert_eq!(
+        env.hook_args(&["hook", "--kind", "codex", "tooling"], &payload),
+        0
+    );
+    let rec = env.read_json("sess-k");
+    assert_eq!(rec["kind"], json!("codex"));
+    assert_eq!(rec["status"], json!("tooling"));
+    // --kind=<k> form writes the same record
+    assert_eq!(
+        env.hook_args(&["hook", "--kind=gemini", "waiting"], &payload),
+        0
+    );
+    assert_eq!(env.read_json("sess-k")["kind"], json!("gemini"));
+    // an empty --kind value falls back to the default
+    assert_eq!(env.hook_args(&["hook", "--kind=", "waiting"], &payload), 0);
+    assert_eq!(env.read_json("sess-k")["kind"], json!("claude"));
 }
 
 #[test]
@@ -420,7 +446,16 @@ fn poll_empty_or_missing_dir_prints_empty_array() {
 fn write_session_unit_seam() {
     let env = TestEnv::new("write-seam");
     fs::create_dir_all(env.state_dir()).unwrap();
-    bsctl::hook::write_session(&env.state_dir(), "seam", "waiting", "A title", 7, 1).unwrap();
+    bsctl::hook::write_session(
+        &env.state_dir(),
+        "seam",
+        "waiting",
+        "A title",
+        7,
+        1,
+        "claude",
+    )
+    .unwrap();
     assert_eq!(
         env.read_json("seam"),
         json!({"ws": 7, "status": "waiting", "kind": "claude", "title": "A title", "pid": 1})
@@ -600,6 +635,55 @@ fn watch_failover_between_two_instances() {
         },
         "survivor taking over the file",
     );
+}
+
+#[test]
+fn watch_migrates_legacy_state_dir_once() {
+    let env = TestEnv::new("watch-migrate");
+    // Fabricate the pre-rename dir with a live session + marker, plus files
+    // the migration must leave behind (dotfiles, debug.log).
+    let old = env.run.join("claude-ws");
+    fs::create_dir_all(&old).unwrap();
+    fs::write(
+        old.join("m1"),
+        r#"{"ws":4,"status":"waiting","kind":"claude","title":"","pid":1}"#,
+    )
+    .unwrap();
+    fs::write(old.join("m1.a1"), r#"{"type":"explore","description":"d"}"#).unwrap();
+    fs::write(old.join(".widget.json"), "[]\n").unwrap();
+    fs::write(old.join("debug.log"), "=== noise").unwrap();
+
+    let _w = Watcher::spawn(&env);
+    wait_for(
+        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("m1")),
+        "migrated session in .widget.json",
+    );
+    let sd = env.state_dir();
+    assert!(sd.join("m1").exists() && sd.join("m1.a1").exists());
+    assert!(!old.join("m1").exists() && !old.join("m1.a1").exists());
+    // Non-protocol files stay put; nothing is deleted.
+    assert!(old.join(".widget.json").exists());
+    assert!(old.join("debug.log").exists());
+
+    // One-time: once the new dir has protocol files, a later start must not
+    // pull stale legacy files back in.
+    fs::write(
+        old.join("m2"),
+        r#"{"ws":9,"status":"waiting","kind":"claude","title":"","pid":1}"#,
+    )
+    .unwrap();
+    drop(_w);
+    // Deleting the output first makes the successor's lock acquisition
+    // observable: its initial recompute rewrites the file, and the migration
+    // check runs before that write — so the reappearance proves the check ran.
+    fs::remove_file(sd.join(".widget.json")).unwrap();
+    let _w2 = Watcher::spawn(&env);
+    wait_for(
+        || widget_json(&env).is_some_and(|v| v[0]["sid"] == json!("m1")),
+        "successor writing the new dir",
+    );
+    assert!(old.join("m2").exists(), "second start must not migrate");
+    assert!(!sd.join("m2").exists());
 }
 
 #[test]

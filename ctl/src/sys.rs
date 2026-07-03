@@ -10,14 +10,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-/// `${XDG_RUNTIME_DIR:-/tmp}/claude-ws` (an empty env var counts as unset,
-/// like the sh `:-` default and python's `get(...) or "/tmp"`).
+/// `${XDG_RUNTIME_DIR:-/tmp}/battlestation-ws` (an empty env var counts as
+/// unset, like the sh `:-` default and python's `get(...) or "/tmp"`).
 pub fn state_dir() -> PathBuf {
     env::var_os("XDG_RUNTIME_DIR")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("claude-ws")
+        .join("battlestation-ws")
 }
 
 /// Temp-file + rename in the same dir keeps every write atomic for the
@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn state_dir_shape() {
         // Can't mutate the env safely in tests; just check the suffix contract.
-        assert!(state_dir().ends_with("claude-ws"));
+        assert!(state_dir().ends_with("battlestation-ws"));
     }
 
     #[test]

@@ -1,8 +1,9 @@
-//! `bsctl hook <verb>` — the hook-event endpoint, mirroring
-//! claude-ws-status.sh verb-for-verb. A hook must NEVER block or error
-//! loudly, so every failure path is silent and the exit code is always 0:
-//! bad JSON on stdin is an empty payload, a missing transcript is an empty
-//! title, hyprctl being absent (or no owning window) means "write nothing".
+//! `bsctl hook [--kind <harness>] <verb>` — the hook-event endpoint,
+//! mirroring claude-ws-status.sh verb-for-verb. A hook must NEVER block or
+//! error loudly, so every failure path is silent and the exit code is always
+//! 0: bad JSON on stdin is an empty payload, a missing transcript is an
+//! empty title, hyprctl being absent (or no owning window) means "write
+//! nothing".
 
 use std::env;
 use std::fs;
@@ -13,9 +14,42 @@ use serde_json::Value;
 
 use crate::{ipc, proto, sys};
 
-/// Dispatch a hook verb. `argv` is everything after the binary name and is
-/// only used for the optional debug log line.
-pub fn run(verb: Option<&str>, argv: &[String]) -> i32 {
+/// The default harness kind when `--kind` is absent (or valueless/empty).
+const DEFAULT_KIND: &str = "claude";
+
+/// Parse `[--kind <k>|--kind=<k>] [verb]` out of everything after `hook`.
+/// Parsed HERE, not by clap: a valueless `--kind` (a miswired hook command)
+/// must exit 0 silently like every other hook malformation, and a clap
+/// `--kind <k>` option errors loudly (exit 2 + stderr) when the value is
+/// missing — there is no clap configuration that keeps a required-value
+/// option silent. So clap hands the raw tokens through and the tolerant
+/// parse lives with the rest of the hook's tolerance. An absent/valueless/
+/// empty kind falls back to "claude" (the pre---kind behavior); a valueless
+/// `--kind` also swallows any verb slot, making the call a silent no-op.
+fn parse_args(args: &[String]) -> (String, Option<&str>) {
+    match args.first().map(String::as_str) {
+        Some("--kind") => (
+            args.get(1).cloned().unwrap_or_default(),
+            args.get(2).map(String::as_str),
+        ),
+        Some(a) if a.starts_with("--kind=") => (
+            a["--kind=".len()..].to_string(),
+            args.get(1).map(String::as_str),
+        ),
+        _ => (String::new(), args.first().map(String::as_str)),
+    }
+}
+
+/// Dispatch a hook call: `args` is everything after `hook` (an optional
+/// `--kind`, then the verb); `argv` is everything after the binary name and
+/// is only used for the optional debug log line.
+pub fn run(args: &[String], argv: &[String]) -> i32 {
+    let (kind, verb) = parse_args(args);
+    let kind = if kind.is_empty() {
+        DEFAULT_KIND.to_string()
+    } else {
+        kind
+    };
     let Some(verb) = verb.filter(|v| !v.is_empty()) else {
         return 0; // the reference exits before even creating the state dir
     };
@@ -32,7 +66,7 @@ pub fn run(verb: Option<&str>, argv: &[String]) -> i32 {
     match verb {
         "agent-start" => agent_start(&dir, &input),
         "agent-stop" => agent_stop(&dir, &input),
-        "waiting" | "thinking" | "tooling" | "clear" => session_verb(&dir, verb, &input),
+        "waiting" | "thinking" | "tooling" | "clear" => session_verb(&dir, verb, &input, &kind),
         _ => {} // unknown verbs are ignored, exit 0
     }
     0
@@ -85,8 +119,11 @@ fn agent_stop(dir: &Path, input: &[u8]) {
     let _ = fs::remove_file(dir.join(format!("{sid}.{aid}")));
 }
 
-/// waiting/thinking/tooling/clear — the session-status verbs.
-fn session_verb(dir: &Path, verb: &str, input: &[u8]) {
+/// waiting/thinking/tooling/clear — the session-status verbs. `kind` is the
+/// harness discriminator from `--kind` (default "claude"); it lands in the
+/// session record only — markers carry no kind (sub-agents inherit their
+/// session's kind in the widget).
+fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str) {
     let d = proto::parse_payload(input);
     // No session_id -> silent no-op. Falling back to a "default" session file
     // here would FABRICATE a session: its pid would be whatever claude
@@ -147,7 +184,7 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8]) {
     {
         title = proto::title_from_transcript(&String::from_utf8_lossy(&bytes));
     }
-    let _ = write_session(dir, &sid, verb, &title, ws, pid);
+    let _ = write_session(dir, &sid, verb, &title, ws, pid, kind);
 }
 
 /// The testable end of the session write path: everything hyprctl/proc
@@ -160,8 +197,13 @@ pub fn write_session(
     title: &str,
     ws: i64,
     pid: i64,
+    kind: &str,
 ) -> io::Result<()> {
-    sys::atomic_write_json(dir, sid, &proto::session_record(ws, status, title, pid))
+    sys::atomic_write_json(
+        dir,
+        sid,
+        &proto::session_record(ws, status, title, pid, kind),
+    )
 }
 
 /// `rm -f <dir>/<sid> <dir>/<sid>.*` — the session file and all its markers.
@@ -224,4 +266,38 @@ fn read_meta_fallback(d: &Value, sid: &str, aid: &str, desc: &mut String, atype:
         return;
     };
     proto::apply_meta_fallback(&meta, desc, atype);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn arg_parse_is_tolerant() {
+        assert_eq!(parse_args(&s(&["waiting"])), ("".into(), Some("waiting")));
+        assert_eq!(
+            parse_args(&s(&["--kind", "codex", "tooling"])),
+            ("codex".into(), Some("tooling"))
+        );
+        assert_eq!(
+            parse_args(&s(&["--kind=codex", "tooling"])),
+            ("codex".into(), Some("tooling"))
+        );
+        // valueless --kind swallows the verb slot -> silent no-op upstream
+        assert_eq!(parse_args(&s(&["--kind"])), ("".into(), None));
+        // --kind with a value but no verb -> no verb, still silent
+        assert_eq!(parse_args(&s(&["--kind", "codex"])), ("codex".into(), None));
+        // empty kind value -> caller falls back to the default
+        assert_eq!(
+            parse_args(&s(&["--kind=", "waiting"])),
+            ("".into(), Some("waiting"))
+        );
+        // flag-shaped junk is just an unknown verb
+        assert_eq!(parse_args(&s(&["--bogus"])), ("".into(), Some("--bogus")));
+        assert_eq!(parse_args(&[]), ("".into(), None));
+    }
 }

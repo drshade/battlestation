@@ -18,20 +18,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Claude Code hook endpoint; hook-event JSON on stdin (always exits 0)
+    /// Agent-harness hook endpoint; hook-event JSON on stdin (always exits 0)
     Hook {
-        /// waiting|thinking|tooling|clear|agent-start|agent-stop
-        // A plain String, NOT a ValueEnum — hooks must never error loudly,
-        // so unknown/missing verbs are validated internally (silent exit 0)
-        // rather than by clap (loud exit 2). allow_hyphen_values keeps even
-        // flag-shaped junk on that silent path.
-        #[arg(allow_hyphen_values = true)]
-        verb: Option<String>,
-        /// Ignored — tolerated so a miswired hook command can never error
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
-        rest: Vec<String>,
+        /// [--kind <harness>] waiting|thinking|tooling|clear|agent-start|agent-stop
+        // Raw tokens, NOT clap-typed args — hooks must never error loudly,
+        // so --kind and the verb are validated internally (silent exit 0)
+        // rather than by clap: a clap `--kind` option with a missing value
+        // exits 2 loudly, and unknown/missing verbs would too under a
+        // ValueEnum. trailing_var_arg + allow_hyphen_values keeps every
+        // token (flag-shaped junk included) on the silent internal path.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
-    /// Emit the claude-ws state dir as one JSON array line (widget poll side)
+    /// Emit the battlestation-ws state dir as one JSON array line (widget poll side)
     Poll,
     /// Daemon: keep <state-dir>/.widget.json equal to `poll`'s output
     Watch,
@@ -146,11 +145,11 @@ enum Dir {
 fn main() {
     let cli = Cli::parse();
     let code = match cli.cmd {
-        Cmd::Hook { verb, rest: _ } => {
+        Cmd::Hook { args } => {
             // Raw argv (not the parsed fields) feeds the debug log, matching
             // the sh reference's `argv: $*` line.
             let argv: Vec<String> = std::env::args().skip(1).collect();
-            bsctl::hook::run(verb.as_deref(), &argv)
+            bsctl::hook::run(&args, &argv)
         }
         Cmd::Poll => bsctl::poll::run(),
         Cmd::Watch => bsctl::watch::run(),

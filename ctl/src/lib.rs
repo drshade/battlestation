@@ -8,27 +8,33 @@
 //! while the bsctl trial runs. Observable behavior is byte-for-byte
 //! compatible with them, so consumers can switch freely.
 //!
-//! # claude-ws status protocol (`bsctl hook` / `bsctl poll`)
+//! # battlestation-ws status protocol (`bsctl hook` / `bsctl poll`)
 //!
-//! Reports each Claude Code instance's status for the Noctalia
-//! claude-workspaces widget. State lives as small JSON files in one flat
-//! dir, `${XDG_RUNTIME_DIR:-/tmp}/claude-ws/`:
+//! Reports each agent-harness instance's status for the Noctalia
+//! claude-workspaces widget. The protocol is multi-harness: ONE flat dir
+//! holds sessions from ANY harness (Claude Code today; codex/gemini/...
+//! write the same records via `bsctl hook --kind <harness>`), discriminated
+//! per session by `kind`. State lives as small JSON files in
+//! `${XDG_RUNTIME_DIR:-/tmp}/battlestation-ws/`:
 //!
 //! - `<session_id>` — one file per live session:
 //!   `{"ws": <int>, "status": "waiting"|"thinking"|"tooling",
-//!     "kind": "claude", "title": "<aiTitle>", "pid": <int>}`.
+//!     "kind": "<harness>", "title": "<aiTitle>", "pid": <int>}`.
 //!   `ws` is the Hyprland workspace id owning the session's terminal window
 //!   (found by walking /proc ancestors against `hyprctl clients -j`). `pid`
 //!   is the Claude Code process — the nearest ancestor whose comm is exactly
 //!   `claude` — and the poll side sweeps session files whose pid is dead.
 //!   `status` is semantic; mapping states to colours is the widget's
-//!   concern. `kind` identifies the agent (`claude` here; the widget is
-//!   ready for codex/gemini/... writing the same protocol with their own
-//!   kind). `title` is the session's current aiTitle — the LAST
+//!   concern. `kind` is the harness discriminator — `bsctl hook --kind`,
+//!   default `claude`; the widget renders per-kind (kindBySid feeds each
+//!   bot's `kind`) and falls back to the Claude presentation for unknown
+//!   kinds, so a new harness needs no widget change to appear. `title` is
+//!   the session's current aiTitle — the LAST
 //!   `"type":"ai-title"` record in the transcript, whitespace-collapsed to
 //!   one line — shown in the bot's hover tooltip.
 //! - `<session_id>.<agent_id>` — one marker per RUNNING subagent:
-//!   `{"type": "<agent_type>", "description": "<text>"}`.
+//!   `{"type": "<agent_type>", "description": "<text>"}`. Markers carry no
+//!   `kind` — a sub-agent inherits its session's kind in the widget.
 //!   Marker MTIME is the subagent's start time (shown as elapsed time in the
 //!   widget) and is refreshed by the agent's own tool calls, which is what
 //!   keeps the poll side's GC honest: a live agent's marker never goes
@@ -43,8 +49,10 @@
 //! when `CLAUDE_WS_DEBUG` is set: argv + raw stdin per hook call) is
 //! diagnostics, not protocol — the poll side skips it by name.
 //!
-//! Hook side (`bsctl hook <verb>`, hook-event JSON on stdin; silent-tolerant
-//! by contract — always exits 0, even on unknown/missing verbs):
+//! Hook side (`bsctl hook [--kind <harness>] <verb>`, hook-event JSON on
+//! stdin; silent-tolerant by contract — always exits 0, even on
+//! unknown/missing verbs or a malformed/valueless `--kind`, which is why
+//! --kind is parsed in hook.rs rather than by clap):
 //! - `waiting`/`thinking`/`tooling` — (re)write the session file with that
 //!   status; events carrying an agent_id also refresh (or recreate/heal)
 //!   that subagent marker. A payload WITHOUT a session_id (empty/absent/bad
@@ -77,7 +85,9 @@
 //! serialization actually changed, so the widget is never woken for nothing.
 //! Transient errors never crash-loop: log to stderr once, sleep 1s, re-init
 //! (lock included). `bsctl poll` remains a subcommand — one-shot debugging
-//! and the documented fallback if watch misbehaves.
+//! and the documented fallback if watch misbehaves. On acquiring the lock,
+//! the watcher also runs a best-effort one-time migration of protocol files
+//! out of the pre-rename `claude-ws` dir (see watch.rs).
 //!
 //! # Workspace display order (`bsctl ws`)
 //!

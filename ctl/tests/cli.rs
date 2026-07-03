@@ -19,6 +19,14 @@ fn hook_stays_silent_tolerant_under_clap() {
         &["hook", "explode"],                  // unknown verb
         &["hook", "--flag-shaped-verb"],       // hyphen junk must not hit clap
         &["hook", "waiting", "extra", "junk"], // trailing noise tolerated
+        // --kind is parsed inside hook::run, NOT by clap (a clap option with
+        // a missing value exits 2 loudly) — every malformation must stay on
+        // the silent exit-0 path:
+        &["hook", "--kind", "codex", "thinking"], // no session_id on stdin -> no-op
+        &["hook", "--kind"],                      // valueless --kind
+        &["hook", "--kind", "codex"],             // kind but no verb
+        &["hook", "--kind=", "waiting"],          // empty kind value
+        &["hook", "--kind=codex", "explode"],     // unknown verb after kind
     ] {
         let out = bsctl(args);
         assert_eq!(out.status.code(), Some(0), "{args:?} must exit 0");

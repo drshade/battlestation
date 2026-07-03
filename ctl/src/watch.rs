@@ -70,6 +70,7 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
     if !sys::flock_exclusive(&lock, false) {
         return Err(io::Error::last_os_error());
     }
+    migrate_legacy_dir(dir);
     let ino = Inotify::new(dir)?;
     // On acquiring the lock (winner or successor): write once immediately.
     let mut prev: Option<String> = None;
@@ -97,6 +98,38 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
         }
         recompute(dir, proj, &mut prev)?;
         deadline = Instant::now() + TICK;
+    }
+}
+
+/// One-time courtesy migration from the pre-rename state dir (`claude-ws`,
+/// a sibling of the current one). Strictly the dir is tmpfs and self-heals —
+/// every hook recreates its session file in the new dir on its next event,
+/// and the old dir dies at reboot — but live sessions would vanish from the
+/// widget until that next event. So on acquiring the writer lock, if the old
+/// dir still exists and the new dir has no protocol files yet, rename the
+/// old dir's protocol files (non-dot, non-debug.log — same filter as the
+/// poll pass) across. Best-effort: every failure is ignored, and nothing is
+/// ever deleted. Once the new dir has any protocol file the check is a
+/// no-op, so re-inits and failovers never re-run the move.
+fn migrate_legacy_dir(dir: &Path) {
+    let Some(old) = dir.parent().map(|p| p.join("claude-ws")) else {
+        return;
+    };
+    let Ok(old_rd) = fs::read_dir(&old) else {
+        return; // no legacy dir (the steady state)
+    };
+    let new_has_protocol_files = fs::read_dir(dir).is_ok_and(|rd| {
+        rd.flatten()
+            .any(|e| name_triggers(&e.file_name().to_string_lossy()))
+    });
+    if new_has_protocol_files {
+        return;
+    }
+    for e in old_rd.flatten() {
+        let name = e.file_name();
+        if name_triggers(&name.to_string_lossy()) {
+            let _ = fs::rename(e.path(), dir.join(&name));
+        }
     }
 }
 
