@@ -1,6 +1,6 @@
-//! OS boundaries: state dir, atomic writes, mtimes, the /proc ancestor walk
-//! and the hyprctl call. Only [`workspace_for_pids`] needs a live compositor;
-//! everything downstream of it takes plain values so it stays testable.
+//! OS boundaries: state dir, atomic writes, mtimes, the /proc ancestor walk,
+//! flock. The compositor boundary lives in [`crate::ipc`]; everything
+//! downstream of it takes plain values so it stays testable.
 
 use std::env;
 use std::fs;
@@ -83,63 +83,6 @@ fn ppid_of(pid: i64) -> Option<i64> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let rest = &stat[stat.rfind(')')? + 1..];
     rest.split_whitespace().nth(1)?.parse().ok()
-}
-
-/// >>> hyprctl BOUNDARY — the one call that needs a live compositor. <<<
-///
-/// Shells out to `hyprctl clients -j` and returns the workspace id of the
-/// FIRST client whose pid is in `pids` (the hook caller's ancestor set).
-/// None on ANY failure — hyprctl absent, bad JSON, no matching client, or a
-/// matching client without an integer workspace.id — and the hook then exits
-/// 0 without writing, exactly like the sh reference. Integration tests fake
-/// this by putting a stub `hyprctl` earlier on PATH.
-pub fn workspace_for_pids(pids: &[i64]) -> Option<i64> {
-    let out = std::process::Command::new("hyprctl")
-        .args(["clients", "-j"])
-        .output()
-        .ok()?;
-    let clients: Value = serde_json::from_slice(&out.stdout).ok()?;
-    let set: std::collections::HashSet<i64> = pids.iter().copied().collect();
-    // First match decides; if ITS workspace.id is unusable the reference
-    // python raises and prints nothing (no fallthrough to later clients).
-    let c = clients.as_array()?.iter().find(|c| {
-        c.get("pid")
-            .and_then(Value::as_i64)
-            .is_some_and(|p| set.contains(&p))
-    })?;
-    match c.get("workspace")?.get("id")? {
-        Value::Number(n) => n.as_i64(),
-        Value::String(s) => s.trim().parse().ok(), // int("3") succeeds in the reference
-        _ => None,
-    }
-}
-
-/// hyprctl JSON boundary for `bsctl ws` — `hyprctl <args>` parsed as JSON.
-/// None on any failure (hyprctl absent, bad JSON); unlike the hook's silent
-/// [`workspace_for_pids`], the ws callers report it and exit non-zero, since
-/// ws is a human/keybind-facing CLI (the sh reference dies under `set -e`).
-pub fn hyprctl_json(args: &[&str]) -> Option<Value> {
-    let out = std::process::Command::new("hyprctl")
-        .args(args)
-        .output()
-        .ok()?;
-    serde_json::from_slice(&out.stdout).ok()
-}
-
-/// `hyprctl dispatch <cmd> >/dev/null` — stdout (hyprctl's "ok") discarded,
-/// stderr passed through, exit code propagated like the script's set -e.
-pub fn hyprctl_dispatch(cmd: &str) -> i32 {
-    match std::process::Command::new("hyprctl")
-        .args(["dispatch", cmd])
-        .stdout(std::process::Stdio::null())
-        .status()
-    {
-        Ok(s) => s.code().unwrap_or(1),
-        Err(_) => {
-            eprintln!("bsctl: hyprctl not found");
-            127 // what sh reports for a missing command
-        }
-    }
 }
 
 /// flock(2) on an open file — the usage cache's cross-process serialization

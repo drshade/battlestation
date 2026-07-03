@@ -40,8 +40,29 @@ enum Cmd {
     },
     /// Print Claude plan usage as one JSON line (cached, ttl 240s)
     Usage,
+    /// Display state visibility & safe dpms management
+    Display {
+        #[command(subcommand)]
+        cmd: DisplayCmd,
+    },
     /// Generate shell completions on stdout
     Completions { shell: clap_complete::Shell },
+}
+
+#[derive(Subcommand)]
+enum DisplayCmd {
+    /// Per-output table + lid state + consistency warnings (always exits 0)
+    Status {
+        /// Emit raw structured JSON instead of the table
+        #[arg(long)]
+        json: bool,
+    },
+    /// DPMS an output on (safe: reads state, toggles only if off)
+    On { output: String },
+    /// DPMS an output off (safe: reads state, toggles only if on)
+    Off { output: String },
+    /// Recovery: reload config, reconcile lid, dpms-on enabled outputs
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -117,6 +138,12 @@ fn main() {
             WsCmd::Order => bsctl::ws::order(),
         },
         Cmd::Usage => bsctl::usage::run(),
+        Cmd::Display { cmd } => match cmd {
+            DisplayCmd::Status { json } => bsctl::display::status(json),
+            DisplayCmd::On { output } => bsctl::display::set_dpms(&output, true),
+            DisplayCmd::Off { output } => bsctl::display::set_dpms(&output, false),
+            DisplayCmd::Reset => bsctl::display::reset(),
+        },
         Cmd::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "bsctl", &mut std::io::stdout());
             0

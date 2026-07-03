@@ -1,0 +1,239 @@
+//! Hyprland IPC boundary — a direct `.socket.sock` client with a hyprctl
+//! fallback. Every compositor-facing call in this crate goes through here;
+//! the contract is summarized in lib.rs ("Hyprland IPC") and the wire notes
+//! below are what was verified empirically.
+//!
+//! Wire format (verified against the live compositor, Hyprland 0.55.4,
+//! 2026-07-03):
+//! - One request per connection to
+//!   `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`:
+//!   write the command, read the reply to EOF (the compositor answers the
+//!   first message and closes). Shutting down the write side is NOT required
+//!   for the reply to arrive on this version, but we do it anyway — it is
+//!   the unambiguous "request complete" and costs nothing.
+//! - `j/<query>` returns JSON (`j/monitors all`, `j/workspaces`,
+//!   `j/activeworkspace`, `j/clients` all verified). A LEADING `/` is
+//!   rejected ("unknown request"); a `[[BATCH]]` prefix is accepted but
+//!   unnecessary for single requests; without the `j/` prefix the same query
+//!   returns human-readable text.
+//! - `dispatch <cmd>` is the wire form of `hyprctl dispatch <cmd>` (verified
+//!   with a no-op `hl.dsp.focus({ workspace = <active> })` refocus). Success
+//!   is the literal reply `ok`; a rejected request replies with an error
+//!   string — which hyprctl prints to STDOUT and still exits 0, so a failed
+//!   dispatch has never been a non-zero exit through hyprctl either.
+//! - `reload` (plain, same ok/error reply shape) is what `hyprctl reload`
+//!   sends.
+//!
+//! Fallback policy: every entry point tries the socket first and falls back
+//! to spawning hyprctl on ANY socket failure — connect, io, unparseable
+//! JSON, non-ok dispatch reply. hyprctl is built with (and always speaks the
+//! protocol of) whatever Hyprland version is running, so on a rolling
+//! release it is the safety net for compositor protocol drift: if this
+//! crate's wire knowledge goes stale, bsctl degrades to exec latency instead
+//! of breaking. Re-sending after a non-ok reply is safe: the error reply
+//! means the compositor rejected the request rather than executing it.
+//!
+//! Instance discovery: `$HYPRLAND_INSTANCE_SIGNATURE` first (empty counts as
+//! unset), else the newest-mtime dir under `<runtime>/hypr/` — the
+//! restart_crashed_lock.sh walk, so VT/recovery contexts without the env var
+//! still find the running instance.
+
+use std::env;
+use std::fs;
+use std::io::{self, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+
+use serde_json::Value;
+
+use crate::sys;
+
+/// `${XDG_RUNTIME_DIR:-/run/user/<uid>}` (empty counts as unset; the uid
+/// default is restart_crashed_lock.sh's, for VT shells with a bare env).
+fn runtime_dir() -> PathBuf {
+    env::var_os("XDG_RUNTIME_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })))
+}
+
+/// Newest-mtime pick among instance-dir candidates — the
+/// restart_crashed_lock.sh `ls -t | head -n1` walk, for when
+/// `$HYPRLAND_INSTANCE_SIGNATURE` is unset. Mtime ties break toward the
+/// lexically greater name so the pick stays deterministic (ls -t leaves tie
+/// order unspecified; any stable rule works, this one needs no extra state).
+pub fn newest_instance(entries: &[(String, f64)]) -> Option<&str> {
+    entries
+        .iter()
+        .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)))
+        .map(|(name, _)| name.as_str())
+}
+
+/// The request socket: `<runtime>/hypr/<instance>/.socket.sock`. None only
+/// when discovery itself fails (no `hypr/` dir, no instance dirs) — callers
+/// then fall straight back to hyprctl.
+fn socket_path() -> Option<PathBuf> {
+    let hypr = runtime_dir().join("hypr");
+    let dir = match env::var_os("HYPRLAND_INSTANCE_SIGNATURE").filter(|v| !v.is_empty()) {
+        Some(his) => hypr.join(his),
+        None => {
+            let entries: Vec<(String, f64)> = fs::read_dir(&hypr)
+                .ok()?
+                .flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .filter_map(|e| {
+                    let mtime = sys::mtime_f64(&e.metadata().ok()?)?;
+                    Some((e.file_name().to_string_lossy().into_owned(), mtime))
+                })
+                .collect();
+            hypr.join(newest_instance(&entries)?)
+        }
+    };
+    Some(dir.join(".socket.sock"))
+}
+
+/// One request per connection: write the command, shutdown the write side,
+/// read the reply to EOF.
+fn socket_request(cmd: &str) -> io::Result<Vec<u8>> {
+    let path = socket_path().ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+    let mut s = UnixStream::connect(path)?;
+    s.write_all(cmd.as_bytes())?;
+    let _ = s.shutdown(std::net::Shutdown::Write); // reply arrives regardless (header)
+    let mut buf = Vec::new();
+    s.read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+/// JSON query — socket `j/<query>` first, then `hyprctl <query...> -j`.
+/// None on total failure (both paths); like the old sys::hyprctl_json, hook
+/// callers stay silent on None while CLI callers report and exit non-zero.
+pub fn json(query: &str) -> Option<Value> {
+    if let Ok(buf) = socket_request(&format!("j/{query}"))
+        && let Ok(v) = serde_json::from_slice(&buf)
+    {
+        return Some(v);
+    }
+    let out = Command::new("hyprctl")
+        .args(query.split_whitespace())
+        .arg("-j")
+        .output()
+        .ok()?;
+    serde_json::from_slice(&out.stdout).ok()
+}
+
+/// `hyprctl dispatch <cmd>` equivalent (the Lua `hl.dsp.*` strings).
+pub fn dispatch(cmd: &str) -> i32 {
+    ok_command(&["dispatch", cmd])
+}
+
+/// `hyprctl reload` equivalent — `bsctl display reset`'s first step.
+pub fn reload() -> i32 {
+    ok_command(&["reload"])
+}
+
+/// An ok/error command: the wire form is the argv words space-joined,
+/// success the literal reply "ok". Anything else falls back to spawning
+/// hyprctl with the same words (safe re-send, per the header). The spawn
+/// keeps the old sys::hyprctl_dispatch contract byte-for-byte: stdout
+/// (hyprctl's ok/error text) discarded, stderr passed through, exit code
+/// propagated, 127 when hyprctl is missing.
+fn ok_command(words: &[&str]) -> i32 {
+    if let Ok(buf) = socket_request(&words.join(" "))
+        && buf.trim_ascii() == b"ok"
+    {
+        return 0;
+    }
+    match Command::new("hyprctl")
+        .args(words)
+        .stdout(Stdio::null())
+        .status()
+    {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(_) => {
+            eprintln!("bsctl: hyprctl not found");
+            127 // what sh reports for a missing command
+        }
+    }
+}
+
+/// >>> compositor boundary for the hook — needs a live query. <<<
+///
+/// Workspace id of the FIRST client whose pid is in `pids` (the hook
+/// caller's ancestor set). None on ANY failure — socket and hyprctl both
+/// unreachable, bad JSON, no matching client, or a matching client without a
+/// usable workspace id — and the hook then exits 0 without writing, exactly
+/// like the sh reference. Integration tests fake this with a stub hyprctl on
+/// PATH (their XDG_RUNTIME_DIR holds no socket, so the fallback path runs).
+pub fn workspace_for_pids(pids: &[i64]) -> Option<i64> {
+    workspace_of(&json("clients")?, pids)
+}
+
+/// The pure half of [`workspace_for_pids`], on an already-fetched clients
+/// array.
+pub fn workspace_of(clients: &Value, pids: &[i64]) -> Option<i64> {
+    let set: std::collections::HashSet<i64> = pids.iter().copied().collect();
+    // First match decides; if ITS workspace.id is unusable the reference
+    // python raises and prints nothing (no fallthrough to later clients).
+    let c = clients.as_array()?.iter().find(|c| {
+        c.get("pid")
+            .and_then(Value::as_i64)
+            .is_some_and(|p| set.contains(&p))
+    })?;
+    match c.get("workspace")?.get("id")? {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.trim().parse().ok(), // int("3") succeeds in the reference
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn e(pairs: &[(&str, f64)]) -> Vec<(String, f64)> {
+        pairs.iter().map(|(n, m)| (n.to_string(), *m)).collect()
+    }
+
+    #[test]
+    fn newest_instance_picks_max_mtime() {
+        let entries = e(&[("old_1", 100.0), ("new_9", 300.0), ("mid_5", 200.0)]);
+        assert_eq!(newest_instance(&entries), Some("new_9"));
+        assert_eq!(newest_instance(&[]), None);
+    }
+
+    #[test]
+    fn newest_instance_breaks_mtime_ties_lexically() {
+        let entries = e(&[("bbb", 100.0), ("aaa", 100.0)]);
+        assert_eq!(newest_instance(&entries), Some("bbb"));
+        let entries = e(&[("aaa", 100.0), ("bbb", 100.0)]);
+        assert_eq!(newest_instance(&entries), Some("bbb"));
+    }
+
+    #[test]
+    fn workspace_of_first_match_decides() {
+        let clients = json!([
+            {"pid": 10, "workspace": {"id": 3}},
+            {"pid": 20, "workspace": {"id": 7}},
+        ]);
+        assert_eq!(workspace_of(&clients, &[20, 10]), Some(3)); // array order wins
+        assert_eq!(workspace_of(&clients, &[20]), Some(7));
+        assert_eq!(workspace_of(&clients, &[99]), None);
+    }
+
+    #[test]
+    fn workspace_of_id_shapes() {
+        // string ids parse (int("3") in the reference); junk on the FIRST
+        // match is None, with no fallthrough to later clients
+        let clients = json!([
+            {"pid": 1, "workspace": {"id": " 3 "}},
+            {"pid": 2, "workspace": {"id": true}},
+            {"pid": 3, "workspace": {"id": 5}},
+        ]);
+        assert_eq!(workspace_of(&clients, &[1]), Some(3));
+        assert_eq!(workspace_of(&clients, &[2, 3]), None);
+        assert_eq!(workspace_of(&json!("not an array"), &[1]), None);
+        assert_eq!(workspace_of(&json!([{"pid": 1}]), &[1]), None);
+    }
+}

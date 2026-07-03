@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::sys;
+use crate::ipc;
 
 /// `${XDG_STATE_HOME:-$HOME/.local/state}/claude-workspaces/order` (an empty
 /// env var counts as unset, like the sh `:-` default).
@@ -134,11 +134,11 @@ fn read_pref() -> String {
     fs::read_to_string(order_file()).unwrap_or_default()
 }
 
-/// `hyprctl workspaces -j`, or the script's set -e death when hyprctl/JSON
-/// fails: report and exit 1.
+/// `hyprctl workspaces -j` (socket-first via ipc), or the script's set -e
+/// death when both paths fail: report and exit 1.
 fn workspaces_json() -> Result<Value, i32> {
-    sys::hyprctl_json(&["workspaces", "-j"]).ok_or_else(|| {
-        eprintln!("bsctl ws: hyprctl workspaces -j failed");
+    ipc::json("workspaces").ok_or_else(|| {
+        eprintln!("bsctl ws: workspaces query failed (socket and hyprctl)");
         1
     })
 }
@@ -149,7 +149,7 @@ pub fn goto(pos: usize) -> i32 {
         Err(c) => return c,
     };
     match resolve(&read_pref(), &live_ids(&ws)).get(pos - 1) {
-        Some(id) => sys::hyprctl_dispatch(&focus_cmd(*id)),
+        Some(id) => ipc::dispatch(&focus_cmd(*id)),
         None => 1, // position off the end: no dispatch, exit 1 (script parity)
     }
 }
@@ -160,7 +160,7 @@ pub fn movewindow(pos: usize, follow: bool) -> i32 {
         Err(c) => return c,
     };
     match resolve(&read_pref(), &live_ids(&ws)).get(pos - 1) {
-        Some(id) => sys::hyprctl_dispatch(&move_cmd(*id, follow)),
+        Some(id) => ipc::dispatch(&move_cmd(*id, follow)),
         None => 1,
     }
 }
@@ -176,8 +176,8 @@ pub fn relative(delta: i64, mov: bool) -> i32 {
     }
     // Current position of `hyprctl activeworkspace -j`'s id in the resolved
     // order; a workspace outside the order (e.g. special) defaults to 1.
-    let Some(active) = sys::hyprctl_json(&["activeworkspace", "-j"]) else {
-        eprintln!("bsctl ws: hyprctl activeworkspace -j failed");
+    let Some(active) = ipc::json("activeworkspace") else {
+        eprintln!("bsctl ws: activeworkspace query failed (socket and hyprctl)");
         return 1;
     };
     let pos = active
@@ -191,7 +191,7 @@ pub fn relative(delta: i64, mov: bool) -> i32 {
     } else {
         focus_cmd(id)
     };
-    sys::hyprctl_dispatch(&cmd)
+    ipc::dispatch(&cmd)
 }
 
 pub fn set(ids: &[i64]) -> i32 {
@@ -240,7 +240,7 @@ pub fn rename(id: i64, name: Option<&str>) -> i32 {
     // Hyprland can't renumber an id; this only changes the display name. The
     // Lua config parser rejects `hyprctl dispatch renameworkspace`, so the
     // rename goes through hl.dsp.workspace.rename (same as focus/move).
-    sys::hyprctl_dispatch(&rename_cmd(id, name))
+    ipc::dispatch(&rename_cmd(id, name))
 }
 
 pub fn order() -> i32 {

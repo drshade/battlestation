@@ -11,7 +11,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::{proto, sys};
+use crate::{ipc, proto, sys};
 
 /// Dispatch a hook verb. `argv` is everything after the binary name and is
 /// only used for the optional debug log line.
@@ -88,7 +88,17 @@ fn agent_stop(dir: &Path, input: &[u8]) {
 /// waiting/thinking/tooling/clear — the session-status verbs.
 fn session_verb(dir: &Path, verb: &str, input: &[u8]) {
     let d = proto::parse_payload(input);
-    let sid = proto::session_id(&d);
+    // No session_id -> silent no-op. Falling back to a "default" session file
+    // here would FABRICATE a session: its pid would be whatever claude
+    // process is our ancestor, so the poller could never sweep it while that
+    // process lives (observed live 2026-07-02 — a payload-less test
+    // invocation planted a phantom bot on the bar). The "default" fallback
+    // survives only in the marker names of agent-start/agent-stop, where an
+    // orphan is swept by the next poll.
+    let sid = proto::field(&d, "session_id");
+    if sid.is_empty() {
+        return;
+    }
     let tpath = proto::field(&d, "transcript_path");
 
     // Subagent-context events carry agent_id (Pre/PostToolUse fired from
@@ -125,8 +135,8 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8]) {
     // Fall back to our immediate parent so the pid field is never omitted.
     let pid = claude_pid.unwrap_or_else(|| std::os::unix::process::parent_id() as i64);
 
-    // hyprctl boundary: no owning workspace -> exit silently, write nothing.
-    let Some(ws) = sys::workspace_for_pids(&pids) else {
+    // compositor boundary: no owning workspace -> exit silently, write nothing.
+    let Some(ws) = ipc::workspace_for_pids(&pids) else {
         return;
     };
 

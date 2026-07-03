@@ -60,6 +60,9 @@ pub fn field_or(d: &Value, key: &str, default: &str) -> String {
 }
 
 /// session_id with the scripts' fallback: falsy/missing -> "default".
+/// MARKER names only (agent-start/agent-stop) — the session-status verbs
+/// require an explicit session_id and no-op without one (see hook.rs), so a
+/// "default" session file can never be fabricated.
 pub fn session_id(d: &Value) -> String {
     field_or(d, "session_id", "default")
 }

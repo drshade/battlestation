@@ -193,11 +193,23 @@ fn session_write_without_hyprctl_writes_nothing() {
 #[test]
 fn bad_stdin_is_tolerated() {
     let env = TestEnv::new("bad-stdin");
-    // Bad JSON -> sid "default"; still exits 0 and writes the default session.
-    assert_eq!(env.hook("waiting", "this is { not json"), 0);
-    let rec = env.read_json("default");
-    assert_eq!(rec["status"], json!("waiting"));
-    assert_eq!(rec["title"], json!(""));
+    // No session_id -> silent no-op: bad JSON, empty stdin, and payloads
+    // lacking the field must all exit 0 WITHOUT writing. (A "default" sid
+    // fallback here once fabricated a phantom session file whose pid was the
+    // live claude ancestor — unsweepable until that process died.)
+    for payload in [
+        "this is { not json",
+        "",
+        "{}",
+        r#"{"transcript_path":"/nope"}"#,
+    ] {
+        assert_eq!(env.hook("waiting", payload), 0, "{payload:?}");
+        assert_eq!(env.hook("tooling", payload), 0, "{payload:?}");
+    }
+    let entries: Vec<_> = fs::read_dir(env.state_dir())
+        .map(|rd| rd.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(entries.is_empty(), "state dir must stay empty: {entries:?}");
     // Unknown verbs are silently ignored.
     assert_eq!(env.hook("explode", "{}"), 0);
 }

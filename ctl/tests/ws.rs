@@ -74,6 +74,11 @@ impl TestEnv {
             .args(args)
             .env("XDG_STATE_HOME", &self.state)
             .env("PATH", &self.path)
+            // No socket lives under this root, so bsctl's socket-first ipc
+            // always falls through to the fake hyprctl above — without this
+            // isolation the tests would drive the developer's LIVE
+            // compositor through the real request socket.
+            .env("XDG_RUNTIME_DIR", self.root.join("run"))
             .output()
             .unwrap()
     }

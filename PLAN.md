@@ -64,7 +64,7 @@ BarWidget/Panel/UsageIndicator QML. All three scripts retired and the empty
 `ctl/src/lib.rs`. 59 tests; live goto round-trip verified through the real
 compositor.
 
-## 3. `bsctl display` — display state visibility & management
+## 3. `bsctl display` — display state visibility & management — ✅ DONE (2026-07-03)
 
 Display management is the machine's roughest edge (two gotcha entries, a
 dpms-toggle quirk, and a lid/reload interaction that stranded the pointer on
@@ -97,6 +97,24 @@ displays-on.sh, display-scale.sh, monitors_local.lua. Proposed:
   last-ditch pure-shell fallback path.
 - Subsumes the parked `display-scale.sh` port (`bsctl display scale
   up|down|reset`) — same domain, same state files.
+
+**Outcome.** `ipc.rs` (socket-first, hyprctl-fallback; wire format verified
+live on Hyprland 0.55.4 — leading `/` rejected, dispatch replies `ok`/error
+text, hyprctl exits 0 even on rejected dispatches; instance discovery env →
+newest-mtime dir) — hook/ws migrated; ws goto 4.4→1.2ms, hook 3.5→1.3ms;
+socket path proven with hyprctl removed from PATH. `display status`
+(readable table + lid + inconsistency WARNINGs, `--json`), `on|off <output>`
+(read-before-toggle, table-form only; refuses disabled outputs — live
+finding: a disabled output reports `dpmsStatus: true`, so the reading is
+meaningless), `reset` (reload → clamshell.sh auto → dpms-on loop).
+First live `reset` exposed a race its own WARNING caught: reload re-applies
+monitors *asynchronously*, so a single lid reconcile can lose to the late
+re-enable — reset now reconciles-and-verifies (bounded loop), skipped
+entirely when no lid is closed. Also fixed: session verbs no longer
+fabricate a `default` session file on payload-less invocations (the phantom
+bot); marker-name fallback unchanged. 85 tests; scale port still parked
+(item 4); shell shims (`displays-on.sh`, clamshell binds) untouched per the
+recovery boundary.
 
 ## 4. Ideas parked behind the above
 

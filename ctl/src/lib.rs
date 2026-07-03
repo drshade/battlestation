@@ -47,7 +47,12 @@
 //! by contract — always exits 0, even on unknown/missing verbs):
 //! - `waiting`/`thinking`/`tooling` — (re)write the session file with that
 //!   status; events carrying an agent_id also refresh (or recreate/heal)
-//!   that subagent marker.
+//!   that subagent marker. A payload WITHOUT a session_id (empty/absent/bad
+//!   JSON) is a silent no-op for all four session verbs: falling back to a
+//!   "default" session file would fabricate a phantom session whose pid is
+//!   the caller's own claude ancestor, unsweepable while that process lives.
+//!   Only the marker names of agent-start/agent-stop keep the historical
+//!   "default" sid fallback (an orphan marker is swept by the next poll).
 //! - `clear` — remove the session file AND its subagent markers.
 //! - `agent-start` / `agent-stop` — write/remove one subagent marker
 //!   (fast path: no hyprctl), falling back to the subagent's meta.json next
@@ -101,8 +106,63 @@
 //! OAuth token comes from `~/.claude/.credentials.json`
 //! (`.claudeAiOauth.accessToken`; missing/unreadable -> silent exit 0) and
 //! is passed to curl on stdin, never in argv.
+//!
+//! # Hyprland IPC (`ipc.rs`)
+//!
+//! Every compositor-facing call goes through [`ipc`]: a direct client of the
+//! request socket
+//! `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`, one
+//! request per connection (write command, shutdown write, read reply to
+//! EOF). Instance discovery: the env var first (empty counts as unset), else
+//! the newest-mtime dir under `$XDG_RUNTIME_DIR/hypr/` — the
+//! restart_crashed_lock.sh walk, so VT/recovery contexts still resolve.
+//!
+//! Wire format, verified live against Hyprland 0.55.4 (2026-07-03):
+//! `j/<query>` returns JSON (`j/monitors all`, `j/workspaces`,
+//! `j/activeworkspace`, `j/clients` verified); a leading `/` is rejected
+//! ("unknown request") and `[[BATCH]]` is accepted but unnecessary for
+//! single requests. `dispatch <cmd>` / `reload` reply with the literal `ok`
+//! on success, an error string on rejection (verified with a no-op
+//! `hl.dsp.focus` refocus of the active workspace). hyprctl prints those
+//! error strings to STDOUT and still exits 0 — a rejected dispatch has never
+//! been a non-zero exit — and bsctl keeps that exit-code contract.
+//!
+//! Fallback policy: on ANY socket failure (connect, io, unparseable JSON,
+//! non-ok dispatch reply) the same request is retried by spawning hyprctl,
+//! which always speaks the running compositor's protocol on this rolling
+//! release — the safety net for wire-format drift. A non-ok reply means the
+//! request was rejected, not half-executed, so the retry cannot double-fire.
+//!
+//! # Display management (`bsctl display`)
+//!
+//! The human/diagnostic tool for display state; the AUTOMATED recovery paths
+//! stay shell per AGENTS.md (hypridle's after_sleep_cmd -> displays-on.sh,
+//! the lid binds -> clamshell.sh, restart_crashed_lock.sh forever).
+//!
+//! Core semantic constraint (AGENTS.md gotcha): the dpms dispatcher is
+//! TOGGLE-ONLY. The string form `hl.dsp.dpms("on")` toggles EVERY monitor;
+//! the table form `hl.dsp.dpms({ monitor = "X" })` toggles exactly one;
+//! neither can "set". So every dpms mutation here is read-before-toggle:
+//! read `dpmsStatus` from `j/monitors all`, emit the TABLE-FORM toggle only
+//! when the state differs. Corollaries: `on`/`off <output>` are idempotent
+//! by construction, and disabled outputs are refused (their dpmsStatus is
+//! meaningless — a lid-disabled panel reports dpms on — and runtime
+//! dpms/eval calls no-op on disabled outputs; `reset`/reload re-enables).
+//!
+//! - `status [--json]` — per-output table (from `j/monitors all`) + lid
+//!   state (`/proc/acpi/button/lid/*/state`; no lid device -> desktop, line
+//!   omitted) + WARNING lines with remedies (internal panel enabled while
+//!   lid closed, mixed dpms, enabled output with dpms off). Warnings never
+//!   affect the exit code — it is a report.
+//! - `on|off <output>` — safe dpms targeting as above; unknown outputs error
+//!   listing the valid names.
+//! - `reset` — displays-on.sh's reset flow: `reload` (re-applies
+//!   monitors.lua), shell out to clamshell.sh auto (it OWNS the lid policy),
+//!   then dpms-on all enabled outputs with bounded re-read retries.
 
+pub mod display;
 pub mod hook;
+pub mod ipc;
 pub mod poll;
 pub mod proto;
 pub mod sys;
