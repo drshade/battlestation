@@ -23,3 +23,13 @@ hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd(clamshell .. " off; " .. restar
 hl.on("hyprland.start", function()
     hl.exec_cmd(clamshell .. " auto")
 end)
+
+-- Reconcile on every config (re)load too: `hyprctl reload` re-applies the
+-- monitor config, which RE-ENABLES the internal panel even with the lid shut
+-- (no switch event re-fires — lid state is a level). Without this, any reload
+-- while docked-and-closed strands the pointer on an invisible panel. This
+-- file executes on each load, so a top-level reconcile covers reloads; the
+-- hyprland.start handler above stays for cold start, where config parse can
+-- run before outputs exist (clamshell.sh auto is idempotent — double-firing
+-- at startup is harmless).
+hl.exec_cmd(clamshell .. " auto")
