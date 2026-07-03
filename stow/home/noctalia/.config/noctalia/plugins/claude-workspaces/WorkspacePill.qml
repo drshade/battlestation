@@ -135,13 +135,16 @@ Item {
           required property string modelData          // = the session id
           readonly property var agents: cell.agentsBySid[modelData] || []
           readonly property string botStatus: cell.statusBySid[modelData] || ""
+          // Squad-wide: markers carry no kind (lib.rs) — sub-bots inherit
+          // the session's, so a codex commander leads codex sub-bots.
+          readonly property string botKind: cell.kindBySid[modelData] || "claude"
           spacing: Math.round(cfg.d * 0.12)
 
           BotIcon {
             anchors.verticalCenter: parent.verticalCenter
             status: botStatus
             title: cell.titleBySid[modelData] || ""
-            kind: cell.kindBySid[modelData] || "claude"
+            kind: botKind
             commander: agents.length > 0              // turn to face the squad
             cfg: cell.cfg
             pokeNonce: cell.pokeNonce
@@ -153,6 +156,7 @@ Item {
               required property var modelData         // = {id,type,description,started}
               anchors.verticalCenter: parent.verticalCenter
               status: botStatus                       // sub-bots mirror the commander
+              kind: botKind                           // inherited from the session
               title: (modelData.type || "agent") + (modelData.description ? " — " + modelData.description : "")
               cfg: cell.cfg
               sizeScale: cfg.subScale
