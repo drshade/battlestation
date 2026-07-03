@@ -1,10 +1,13 @@
 //! `bsctl ws` — workspace display-order commands, mirroring ws.sh
-//! verb-for-verb. The order-file protocol and the display-position model are
-//! specified in lib.rs ("Workspace display order"); this module keeps the
-//! script's observable behavior exactly: same dispatch strings (Hyprland's
-//! Lua parser is picky — these are the known-good forms), same file bytes,
-//! same exit codes (usage errors 2 via clap; position-off-the-end 1, the sh
-//! `[ -n "$id" ] && dispatch` leftover status).
+//! verb-for-verb, plus the display-level verbs (`display`, `movetodisplay`,
+//! `swapdisplays`). The order-file protocol, the display-position model and
+//! the display numbering are specified in lib.rs ("Workspace display
+//! order"); this module keeps the script's observable behavior exactly:
+//! same dispatch strings (Hyprland's Lua parser is picky — these are the
+//! known-good forms, the monitor ones discovered by live probing), same
+//! file bytes, same exit codes (usage errors 2 via clap;
+//! position-off-the-end 1, the sh `[ -n "$id" ] && dispatch` leftover
+//! status).
 
 use std::env;
 use std::fs;
@@ -93,6 +96,84 @@ pub fn focus_cmd(id: i64) -> String {
     format!("hl.dsp.focus({{ workspace = {id} }})")
 }
 
+/// `hl.dsp.focus({ monitor = "NAME" })` — the Lua form of legacy
+/// `focusmonitor` (verified live: a no-op refocus of the focused monitor
+/// replies ok; an unknown name replies `warning: ... monitor not found`).
+pub fn focus_monitor_cmd(name: &str) -> String {
+    format!(r#"hl.dsp.focus({{ monitor = "{}" }})"#, lua_escape(name))
+}
+
+/// `hl.dsp.workspace.move({ workspace = N, monitor = "NAME" })` — the Lua
+/// form of legacy `moveworkspacetomonitor` (verified live: a no-op move of a
+/// workspace to its own monitor replies ok; omitting `monitor` replies
+/// `error: ... 'monitor' is required`).
+pub fn move_workspace_cmd(id: i64, monitor: &str) -> String {
+    format!(
+        r#"hl.dsp.workspace.move({{ workspace = {id}, monitor = "{}" }})"#,
+        lua_escape(monitor)
+    )
+}
+
+/// `hl.dsp.workspace.swap_monitors({ monitor1 = "A", monitor2 = "B" })` —
+/// the Lua form of legacy `swapactiveworkspaces` (verified live with a swap
+/// round-trip; an empty table replies `error: ... 'monitor1' is required` /
+/// `'monitor2' is required`, which is how the field names were discovered).
+pub fn swap_monitors_cmd(m1: &str, m2: &str) -> String {
+    format!(
+        r#"hl.dsp.workspace.swap_monitors({{ monitor1 = "{}", monitor2 = "{}" }})"#,
+        lua_escape(m1),
+        lua_escape(m2)
+    )
+}
+
+/// One enabled output, in display order. Display numbering is a pure remap
+/// of `monitors` JSON: enabled outputs sorted by (x, y), 1-based — leftmost
+/// is display 1. Like workspace positions, the number is a display-layer
+/// concept; output names stay the compositor's.
+pub struct Display {
+    pub name: String,
+    pub focused: bool,
+    pub active_ws: Option<i64>,
+}
+
+/// Displays from a `monitors` array: disabled outputs dropped, the rest
+/// sorted by (x, y). Coordinates compare as f64 (the JSON's native type);
+/// ties break by name so the numbering stays deterministic.
+pub fn displays_from(monitors: &Value) -> Vec<Display> {
+    let Some(arr) = monitors.as_array() else {
+        return Vec::new();
+    };
+    let mut mons: Vec<(f64, f64, Display)> = arr
+        .iter()
+        .filter(|m| !m.get("disabled").and_then(Value::as_bool).unwrap_or(false))
+        .map(|m| {
+            let f = |k: &str| m.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+            (
+                f("x"),
+                f("y"),
+                Display {
+                    name: m
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    focused: m.get("focused").and_then(Value::as_bool).unwrap_or(false),
+                    active_ws: m
+                        .get("activeWorkspace")
+                        .and_then(|w| w.get("id"))
+                        .and_then(Value::as_i64),
+                },
+            )
+        })
+        .collect();
+    mons.sort_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then(a.1.total_cmp(&b.1))
+            .then_with(|| a.2.name.cmp(&b.2.name))
+    });
+    mons.into_iter().map(|(_, _, d)| d).collect()
+}
+
 /// `hl.dsp.window.move({ workspace = N, follow = B })` — byte-identical.
 pub fn move_cmd(id: i64, follow: bool) -> String {
     format!("hl.dsp.window.move({{ workspace = {id}, follow = {follow} }})")
@@ -141,6 +222,104 @@ fn workspaces_json() -> Result<Value, i32> {
         eprintln!("bsctl ws: workspaces query failed (socket and hyprctl)");
         1
     })
+}
+
+/// `hyprctl monitors -j` (socket-first via ipc; without `all`, so disabled
+/// outputs never enter the numbering) — same failure contract as
+/// [`workspaces_json`].
+fn monitors_json() -> Result<Value, i32> {
+    ipc::json("monitors").ok_or_else(|| {
+        eprintln!("bsctl ws: monitors query failed (socket and hyprctl)");
+        1
+    })
+}
+
+/// Out-of-range display error: name the valid numbering so the fix is in
+/// the message (e.g. `displays: 1 = eDP-1, 2 = DP-1`).
+fn no_such_display(verb: &str, n: usize, ds: &[Display]) -> i32 {
+    let list = ds
+        .iter()
+        .enumerate()
+        .map(|(i, d)| format!("{} = {}", i + 1, d.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    eprintln!("bsctl ws {verb}: no display {n} (displays: {list})");
+    1
+}
+
+/// The focused display's index in `ds` — exactly one enabled output is
+/// focused in a healthy compositor, so None means the query is broken.
+fn focused_index(verb: &str, ds: &[Display]) -> Result<usize, i32> {
+    ds.iter().position(|d| d.focused).ok_or_else(|| {
+        eprintln!("bsctl ws {verb}: no focused display in monitors query");
+        1
+    })
+}
+
+pub fn display(n: usize) -> i32 {
+    let mons = match monitors_json() {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    let ds = displays_from(&mons);
+    match ds.get(n - 1) {
+        Some(d) => ipc::dispatch(&focus_monitor_cmd(&d.name)),
+        None => no_such_display("display", n, &ds),
+    }
+}
+
+pub fn movetodisplay(n: usize, follow: bool) -> i32 {
+    let mons = match monitors_json() {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    let ds = displays_from(&mons);
+    let Some(target) = ds.get(n - 1) else {
+        return no_such_display("movetodisplay", n, &ds);
+    };
+    let cur = match focused_index("movetodisplay", &ds) {
+        Ok(i) => i,
+        Err(c) => return c,
+    };
+    if cur == n - 1 {
+        return 0; // already on that display: nothing to move
+    }
+    let Some(ws_id) = ds[cur].active_ws else {
+        eprintln!(
+            "bsctl ws movetodisplay: focused display {} has no active workspace",
+            ds[cur].name
+        );
+        return 1;
+    };
+    let code = ipc::dispatch(&move_workspace_cmd(ws_id, &target.name));
+    if code != 0 {
+        return code;
+    }
+    // Pin focus explicitly rather than trusting the move's inherent focus
+    // behavior (version-dependent): follow lands on the moved workspace,
+    // stay re-focuses the source display — both no-op when already true.
+    if follow {
+        ipc::dispatch(&focus_cmd(ws_id))
+    } else {
+        ipc::dispatch(&focus_monitor_cmd(&ds[cur].name))
+    }
+}
+
+pub fn swapdisplays() -> i32 {
+    let mons = match monitors_json() {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    let ds = displays_from(&mons);
+    if ds.len() < 2 {
+        return 0; // nothing to swap with
+    }
+    let cur = match focused_index("swapdisplays", &ds) {
+        Ok(i) => i,
+        Err(c) => return c,
+    };
+    let next = (cur + 1) % ds.len();
+    ipc::dispatch(&swap_monitors_cmd(&ds[cur].name, &ds[next].name))
 }
 
 pub fn goto(pos: usize) -> i32 {
@@ -357,5 +536,51 @@ mod tests {
         assert_eq!(name_of(&ws, 3), "null"); // null name -> jq -r "null"
         assert_eq!(name_of(&json!([{"id": 4}]), 4), "null"); // missing key too
         assert_eq!(name_of(&ws, 99), ""); // no entry -> empty capture
+    }
+
+    #[test]
+    fn displays_numbered_left_to_right() {
+        let mons = json!([
+            {"name": "DP-1",  "x": 2304, "y": 0, "focused": true,  "activeWorkspace": {"id": 11}},
+            {"name": "eDP-1", "x": 0,    "y": 0, "focused": false, "activeWorkspace": {"id": 3}},
+            {"name": "HDMI-A-1", "x": 500, "y": 0, "disabled": true},
+        ]);
+        let ds = displays_from(&mons);
+        assert_eq!(
+            ds.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+            vec!["eDP-1", "DP-1"] // by x, disabled dropped
+        );
+        assert!(!ds[0].focused);
+        assert!(ds[1].focused);
+        assert_eq!(ds[0].active_ws, Some(3));
+        assert_eq!(ds[1].active_ws, Some(11));
+        // ties on (x, y) break by name, deterministically
+        let tie = json!([{"name": "b", "x": 0, "y": 0}, {"name": "a", "x": 0, "y": 0}]);
+        let ds = displays_from(&tie);
+        assert_eq!(ds[0].name, "a");
+        assert_eq!(displays_from(&json!("junk")).len(), 0);
+    }
+
+    #[test]
+    fn display_dispatch_strings_match_verified_forms() {
+        // Pinned byte-for-byte to the live-verified Lua forms (see each
+        // constructor's doc comment for the verification story).
+        assert_eq!(
+            focus_monitor_cmd("DP-1"),
+            r#"hl.dsp.focus({ monitor = "DP-1" })"#
+        );
+        assert_eq!(
+            move_workspace_cmd(3, "DP-1"),
+            r#"hl.dsp.workspace.move({ workspace = 3, monitor = "DP-1" })"#
+        );
+        assert_eq!(
+            swap_monitors_cmd("eDP-1", "DP-1"),
+            r#"hl.dsp.workspace.swap_monitors({ monitor1 = "eDP-1", monitor2 = "DP-1" })"#
+        );
+        // names ride through lua_escape like rename's
+        assert_eq!(
+            focus_monitor_cmd(r#"we"ird"#),
+            r#"hl.dsp.focus({ monitor = "we\"ird" })"#
+        );
     }
 }

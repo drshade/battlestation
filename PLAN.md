@@ -145,6 +145,25 @@ recovery boundary.
   monitors. DESIGN CONSTRAINT for anything touching the ws protocol or the
   order file now: don't bake in the single-monitor assumption harder than it
   already is.
+
+  **First slice DONE (2026-07-03):** display-level verbs + the F-row.
+  `bsctl ws display <n>` / `movetodisplay <n> [--follow]` / `swapdisplays`;
+  display N = Nth enabled output left-to-right (pure remap, like workspace
+  positions). Lua dispatcher forms discovered by live probing (legacy names
+  rejected): `hl.dsp.focus({ monitor })`, `hl.dsp.workspace.move({
+  workspace, monitor })`, `hl.dsp.workspace.swap_monitors({ monitor1,
+  monitor2 })` — pinned in tests; movetodisplay pins focus explicitly
+  (follow/stay) rather than trusting version-dependent move focus. Keybinds:
+  the F-row mirrors the number-row grammar — SUPER+F1..3 focus display,
+  HYPER+F1..3 send-workspace-and-follow, HYPER+SHIFT+F1..3 send-and-stay,
+  HYPER+F12 swap; keybind-model header updated. 108 tests; live-verified
+  (focus round-trip, out-of-range error naming valid displays, own-display
+  no-op). Known wart, accepted: slide-animation direction and the 4-finger
+  gesture follow raw id order, so they can disagree with pill order after
+  drags. STILL OPEN from the requirements: per-monitor display orders /
+  cross-monitor position semantics for the order file (`goto` still numbers
+  the global resolved order), and taming spontaneous ws 11+ creation
+  (workspace rules pinning ids to monitors).
 - `display-scale.sh` port (`bsctl display scale up|down|reset`) — remaining
   piece of item 3's domain once the core lands.
 
@@ -159,3 +178,8 @@ recovery boundary.
   push) — the repo is published.
 - Drift triage of remaining unmanaged `~/.config` entries as they catch the
   eye; luacheck install if doctor's Lua linting ever needs to be real.
+
+
+# More things to consider:
+- renaming our plugin (currently 'Claude Workspaces') to 'Battlestation' with a view of making it broader than supporting just claude. I want to support Codex next. This means changing the file state model a bit to include the agent harness (and probably renaming /run/user/1000/claude-ws to battlestation-ws or something). I also want to include new icons for Codex to show the various states, and of course hook into the codex code harness to update those states (this will need investigation of what is possible)
+- when navigating to the scratch workspace (cmd-s) - we should unhighlight the currently selected workspace (it currently remains highlighted). probably a small bug here. 

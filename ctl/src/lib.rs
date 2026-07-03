@@ -105,6 +105,23 @@
 //! Renaming never renumbers: `rename <id> [name]` only sets the display name
 //! (empty name resets it to the id's number).
 //!
+//! ## Display numbering (`display` / `movetodisplay` / `swapdisplays`)
+//!
+//! Display N = the Nth ENABLED output sorted by (x, y) position, 1-based —
+//! leftmost is display 1. Like workspace positions, the number is a pure
+//! display-layer remap (output names stay the compositor's; ties break by
+//! name). The Lua dispatcher forms — `hl.dsp.focus({ monitor })`,
+//! `hl.dsp.workspace.move({ workspace, monitor })`,
+//! `hl.dsp.workspace.swap_monitors({ monitor1, monitor2 })` — were
+//! discovered by live probing (Hyprland 0.55.4; the legacy `focusmonitor`/
+//! `moveworkspacetomonitor`/`swapactiveworkspaces` names are rejected by the
+//! Lua parser) and are pinned byte-for-byte in tests. `movetodisplay` pins
+//! focus explicitly after the move (follow -> the moved workspace, stay ->
+//! back to the source display) rather than trusting the move's
+//! version-dependent inherent focus. Workspace ids are untouched by monitor
+//! moves, so the order file needs no migration when workspaces change
+//! displays.
+//!
 //! # Usage cache (`bsctl usage`)
 //!
 //! Fetches Claude Code plan usage from the OAuth usage endpoint (the same

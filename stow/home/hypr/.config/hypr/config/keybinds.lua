@@ -3,8 +3,11 @@
 --   HYPER = DO  — launch apps, act on the focused window, act on the system.
 --   SHIFT       — "…with the window" suffix (e.g. send-and-follow).
 --   ALT / CTRL  — almost nothing; reserved for app-internal + rare exceptions.
--- The number row is the whole story:
+-- The number row is the whole story for WORKSPACES:
 --   SUPER+N go there · HYPER+N throw it there · HYPER+SHIFT+N throw it & go.
+-- The F-row is the same story one level up, for DISPLAYS:
+--   SUPER+Fn look at display n · HYPER+Fn take this workspace there & follow
+--   · HYPER+SHIFT+Fn send it & stay · HYPER+F12 swap what the displays show.
 --
 -- Section headers below MUST stay in the "-- N. Name" form: the noctalia
 -- keybind-cheatsheet parser uses them to categorise binds (it matches each
@@ -100,7 +103,22 @@ hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noctCall .. "plugin:claude-workspace
 -- Clear any manual pill reordering: positions map back to 1,2,3,... (ascending id).
 hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " reset"), { description = "Reset workspace order to default" })
 
--- 5. System · Hyper
+-- 5. Displays
+
+-- Display n = the nth enabled output LEFT TO RIGHT (bsctl ws numbers by
+-- x-position, not connector name), mirroring the number-row verb grammar.
+for i = 1, 3 do
+    hl.bind(mainMod .. " + F" .. i, hl.dsp.exec_cmd(ws .. " display " .. i), { description = "Focus display " .. i })
+end
+for i = 1, 3 do
+    hl.bind(hyperMod .. " + F" .. i, hl.dsp.exec_cmd(ws .. " movetodisplay " .. i .. " --follow"), { description = "Send workspace to display " .. i .. " & follow" })
+end
+for i = 1, 3 do
+    hl.bind(hyperMod .. " + SHIFT + F" .. i, hl.dsp.exec_cmd(ws .. " movetodisplay " .. i), { description = "Send workspace to display " .. i })
+end
+hl.bind(hyperMod .. " + F12", hl.dsp.exec_cmd(ws .. " swapdisplays"), { description = "Swap displays" })
+
+-- 6. System · Hyper
 
 hl.bind(hyperMod .. " + Print",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit toggle"),       { description = "Screenshot toolkit" })
 hl.bind(hyperMod .. " + L",         hl.dsp.exec_cmd(noctCall .. "sessionMenu toggle"),                 { description = "Session menu (lock/logout/reboot)" })
@@ -108,7 +126,7 @@ hl.bind(hyperMod .. " + comma",     hl.dsp.exec_cmd("$HOME/.local/bin/bsctl disp
 hl.bind(hyperMod .. " + period",    hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display scale up"),   { description = "Zoom display in (scale up)" })
 hl.bind(hyperMod .. " + Backspace", hl.dsp.exec_cmd("qs -c noctalia-shell kill; sleep 1; qs -c noctalia-shell"), { description = "Restart Noctalia shell" })
 
--- 6. Edit · Super
+-- 7. Edit · Super
 
 -- Universal copy/paste/cut/undo (grandfathered onto SUPER) + clipboard history
 hl.bind(mainMod .. " + C",           send_shortcut("CTRL", "Insert"),                   { description = "Copy" })
@@ -117,7 +135,7 @@ hl.bind(mainMod .. " + X",           send_shortcut("CTRL", "X"),                
 hl.bind(mainMod .. " + Z",           send_shortcut("CTRL", "Z"),                        { description = "Undo" })
 hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipboard"), { description = "Clipboard history" })
 
--- 7. Hardware
+-- 8. Hardware
 
 -- Audio
 hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd(noctCall .. "volume increase"),   { locked = true, repeating = true, description = "Volume up" })

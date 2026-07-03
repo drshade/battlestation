@@ -117,6 +117,21 @@ enum WsCmd {
     Rename { id: i64, name: Option<String> },
     /// Print resolved "pos -> id (name)" (debug)
     Order,
+    /// Focus display N (1-based, leftmost first)
+    Display {
+        #[arg(value_parser = clap::value_parser!(u32).range(1..))]
+        n: u32,
+    },
+    /// Move the current workspace to display N
+    Movetodisplay {
+        #[arg(value_parser = clap::value_parser!(u32).range(1..))]
+        n: u32,
+        /// Follow the workspace to its new display
+        #[arg(long)]
+        follow: bool,
+    },
+    /// Swap the active workspaces of this display and the next
+    Swapdisplays,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -151,6 +166,9 @@ fn main() {
             WsCmd::Get => bsctl::ws::get(),
             WsCmd::Rename { id, name } => bsctl::ws::rename(id, name.as_deref()),
             WsCmd::Order => bsctl::ws::order(),
+            WsCmd::Display { n } => bsctl::ws::display(n as usize),
+            WsCmd::Movetodisplay { n, follow } => bsctl::ws::movetodisplay(n as usize, follow),
+            WsCmd::Swapdisplays => bsctl::ws::swapdisplays(),
         },
         Cmd::Usage => bsctl::usage::run(),
         Cmd::Display { cmd } => match cmd {
