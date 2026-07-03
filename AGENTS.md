@@ -170,6 +170,9 @@ live in `setup/README.md`.
   delete the relevant note rather than appending contradictions. Then check
   whether README / other notes need the same correction (see the alacritty
   drift above — a change in one place often implies edits in others).
+  Likewise no history/origin stories in notes — how the previous state came
+  to be belongs in commit messages and PLAN.md outcomes, not in front of
+  someone mid-rebuild (see setup/README.md style).
 
 ## Known gotchas
 

@@ -22,3 +22,10 @@ e.g. `sshkeys-00-generate-key.md` … `sshkeys-03-register-key.md`,
 
 Terse; assume a competent reader. Document the non-obvious command, not the
 obvious — no spoon-feeding, no scaffolding, no filler.
+
+**No history or origin stories.** A note serves someone mid-rebuild; how the
+old state came to be, what replaced what, and who installed it are noise to
+that reader (an early rust note carried a provenance tale — anti-pattern).
+History lives in git commit messages and PLAN.md outcomes; a note states only
+the current steps and, per AGENTS.md principle #5, the *why* of the current
+choice when it isn't obvious.
