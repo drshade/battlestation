@@ -126,6 +126,56 @@ pub fn title_from_transcript(content: &str) -> String {
     }
 }
 
+/// Char budget for payload-derived titles (transcript aiTitles arrive
+/// pre-sized; prompts don't).
+pub const PROMPT_TITLE_MAX: usize = 60;
+
+/// Payload-derived title for harnesses whose transcripts carry no ai-title
+/// (Codex): `basename(cwd): <first non-blank line of prompt>`,
+/// whitespace-collapsed and truncated to [`PROMPT_TITLE_MAX`] chars (a cut
+/// gets a trailing `…`). Missing pieces degrade: no usable prompt line -> ""
+/// (so the precedence chain falls through); no cwd basename -> the bare
+/// prompt line.
+pub fn title_from_prompt(cwd: &str, prompt: &str) -> String {
+    let Some(line) = prompt.lines().map(collapse_ws).find(|l| !l.is_empty()) else {
+        return String::new();
+    };
+    let base = std::path::Path::new(cwd)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let full = if base.is_empty() {
+        line
+    } else {
+        format!("{base}: {line}")
+    };
+    truncate_chars(&full, PROMPT_TITLE_MAX)
+}
+
+/// Cap `s` at `max` chars, replacing the tail with `…` when cut (the
+/// ellipsis occupies the last char of the budget).
+fn truncate_chars(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        None => s.to_string(),
+        Some(_) => {
+            let mut t: String = s.chars().take(max - 1).collect();
+            t.push('…');
+            t
+        }
+    }
+}
+
+/// Session-title precedence, kind-agnostic: (1) transcript ai-title scan
+/// (empty for harnesses without one) -> (2) payload-derived prompt title ->
+/// (3) STICKY: the existing session file's title, so a title set once
+/// persists across events that carry nothing -> (4) "".
+pub fn derive_title(transcript: &str, prompt: &str, sticky: &str) -> String {
+    [transcript, prompt, sticky]
+        .iter()
+        .find(|t| !t.is_empty())
+        .map_or_else(String::new, |t| t.to_string())
+}
+
 /// Poll-side GC backstop decision for ONE marker (see the pollScript): sweep
 /// only when the marker is stale (untouched > GC_SECS) AND its subagent
 /// transcript is missing or equally frozen. A live agent refreshes its marker
@@ -172,8 +222,8 @@ pub fn marker_record(atype: &str, desc: &str) -> Value {
 
 /// Session file content:
 /// `{"ws": <int>, "status": ..., "kind": ..., "title": ..., "pid": <int>}`.
-/// `kind` is the harness discriminator (`bsctl hook --kind`, default
-/// "claude") — see the protocol contract in lib.rs.
+/// `kind` is the harness discriminator (`bsctl hook --kind`, mandatory) —
+/// see the protocol contract in lib.rs.
 pub fn session_record(ws: i64, status: &str, title: &str, pid: i64, kind: &str) -> Value {
     json!({"ws": ws, "status": status, "kind": kind, "title": title, "pid": pid})
 }
@@ -287,6 +337,43 @@ mod tests {
             title_from_transcript(r#"{"type":"ai-title","aiTitle":7}"#),
             ""
         );
+    }
+
+    #[test]
+    fn prompt_title_shape_and_truncation() {
+        assert_eq!(
+            title_from_prompt("/home/u/dev/battlestation", "fix the widget"),
+            "battlestation: fix the widget"
+        );
+        // multiline prompt: only the first non-blank line, collapsed
+        assert_eq!(
+            title_from_prompt("/x/proj", "\n\n  first \t line \nsecond line\n"),
+            "proj: first line"
+        );
+        // no usable cwd basename -> the bare prompt line
+        assert_eq!(title_from_prompt("", "just a prompt"), "just a prompt");
+        assert_eq!(title_from_prompt("/", "root cwd"), "root cwd");
+        // no usable prompt -> "" so the precedence chain falls through
+        assert_eq!(title_from_prompt("/x/proj", ""), "");
+        assert_eq!(title_from_prompt("/x/proj", " \n\t\n"), "");
+        // truncation to PROMPT_TITLE_MAX chars, ellipsis in the last slot
+        let long = title_from_prompt("/x/proj", &"y".repeat(200));
+        assert_eq!(long.chars().count(), PROMPT_TITLE_MAX);
+        assert!(long.starts_with("proj: yyy") && long.ends_with('…'));
+        // exactly at the budget: untouched, no ellipsis
+        let exact = "p".repeat(PROMPT_TITLE_MAX);
+        assert_eq!(title_from_prompt("", &exact), exact);
+        // multibyte chars: counted as chars, not bytes (no boundary panic)
+        let uni = title_from_prompt("", &"héllo wörld ".repeat(10));
+        assert_eq!(uni.chars().count(), PROMPT_TITLE_MAX);
+    }
+
+    #[test]
+    fn title_precedence_chain() {
+        assert_eq!(derive_title("ai", "prompt", "old"), "ai");
+        assert_eq!(derive_title("", "prompt", "old"), "prompt");
+        assert_eq!(derive_title("", "", "old"), "old");
+        assert_eq!(derive_title("", "", ""), "");
     }
 
     #[test]

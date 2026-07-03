@@ -84,8 +84,10 @@ impl TestEnv {
         c
     }
 
+    /// A well-wired Claude hook call (`--kind` is mandatory; the kindless
+    /// form is pinned as a no-op in `kindless_hook_is_a_noop`).
     fn hook(&self, verb: &str, payload: &str) -> i32 {
-        self.hook_args(&["hook", verb], payload)
+        self.hook_args(&["hook", "--kind", "claude", verb], payload)
     }
 
     fn hook_args(&self, args: &[&str], payload: &str) -> i32 {
@@ -196,9 +198,96 @@ fn session_write_with_kind_codex() {
         0
     );
     assert_eq!(env.read_json("sess-k")["kind"], json!("gemini"));
-    // an empty --kind value falls back to the default
+    // an empty --kind value is kindless -> no-op: the record is untouched
     assert_eq!(env.hook_args(&["hook", "--kind=", "waiting"], &payload), 0);
-    assert_eq!(env.read_json("sess-k")["kind"], json!("claude"));
+    assert_eq!(env.read_json("sess-k")["kind"], json!("gemini"));
+}
+
+#[test]
+fn kindless_hook_is_a_noop() {
+    // --kind is MANDATORY: a kindless verb (outdated wiring) must write
+    // NOTHING, silently — even with a valid payload and working hyprctl —
+    // so the outdated caller's sessions visibly stop updating.
+    let env = TestEnv::new("kindless");
+    let tp = env.make_transcript();
+    let payload = json!({"session_id": "sess-nk", "transcript_path": tp}).to_string();
+    for args in [
+        &["hook", "waiting"][..],           // no --kind at all
+        &["hook", "--kind=", "thinking"],   // empty kind value
+        &["hook", "--kind", "", "tooling"], // empty kind token
+    ] {
+        assert_eq!(env.hook_args(args, &payload), 0, "{args:?}");
+    }
+    // markers too: agent verbs are equally kind-gated
+    let ap = json!({"session_id": "sess-nk", "agent_id": "a1"}).to_string();
+    assert_eq!(env.hook_args(&["hook", "agent-start"], &ap), 0);
+    let entries: Vec<_> = fs::read_dir(env.state_dir())
+        .map(|rd| rd.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(entries.is_empty(), "state dir must stay empty: {entries:?}");
+}
+
+#[test]
+fn codex_title_derives_from_prompt_and_sticks() {
+    // Codex transcripts carry no ai-title records; UserPromptSubmit carries
+    // `prompt` + `cwd` instead. The derived title must land in the session
+    // file and then STICK across later events that carry nothing.
+    let env = TestEnv::new("codex-title");
+    let prompt_ev = json!({
+        "session_id": "cx-1",
+        "cwd": "/home/u/dev/myproj",
+        "prompt": "Fix the flaky test\nsecond line is ignored"
+    })
+    .to_string();
+    assert_eq!(
+        env.hook_args(&["hook", "--kind", "codex", "thinking"], &prompt_ev),
+        0
+    );
+    let rec = env.read_json("cx-1");
+    assert_eq!(rec["kind"], json!("codex"));
+    assert_eq!(rec["title"], json!("myproj: Fix the flaky test"));
+
+    // A following tool event (no prompt, no transcript title) keeps it.
+    let tool_ev = json!({"session_id": "cx-1"}).to_string();
+    assert_eq!(
+        env.hook_args(&["hook", "--kind", "codex", "tooling"], &tool_ev),
+        0
+    );
+    let rec = env.read_json("cx-1");
+    assert_eq!(rec["status"], json!("tooling"));
+    assert_eq!(rec["title"], json!("myproj: Fix the flaky test"), "sticky");
+
+    // A new prompt re-derives (payload beats sticky).
+    let prompt2 = json!({
+        "session_id": "cx-1", "cwd": "/home/u/dev/myproj", "prompt": "Now refactor"
+    })
+    .to_string();
+    assert_eq!(
+        env.hook_args(&["hook", "--kind", "codex", "thinking"], &prompt2),
+        0
+    );
+    assert_eq!(
+        env.read_json("cx-1")["title"],
+        json!("myproj: Now refactor")
+    );
+}
+
+#[test]
+fn transcript_title_beats_prompt_title() {
+    // Claude events can carry BOTH a transcript ai-title and (hypothetically)
+    // a prompt; the transcript scan wins the precedence chain.
+    let env = TestEnv::new("title-precedence");
+    let tp = env.make_transcript();
+    let payload = json!({
+        "session_id": "pr-1", "transcript_path": tp,
+        "cwd": "/x/proj", "prompt": "loser prompt"
+    })
+    .to_string();
+    assert_eq!(env.hook("thinking", &payload), 0);
+    assert_eq!(
+        env.read_json("pr-1")["title"],
+        json!("Fix the widget poller")
+    );
 }
 
 #[test]
@@ -206,7 +295,7 @@ fn session_write_without_hyprctl_writes_nothing() {
     let env = TestEnv::new("no-hyprctl");
     // PATH with no hyprctl at all: spawning it fails -> silent exit 0.
     let mut child = Command::new(BIN)
-        .args(["hook", "thinking"])
+        .args(["hook", "--kind", "claude", "thinking"])
         .env("XDG_RUNTIME_DIR", &env.run)
         .env("PATH", env.root.join("nowhere").display().to_string())
         .stdin(Stdio::piped())

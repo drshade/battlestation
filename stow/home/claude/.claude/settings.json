@@ -9,7 +9,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook waiting",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude waiting",
             "type": "command"
           }
         ]
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook thinking",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude thinking",
             "type": "command"
           }
         ],
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook thinking",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude thinking",
             "type": "command"
           }
         ],
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook tooling",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude tooling",
             "type": "command"
           }
         ],
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook clear",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude clear",
             "type": "command"
           }
         ]
@@ -67,7 +67,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook waiting",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude waiting",
             "type": "command"
           }
         ]
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook waiting",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude waiting",
             "type": "command"
           }
         ]
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook agent-start",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude agent-start",
             "type": "command"
           }
         ]
@@ -100,7 +100,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook agent-stop",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude agent-stop",
             "type": "command"
           }
         ]
@@ -111,7 +111,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "$HOME/.local/bin/bsctl hook thinking",
+            "command": "$HOME/.local/bin/bsctl hook --kind claude thinking",
             "type": "command"
           }
         ]

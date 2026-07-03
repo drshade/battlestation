@@ -1,9 +1,10 @@
-//! `bsctl hook [--kind <harness>] <verb>` — the hook-event endpoint,
+//! `bsctl hook --kind <harness> <verb>` — the hook-event endpoint,
 //! mirroring claude-ws-status.sh verb-for-verb. A hook must NEVER block or
 //! error loudly, so every failure path is silent and the exit code is always
 //! 0: bad JSON on stdin is an empty payload, a missing transcript is an
 //! empty title, hyprctl being absent (or no owning window) means "write
-//! nothing".
+//! nothing". `--kind` is mandatory — a kindless call is a silent no-op (an
+//! outdated caller must stop updating, not guess a harness).
 
 use std::env;
 use std::fs;
@@ -14,18 +15,17 @@ use serde_json::Value;
 
 use crate::{ipc, proto, sys};
 
-/// The default harness kind when `--kind` is absent (or valueless/empty).
-const DEFAULT_KIND: &str = "claude";
-
 /// Parse `[--kind <k>|--kind=<k>] [verb]` out of everything after `hook`.
 /// Parsed HERE, not by clap: a valueless `--kind` (a miswired hook command)
 /// must exit 0 silently like every other hook malformation, and a clap
 /// `--kind <k>` option errors loudly (exit 2 + stderr) when the value is
 /// missing — there is no clap configuration that keeps a required-value
 /// option silent. So clap hands the raw tokens through and the tolerant
-/// parse lives with the rest of the hook's tolerance. An absent/valueless/
-/// empty kind falls back to "claude" (the pre---kind behavior); a valueless
-/// `--kind` also swallows any verb slot, making the call a silent no-op.
+/// parse lives with the rest of the hook's tolerance. `--kind` is MANDATORY
+/// (no default): an absent/valueless/empty kind makes the whole call a
+/// silent no-op, so an outdated kindless caller simply stops updating —
+/// the visible symptom that says "rewire me" without ever breaking a hook.
+/// A valueless `--kind` also swallows any verb slot, same outcome.
 fn parse_args(args: &[String]) -> (String, Option<&str>) {
     match args.first().map(String::as_str) {
         Some("--kind") => (
@@ -40,19 +40,17 @@ fn parse_args(args: &[String]) -> (String, Option<&str>) {
     }
 }
 
-/// Dispatch a hook call: `args` is everything after `hook` (an optional
+/// Dispatch a hook call: `args` is everything after `hook` (the mandatory
 /// `--kind`, then the verb); `argv` is everything after the binary name and
 /// is only used for the optional debug log line.
 pub fn run(args: &[String], argv: &[String]) -> i32 {
     let (kind, verb) = parse_args(args);
-    let kind = if kind.is_empty() {
-        DEFAULT_KIND.to_string()
-    } else {
-        kind
-    };
     let Some(verb) = verb.filter(|v| !v.is_empty()) else {
         return 0; // the reference exits before even creating the state dir
     };
+    if kind.is_empty() {
+        return 0; // kindless caller = outdated wiring: write NOTHING, silently
+    }
     let dir = sys::state_dir();
     let _ = fs::create_dir_all(&dir);
 
@@ -120,7 +118,7 @@ fn agent_stop(dir: &Path, input: &[u8]) {
 }
 
 /// waiting/thinking/tooling/clear — the session-status verbs. `kind` is the
-/// harness discriminator from `--kind` (default "claude"); it lands in the
+/// harness discriminator from the mandatory `--kind`; it lands in the
 /// session record only — markers carry no kind (sub-agents inherit their
 /// session's kind in the widget).
 fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str) {
@@ -168,23 +166,40 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str) {
         return;
     }
 
-    let (pids, claude_pid) = sys::ancestor_chain();
+    let (pids, harness_pid) = sys::ancestor_chain(kind);
     // Fall back to our immediate parent so the pid field is never omitted.
-    let pid = claude_pid.unwrap_or_else(|| std::os::unix::process::parent_id() as i64);
+    let pid = harness_pid.unwrap_or_else(|| std::os::unix::process::parent_id() as i64);
 
     // compositor boundary: no owning workspace -> exit silently, write nothing.
     let Some(ws) = ipc::workspace_for_pids(&pids) else {
         return;
     };
 
-    let mut title = String::new();
+    // Title precedence (proto::derive_title), kind-agnostic: transcript
+    // ai-title (empty for harnesses without one, e.g. Codex) -> derived from
+    // the payload's prompt+cwd (Codex UserPromptSubmit) -> sticky: whatever
+    // title the session file already carries -> "".
+    let mut transcript_title = String::new();
     if !tpath.is_empty()
         && Path::new(&tpath).is_file()
         && let Ok(bytes) = fs::read(&tpath)
     {
-        title = proto::title_from_transcript(&String::from_utf8_lossy(&bytes));
+        transcript_title = proto::title_from_transcript(&String::from_utf8_lossy(&bytes));
     }
+    let prompt_title =
+        proto::title_from_prompt(&proto::field(&d, "cwd"), &proto::field(&d, "prompt"));
+    let title = proto::derive_title(&transcript_title, &prompt_title, &existing_title(dir, &sid));
     let _ = write_session(dir, &sid, verb, &title, ws, pid, kind);
+}
+
+/// The sticky-title source: the session file's current title, "" when the
+/// file is missing/unparseable (first event of a session).
+fn existing_title(dir: &Path, sid: &str) -> String {
+    fs::read(dir.join(sid))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .map(|v| proto::field(&v, "title"))
+        .unwrap_or_default()
 }
 
 /// The testable end of the session write path: everything hyprctl/proc
@@ -291,11 +306,14 @@ mod tests {
         assert_eq!(parse_args(&s(&["--kind"])), ("".into(), None));
         // --kind with a value but no verb -> no verb, still silent
         assert_eq!(parse_args(&s(&["--kind", "codex"])), ("codex".into(), None));
-        // empty kind value -> caller falls back to the default
+        // empty kind value -> kindless -> silent no-op upstream (kind is
+        // mandatory; there is no default)
         assert_eq!(
             parse_args(&s(&["--kind=", "waiting"])),
             ("".into(), Some("waiting"))
         );
+        // a kindless verb parses but run() no-ops it (mandatory --kind)
+        assert_eq!(parse_args(&s(&["waiting"])), ("".into(), Some("waiting")));
         // flag-shaped junk is just an unknown verb
         assert_eq!(parse_args(&s(&["--bogus"])), ("".into(), Some("--bogus")));
         assert_eq!(parse_args(&[]), ("".into(), None));

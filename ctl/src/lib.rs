@@ -22,16 +22,25 @@
 //!     "kind": "<harness>", "title": "<aiTitle>", "pid": <int>}`.
 //!   `ws` is the Hyprland workspace id owning the session's terminal window
 //!   (found by walking /proc ancestors against `hyprctl clients -j`). `pid`
-//!   is the Claude Code process — the nearest ancestor whose comm is exactly
-//!   `claude` — and the poll side sweeps session files whose pid is dead.
-//!   `status` is semantic; mapping states to colours is the widget's
-//!   concern. `kind` is the harness discriminator — `bsctl hook --kind`,
-//!   default `claude`; the widget renders per-kind (kindBySid feeds each
-//!   bot's `kind`) and falls back to the Claude presentation for unknown
-//!   kinds, so a new harness needs no widget change to appear. `title` is
-//!   the session's current aiTitle — the LAST
-//!   `"type":"ai-title"` record in the transcript, whitespace-collapsed to
-//!   one line — shown in the bot's hover tooltip.
+//!   is the harness process — the nearest ancestor whose comm matches the
+//!   kind (harness binaries are named after their kind: comm `claude` /
+//!   `codex`, both verified live; comm is the kernel's 15-char truncation,
+//!   so longer kinds match on their truncation) — and the poll side sweeps
+//!   session files whose pid is dead. `status` is semantic; mapping states
+//!   to colours is the widget's concern. `kind` is the harness
+//!   discriminator — `bsctl hook --kind`, MANDATORY, no default: a kindless
+//!   call is a silent no-op, so an outdated caller visibly stops updating
+//!   instead of guessing a harness. The widget renders per-kind (kindBySid
+//!   feeds each bot's `kind`) and falls back to the Claude presentation for
+//!   unknown kinds, so a new harness needs no widget change to appear.
+//!   `title` (the bot's hover tooltip) is kind-agnostic precedence, first
+//!   non-empty wins: (1) the LAST `"type":"ai-title"` record in the
+//!   transcript, whitespace-collapsed to one line (Claude; harmlessly empty
+//!   for harnesses without ai-title records); (2) derived from the payload
+//!   when it carries `prompt` (Codex UserPromptSubmit):
+//!   `basename(cwd): <first non-blank prompt line>` capped at 60 chars;
+//!   (3) STICKY — the title already in the session file, so a title set
+//!   once persists across events that carry nothing; (4) "".
 //! - `<session_id>.<agent_id>` — one marker per RUNNING subagent:
 //!   `{"type": "<agent_type>", "description": "<text>"}`. Markers carry no
 //!   `kind` — a sub-agent inherits its session's kind in the widget.
@@ -49,10 +58,11 @@
 //! when `CLAUDE_WS_DEBUG` is set: argv + raw stdin per hook call) is
 //! diagnostics, not protocol — the poll side skips it by name.
 //!
-//! Hook side (`bsctl hook [--kind <harness>] <verb>`, hook-event JSON on
+//! Hook side (`bsctl hook --kind <harness> <verb>`, hook-event JSON on
 //! stdin; silent-tolerant by contract — always exits 0, even on
-//! unknown/missing verbs or a malformed/valueless `--kind`, which is why
-//! --kind is parsed in hook.rs rather than by clap):
+//! unknown/missing verbs or a missing/valueless/empty `--kind` (a no-op:
+//! kind is mandatory), which is why --kind is parsed in hook.rs rather than
+//! by clap):
 //! - `waiting`/`thinking`/`tooling` — (re)write the session file with that
 //!   status; events carrying an agent_id also refresh (or recreate/heal)
 //!   that subagent marker. A payload WITHOUT a session_id (empty/absent/bad

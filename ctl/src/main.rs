@@ -20,7 +20,7 @@ struct Cli {
 enum Cmd {
     /// Agent-harness hook endpoint; hook-event JSON on stdin (always exits 0)
     Hook {
-        /// [--kind <harness>] waiting|thinking|tooling|clear|agent-start|agent-stop
+        /// --kind <harness> waiting|thinking|tooling|clear|agent-start|agent-stop
         // Raw tokens, NOT clap-typed args — hooks must never error loudly,
         // so --kind and the verb are validated internally (silent exit 0)
         // rather than by clap: a clap `--kind` option with a missing value

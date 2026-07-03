@@ -53,28 +53,39 @@ pub fn now_f64() -> f64 {
 }
 
 /// Walk the /proc ancestor chain from this process: returns (all pids up to
-/// init, the nearest ancestor whose comm is EXACTLY `claude`). The exact
-/// match matters — comm is the kernel's 15-char truncation, so a prefix
-/// match would self-match other claude-* tooling (this binary's own comm is
-/// `bsctl`; the sh reference's is `claude-ws-statu`).
-pub fn ancestor_chain() -> (Vec<i64>, Option<i64>) {
+/// init, the nearest ancestor whose comm matches the harness `kind`). The
+/// harness process is assumed to be named after its kind — verified live for
+/// both current kinds (`claude` → comm `claude`; `codex` → comm `codex`,
+/// checked against a running `codex exec`, 2026-07-03). comm is the kernel's
+/// 15-char truncation, so a kind longer than 15 chars matches on its
+/// truncation; anything looser (prefix match) would self-match other
+/// same-named tooling (this binary's own comm is `bsctl`; the sh reference's
+/// was `claude-ws-statu`).
+pub fn ancestor_chain(kind: &str) -> (Vec<i64>, Option<i64>) {
     let mut pids = Vec::new();
-    let mut claude = None;
+    let mut harness = None;
     let mut pid = std::process::id() as i64;
     while pid > 1 {
         pids.push(pid);
-        if claude.is_none()
+        if harness.is_none()
             && fs::read_to_string(format!("/proc/{pid}/comm"))
-                .is_ok_and(|c| c.trim_end_matches('\n') == "claude")
+                .is_ok_and(|c| comm_matches_kind(c.trim_end_matches('\n'), kind))
         {
-            claude = Some(pid);
+            harness = Some(pid);
         }
         match ppid_of(pid) {
             Some(p) if p != pid => pid = p,
             _ => break,
         }
     }
-    (pids, claude)
+    (pids, harness)
+}
+
+/// [`ancestor_chain`]'s comm rule: exact match, or — for a kind longer than
+/// comm's 15-char limit — the kernel's truncation of it (exactly 15 chars
+/// AND a prefix of the kind; shorter prefixes are different names).
+fn comm_matches_kind(comm: &str, kind: &str) -> bool {
+    comm == kind || (comm.len() == 15 && kind.len() > 15 && kind.starts_with(comm))
 }
 
 /// PPID = field 4 of /proc/<pid>/stat. The comm field (2) is parenthesised
@@ -153,8 +164,37 @@ mod tests {
 
     #[test]
     fn ancestors_include_self_and_parent() {
-        let (pids, _claude) = ancestor_chain();
+        let (pids, _harness) = ancestor_chain("claude");
         assert_eq!(pids.first().copied(), Some(std::process::id() as i64));
         assert!(pids.contains(&(std::os::unix::process::parent_id() as i64)));
+    }
+
+    #[test]
+    fn ancestor_kind_match_is_exact_with_truncation() {
+        // The test binary's own comm is the crate's test-bin name, never a
+        // harness kind — an unrelated kind must find no harness ancestor...
+        let (_, none) = ancestor_chain("no-such-harness-kind");
+        assert_eq!(none, None);
+        // ...while a kind that IS an ancestor's comm matches: walk our real
+        // chain and reuse the first ancestor's comm as the kind.
+        let parent = std::os::unix::process::parent_id() as i64;
+        let comm = std::fs::read_to_string(format!("/proc/{parent}/comm")).unwrap();
+        let comm = comm.trim_end_matches('\n');
+        let (_, found) = ancestor_chain(comm);
+        assert_eq!(found, Some(parent));
+    }
+
+    #[test]
+    fn comm_kind_match_is_exact_with_truncation() {
+        assert!(comm_matches_kind("claude", "claude"));
+        assert!(comm_matches_kind("codex", "codex"));
+        // no prefix matching for short kinds (claude-* tooling must not match)
+        assert!(!comm_matches_kind("claude-ws-statu", "claude"));
+        assert!(!comm_matches_kind("clau", "claude"));
+        // 15-char truncation rule: a >15-char kind matches its truncated comm
+        let long = "a-very-long-harness-name";
+        assert!(comm_matches_kind(&long[..15], long));
+        assert!(!comm_matches_kind(&long[..14], long)); // not a comm truncation
+        assert!(!comm_matches_kind("a-very-long-hXr", long)); // 15 chars, wrong
     }
 }

@@ -16,12 +16,13 @@ fn bsctl(args: &[&str]) -> std::process::Output {
 fn hook_stays_silent_tolerant_under_clap() {
     for args in [
         &["hook"][..],                         // no verb at all
-        &["hook", "explode"],                  // unknown verb
+        &["hook", "explode"],                  // unknown verb (also kindless)
         &["hook", "--flag-shaped-verb"],       // hyphen junk must not hit clap
-        &["hook", "waiting", "extra", "junk"], // trailing noise tolerated
+        &["hook", "waiting", "extra", "junk"], // kindless verb = no-op, still silent
         // --kind is parsed inside hook::run, NOT by clap (a clap option with
-        // a missing value exits 2 loudly) — every malformation must stay on
-        // the silent exit-0 path:
+        // a missing value exits 2 loudly) — every malformation, including a
+        // missing/valueless/empty --kind (mandatory, so a no-op), must stay
+        // on the silent exit-0 path:
         &["hook", "--kind", "codex", "thinking"], // no session_id on stdin -> no-op
         &["hook", "--kind"],                      // valueless --kind
         &["hook", "--kind", "codex"],             // kind but no verb
