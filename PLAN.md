@@ -64,16 +64,37 @@ BarWidget/Panel/UsageIndicator QML. All three scripts retired and the empty
 `ctl/src/lib.rs`. 59 tests; live goto round-trip verified through the real
 compositor.
 
-## 3. Ideas parked behind phase 3
+## 3. `bsctl display` — display state visibility & management
+
+Display management is the machine's roughest edge (two gotcha entries, a
+dpms-toggle quirk, and a lid/reload interaction that stranded the pointer on
+an invisible panel — fixed fb27c0a, but diagnosed by hand-rolled jq). The
+primitives are scattered: `hyprctl monitors -j` (dense JSON), clamshell.sh,
+displays-on.sh, display-scale.sh, monitors_local.lua. Proposed:
+
+- `bsctl display status` — one readable table: per output enabled/dpms/mode/
+  scale/position/description, plus lid state and a WARNING line when state is
+  inconsistent (internal panel enabled while lid closed, dpms mixed, an
+  output stuck at a non-native mode).
+- `bsctl display on|off <output>` — safe dpms targeting (the table-form
+  toggle + read-before-toggle logic from displays-on.sh, per the gotcha).
+- `bsctl display reset` — the displays-on.sh reset flow: reload + reconcile
+  lid + re-assert modes.
+- Boundary with the recovery policy (AGENTS.md): bsctl display is the
+  *human/diagnostic* tool. The two automated hooks stay tiny shell shims —
+  hypridle's `after_sleep_cmd` and the lid binds — and
+  `restart_crashed_lock.sh` stays shell forever. Once bsctl display has
+  earned trust the shims may *delegate* to it, but each keeps a
+  last-ditch pure-shell fallback path.
+- Subsumes the parked `display-scale.sh` port (`bsctl display scale
+  up|down|reset`) — same domain, same state files.
+
+## 4. Ideas parked behind the above
 
 - `bsctl watch`: a small daemon inotify-watching the state dir, maintaining
   one consolidated JSON the widget observes via Quickshell `FileView` —
   event-driven bar (sub-bots appear the instant a hook writes) instead of the
   2s poll.
-- `display-scale.sh` port (the other sh+embedded-python hybrid, per-monitor
-  state files) — second wave, only after bsctl has earned trust. Recovery
-  scripts (`restart_crashed_lock.sh`, `displays-on.sh`, `clamshell.sh`) stay
-  shell permanently, per the AGENTS.md policy.
 
 ## Parked (non-bsctl)
 
