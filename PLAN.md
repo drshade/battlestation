@@ -72,6 +72,15 @@ an invisible panel — fixed fb27c0a, but diagnosed by hand-rolled jq). The
 primitives are scattered: `hyprctl monitors -j` (dense JSON), clamshell.sh,
 displays-on.sh, display-scale.sh, monitors_local.lua. Proposed:
 
+- **Foundation: a Hyprland IPC module** (`ctl/src/ipc.rs`) — talk to
+  `.socket.sock` directly (`std` UnixStream, zero new crates): `j/<query>` +
+  `dispatch <cmd>`, instance discovery via `$HYPRLAND_INSTANCE_SIGNATURE`
+  with a newest-instance-dir fallback (VT contexts). **Socket-first,
+  hyprctl-fallback**: on connect/protocol failure, fall back to spawning
+  hyprctl (which always matches the running compositor on a rolling
+  release). All existing call sites (`hook`'s clients lookup, `ws`) migrate
+  onto it; `.socket2.sock` (the event stream) is what `bsctl watch` and
+  event-driven display reconciliation will build on later.
 - `bsctl display status` — one readable table: per output enabled/dpms/mode/
   scale/position/description, plus lid state and a WARNING line when state is
   inconsistent (internal panel enabled while lid closed, dpms mixed, an
@@ -94,7 +103,21 @@ displays-on.sh, display-scale.sh, monitors_local.lua. Proposed:
 - `bsctl watch`: a small daemon inotify-watching the state dir, maintaining
   one consolidated JSON the widget observes via Quickshell `FileView` —
   event-driven bar (sub-bots appear the instant a hook writes) instead of the
-  2s poll.
+  2s poll. With the IPC module it can also subscribe to `.socket2.sock`
+  events (workspace/monitor changes) — the real-time primitive everything
+  else wants.
+- **Multi-monitor workspace model** (requirements captured 2026-07-03,
+  design-for-now/implement-later): today all 10 bound workspaces live on
+  monitor 1; a second monitor spawns ws 11-20 which have no keybinds and no
+  place in the display order. Wanted: workspace↔monitor assignment as a
+  first-class `bsctl ws` concept — e.g. "send workspace 3 to display 2"
+  (`hl.dsp`/`moveworkspacetomonitor`), per-monitor display orders (the order
+  file may need a schema step), and keybinds that address positions across
+  monitors. DESIGN CONSTRAINT for anything touching the ws protocol or the
+  order file now: don't bake in the single-monitor assumption harder than it
+  already is.
+- `display-scale.sh` port (`bsctl display scale up|down|reset`) — remaining
+  piece of item 3's domain once the core lands.
 
 ## Parked (non-bsctl)
 
