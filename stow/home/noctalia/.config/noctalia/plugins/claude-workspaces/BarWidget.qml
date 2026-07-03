@@ -61,8 +61,22 @@ Item {
   // widget explicitly Hyprland-only, which it already is in practice — every
   // command it runs speaks Hyprland IPC.)
   readonly property var hlMonitor: Hyprland.monitorFor(root.screen)
-  readonly property int activeId: (hlMonitor && hlMonitor.activeWorkspace) ? hlMonitor.activeWorkspace.id : -1
-  onActiveIdChanged: rebuildDisplay()   // re-evaluate highlight + trailing-trim pinning
+  // This monitor's active workspace id — used for trailing-trim pinning even
+  // while the scratchpad covers it (the workspace hasn't gone anywhere).
+  readonly property int monActiveId: (hlMonitor && hlMonitor.activeWorkspace) ? hlMonitor.activeWorkspace.id : -1
+  onMonActiveIdChanged: rebuildDisplay()   // re-evaluate highlight + trailing-trim pinning
+  // A special workspace (scratchpad) showing on this monitor: no pill is
+  // "current", so the highlight clears. lastIpcObject (the raw hyprctl
+  // monitor JSON) is the only place Quickshell exposes specialWorkspace;
+  // it notifies, and the refreshMonitors nudge keeps it fresh the same way
+  // it does activeWorkspace.
+  readonly property bool specialShowing: {
+    var o = hlMonitor ? hlMonitor.lastIpcObject : null;
+    return !!(o && o.specialWorkspace && (o.specialWorkspace.name || "") !== "");
+  }
+  onSpecialShowingChanged: rebuildDisplay()
+  // What the pill highlight compares against (-1 while the scratchpad is up).
+  readonly property int activeId: specialShowing ? -1 : monActiveId
   // Whether the keyboard is on THIS monitor — the unfocused display's active
   // pill renders slightly dimmed. Compared via the Hyprland.focusedMonitor
   // singleton (object identity; notifies on focus moves) — the per-monitor
@@ -251,7 +265,7 @@ Item {
     }
     var mx = 1;
     for (var p = 0; p < vis.length; p++)
-      if (occupiedMap[String(vis[p])] === true || vis[p] === activeId)
+      if (occupiedMap[String(vis[p])] === true || vis[p] === monActiveId)
         mx = p + 1;
     maxVisiblePos = mx;
     if (config.hideTrailing) {
@@ -407,8 +421,8 @@ Item {
 
   // ---- state watcher ----------------------------------------------------------
   // Event-driven, not polled: `bsctl watch` (repo: ctl/src/watch.rs) is a
-  // long-lived daemon that inotify-watches the claude-ws state dir and keeps
-  // <XDG_RUNTIME_DIR>/claude-ws/.widget.json equal to `bsctl poll`'s output —
+  // long-lived daemon that inotify-watches the battlestation-ws state dir and keeps
+  // <XDG_RUNTIME_DIR>/battlestation-ws/.widget.json equal to `bsctl poll`'s output —
   // one flat self-cleaning pass (dead-pid sessions, orphan markers,
   // kill-leaked stale markers via the transcript-frozen GC) emitting ONE JSON
   // array (protocol spec: ctl/src/lib.rs):
@@ -420,7 +434,7 @@ Item {
   // here. The FileView reload()s on each write and feeds applyRecs(); `bsctl
   // poll` remains available as a one-shot debugging fallback if watch
   // misbehaves.
-  readonly property string stateFilePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/claude-ws/.widget.json"
+  readonly property string stateFilePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/battlestation-ws/.widget.json"
   property bool stateEverLoaded: false
 
   Process {
