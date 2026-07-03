@@ -31,11 +31,14 @@ registry in `Cfg.qml` — adding a harness = one registry entry + one asset dir
    monitors). Accepted wart: slide-animation direction and the 4-finger
    gesture follow raw id order and can disagree with pill order after drags.
 
-2. **Next harnesses: gemini, opencode.** The recipe is proven (Codex took an
-   afternoon): investigate the harness's hook/notify surface, wire its config
-   to `bsctl hook --kind <k> <verb>`, add a registry entry + asset dir.
-   Unknown-kind sessions already render as claude, so partial integration is
-   safe at every step.
+2. **Next harness: opencode.** The recipe is proven twice (Codex, then
+   Antigravity — which surfaced one real integration cost each: Codex's
+   trust gate, agy's conversationId payloads): investigate the harness's
+   hook/notify surface, wire its config to `bsctl hook --kind <k> <verb>`,
+   add a registry entry + asset dir. Unknown-kind sessions already render
+   as claude, so partial integration is safe at every step. (gemini-cli is
+   dead — Google folded it into Antigravity, which even squats its
+   `~/.gemini` config dir; already integrated, kind `agy`.)
 
 ## Parked
 
