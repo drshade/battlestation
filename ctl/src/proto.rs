@@ -67,6 +67,19 @@ pub fn session_id(d: &Value) -> String {
     field_or(d, "session_id", "default")
 }
 
+/// python-3 `round()`: exact halves go to the even integer (Rust's
+/// f64::round goes away from zero instead). Used wherever a reference
+/// script's python rounds — usage percentages, display-scale refresh rates.
+pub fn round_half_even(f: f64) -> i64 {
+    let floor = f.floor();
+    if f - floor == 0.5 {
+        let below = floor as i64;
+        if below % 2 == 0 { below } else { below + 1 }
+    } else {
+        f.round() as i64
+    }
+}
+
 /// Mirror of python `int(v)` for the poll side's pid check: int, bool,
 /// float (truncated), or integer-string succeed; anything else is None
 /// (python raises -> the except path sweeps the session).
@@ -194,6 +207,19 @@ mod tests {
         assert!(gc_should_delete(now, stale, Some(stale)));
         assert!(!gc_should_delete(now, stale, Some(fresh)));
         assert!(!gc_should_delete(now, stale, Some(boundary)));
+    }
+
+    #[test]
+    fn rounding_is_pythons_half_to_even() {
+        assert_eq!(round_half_even(34.2), 34);
+        assert_eq!(round_half_even(34.6), 35);
+        assert_eq!(round_half_even(62.5), 62); // python round(62.5) == 62
+        assert_eq!(round_half_even(63.5), 64);
+        assert_eq!(round_half_even(-2.5), -2);
+        assert_eq!(round_half_even(-1.5), -2);
+        assert_eq!(round_half_even(0.0), 0);
+        assert_eq!(round_half_even(100.0), 100);
+        assert_eq!(round_half_even(120.001), 120); // a live refreshRate
     }
 
     #[test]

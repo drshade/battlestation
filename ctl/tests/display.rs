@@ -3,7 +3,9 @@
 //! request) for the socket path, and the fake-hyprctl-on-PATH pattern for
 //! the fallback path (the env's XDG_RUNTIME_DIR holds no socket, so every
 //! socket attempt fails by construction). The lid is faked through
-//! BSCTL_LID_DIR and clamshell.sh through XDG_CONFIG_HOME.
+//! BSCTL_LID_DIR and clamshell.sh through XDG_CONFIG_HOME; `display scale`'s
+//! per-monitor rung state lands inside the same XDG_RUNTIME_DIR, isolated
+//! for free.
 //!
 //! What CANNOT be faked here (left to live review): `reset`'s actual reload
 //! effect on the compositor (re-applied monitors.lua, re-enabled outputs)
@@ -88,6 +90,8 @@ impl TestEnv {
                    dispatch)\n\
                      printf '%s\\n' \"$2\" >> '{fix}/dispatch.log'\n\
                      if [ -f '{fix}/monitors.after.json' ]; then mv '{fix}/monitors.after.json' '{fix}/monitors.json'; fi ;;\n\
+                   eval)\n\
+                     printf '%s\\n' \"$2\" >> '{fix}/eval.log' ;;\n\
                  esac\n",
                 fix = fix.display()
             ),
@@ -443,6 +447,168 @@ fn reset_aborts_when_clamshell_fails() {
     assert!(err.contains("clamshell.sh auto failed"), "{err}");
     // never reached the dpms pass
     assert_eq!(env.log("calls.log"), vec!["hyprctl reload"]);
+}
+
+// ---- scale ---------------------------------------------------------------------
+
+/// The enabled-only `j/monitors` view scale reads (the script's `hyprctl
+/// monitors -j`): DP-1 focused, at the given reported scale.
+fn scale_mons_fixture(scale: f64) -> String {
+    json!([
+        {"id": 1, "name": "DP-1", "description": "HP Inc. OMEN 34c CNC32023FL",
+         "focused": true, "disabled": false, "dpmsStatus": true,
+         "width": 3440, "height": 1440, "refreshRate": 100.0,
+         "x": 0, "y": 0, "scale": scale},
+    ])
+    .to_string()
+}
+
+const MON_REQ: &str = "j/monitors";
+
+/// The socket wire form of the scale dispatch for DP-1 — byte-identical to
+/// what display-scale.sh hands `hyprctl eval`.
+fn scale_eval_req(luascale: &str) -> String {
+    format!(
+        r#"eval hl.monitor({{ output = "DP-1", mode = "3440x1440@100", position = "auto", scale = {luascale} }})"#
+    )
+}
+
+impl TestEnv {
+    fn scale_state(&self) -> PathBuf {
+        self.run.join("hypr-display-scale.DP-1")
+    }
+}
+
+#[test]
+fn scale_up_from_nothing_seeds_nearest_rung_via_socket() {
+    // No state file: the reported scale 1.0 seeds rung 0, up -> rung 1.
+    let env = TestEnv::new("scale-up-fresh");
+    let fixture = scale_mons_fixture(1.0);
+    let eval = scale_eval_req("1.25000");
+    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+
+    let out = env.display(&["scale", "up"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty(), "script parity: silent on success");
+    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert!(env.log("calls.log").is_empty());
+    // the new rung index is persisted, index + newline
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"1\n");
+}
+
+#[test]
+fn scale_up_prefers_saved_index_over_reported_scale() {
+    // Saved rung 3 disagrees with the reported scale 1.0 — the index wins
+    // (Hyprland's grid snap makes the reported value untrustworthy).
+    let env = TestEnv::new("scale-saved-index");
+    fs::write(env.scale_state(), "3\n").unwrap();
+    let fixture = scale_mons_fixture(1.0);
+    let eval = scale_eval_req("2.00000");
+    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+
+    let out = env.display(&["scale", "up"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"4\n");
+}
+
+#[test]
+fn scale_clamps_at_both_ends() {
+    // Top rung + up: stays 3.00000, index stays 6 — and still dispatches.
+    let env = TestEnv::new("scale-clamp-top");
+    fs::write(env.scale_state(), "6\n").unwrap();
+    let fixture = scale_mons_fixture(3.0);
+    let eval = scale_eval_req("3.00000");
+    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+    let out = env.display(&["scale", "up"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"6\n");
+
+    // Bottom rung + down, seeded from the reported scale (no state file).
+    let env = TestEnv::new("scale-clamp-bottom");
+    let fixture = scale_mons_fixture(1.0);
+    let eval = scale_eval_req("1.00000");
+    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+    let out = env.display(&["scale", "down"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"0\n");
+}
+
+#[test]
+fn scale_reset_deletes_state_and_evals_auto_string() {
+    let env = TestEnv::new("scale-reset");
+    fs::write(env.scale_state(), "2\n").unwrap();
+    let fixture = scale_mons_fixture(1.5);
+    // scale = "auto" — the QUOTED Lua string, not a bare number
+    let eval = scale_eval_req(r#""auto""#);
+    env.start_socket("testinst", &[(MON_REQ, &fixture), (&eval, "ok")]);
+
+    let out = env.display(&["scale", "reset"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(env.log("socket.log"), vec![MON_REQ.to_string(), eval]);
+    assert!(!env.scale_state().exists(), "reset must rm the state file");
+    // reset with no state file is equally fine (rm -f)
+    let out = env.display(&["scale", "reset"]);
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn scale_no_focused_monitor_is_silent_exit_0() {
+    let env = TestEnv::new("scale-unfocused");
+    let fixture = json!([
+        {"id": 1, "name": "DP-1", "focused": false, "width": 3440,
+         "height": 1440, "refreshRate": 100.0, "scale": 1.0},
+    ])
+    .to_string();
+    env.start_socket("testinst", &[(MON_REQ, &fixture)]);
+
+    let out = env.display(&["scale", "up"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    // queried, but never dispatched and never wrote state
+    assert_eq!(env.log("socket.log"), vec![MON_REQ]);
+    assert!(!env.scale_state().exists());
+}
+
+#[test]
+fn scale_falls_back_to_hyprctl() {
+    // No socket in this env -> both the query and the eval go through the
+    // fake hyprctl, with the script's exact argv shape.
+    let env = TestEnv::new("scale-fallback");
+    fs::write(env.fix.join("monitors.json"), scale_mons_fixture(1.0)).unwrap();
+
+    let out = env.display(&["scale", "up"]);
+    assert_eq!(out.status.code(), Some(0));
+    let eval = r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "auto", scale = 1.25000 })"#;
+    assert_eq!(
+        env.log("calls.log"),
+        vec![
+            "hyprctl monitors -j".to_string(),
+            format!("hyprctl eval {eval}")
+        ]
+    );
+    assert_eq!(env.log("eval.log"), vec![eval]);
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"1\n");
+}
+
+#[test]
+fn scale_garbage_state_file_errors() {
+    // The sh reference dies on int(garbage) too; ours says why.
+    let env = TestEnv::new("scale-garbage-state");
+    fs::write(env.scale_state(), "not-a-rung\n").unwrap();
+    let fixture = scale_mons_fixture(1.0);
+    env.start_socket("testinst", &[(MON_REQ, &fixture)]);
+
+    let out = env.display(&["scale", "up"]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("unreadable rung index"), "{err}");
+    assert!(err.contains("hypr-display-scale.DP-1"), "{err}");
+    // no dispatch, state left for inspection
+    assert_eq!(env.log("socket.log"), vec![MON_REQ]);
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"not-a-rung\n");
 }
 
 // ---- instance discovery -----------------------------------------------------------

@@ -63,6 +63,18 @@ enum DisplayCmd {
     Off { output: String },
     /// Recovery: reload config, reconcile lid, dpms-on enabled outputs
     Reset,
+    /// Step the focused monitor's scale along a fixed ladder (reset -> auto)
+    Scale {
+        #[arg(value_enum)]
+        action: ScaleAction,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ScaleAction {
+    Up,
+    Down,
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -143,6 +155,11 @@ fn main() {
             DisplayCmd::On { output } => bsctl::display::set_dpms(&output, true),
             DisplayCmd::Off { output } => bsctl::display::set_dpms(&output, false),
             DisplayCmd::Reset => bsctl::display::reset(),
+            DisplayCmd::Scale { action } => bsctl::scale::run(match action {
+                ScaleAction::Up => bsctl::scale::Action::Up,
+                ScaleAction::Down => bsctl::scale::Action::Down,
+                ScaleAction::Reset => bsctl::scale::Action::Reset,
+            }),
         },
         Cmd::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "bsctl", &mut std::io::stdout());

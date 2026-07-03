@@ -23,6 +23,14 @@
 //!   dispatch has never been a non-zero exit through hyprctl either.
 //! - `reload` (plain, same ok/error reply shape) is what `hyprctl reload`
 //!   sends.
+//! - `eval <lua>` is the wire form of `hyprctl eval <lua>` — the runtime
+//!   config channel the Lua parser demands (legacy `keyword` is a rejected
+//!   no-op). Same ok/error replies (verified with a read-only
+//!   `eval return 1+1` -> `ok`, a syntax-error chunk -> `error: ...`, and a
+//!   no-op `hl.monitor` re-assert of the disabled internal panel -> `ok`).
+//!   An `error:` reply means the chunk failed to parse/run, not that it half
+//!   executed, so the hyprctl re-send stays double-fire-safe for the
+//!   single-call chunks this crate emits.
 //!
 //! Fallback policy: every entry point tries the socket first and falls back
 //! to spawning hyprctl on ANY socket failure — connect, io, unparseable
@@ -130,6 +138,13 @@ pub fn dispatch(cmd: &str) -> i32 {
 /// `hyprctl reload` equivalent — `bsctl display reset`'s first step.
 pub fn reload() -> i32 {
     ok_command(&["reload"])
+}
+
+/// `hyprctl eval <lua>` equivalent — runtime config through the Lua API
+/// (`hl.monitor` and friends). Ok/error replies like dispatch; see the
+/// header for why the fallback re-send cannot double-apply.
+pub fn eval(lua: &str) -> i32 {
+    ok_command(&["eval", lua])
 }
 
 /// An ok/error command: the wire form is the argv words space-joined,

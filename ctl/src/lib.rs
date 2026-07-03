@@ -121,9 +121,11 @@
 //! `j/<query>` returns JSON (`j/monitors all`, `j/workspaces`,
 //! `j/activeworkspace`, `j/clients` verified); a leading `/` is rejected
 //! ("unknown request") and `[[BATCH]]` is accepted but unnecessary for
-//! single requests. `dispatch <cmd>` / `reload` reply with the literal `ok`
-//! on success, an error string on rejection (verified with a no-op
-//! `hl.dsp.focus` refocus of the active workspace). hyprctl prints those
+//! single requests. `dispatch <cmd>` / `reload` / `eval <lua>` reply with
+//! the literal `ok` on success, an error string on rejection (verified with
+//! a no-op `hl.dsp.focus` refocus of the active workspace; for eval, with a
+//! read-only `return 1+1` and an `hl.monitor` re-assert of a disabled
+//! output, which no-ops per the AGENTS.md gotcha). hyprctl prints those
 //! error strings to STDOUT and still exits 0 — a rejected dispatch has never
 //! been a non-zero exit — and bsctl keeps that exit-code contract.
 //!
@@ -159,12 +161,37 @@
 //! - `reset` — displays-on.sh's reset flow: `reload` (re-applies
 //!   monitors.lua), shell out to clamshell.sh auto (it OWNS the lid policy),
 //!   then dpms-on all enabled outputs with bounded re-read retries.
+//!
+//! # Display scale (`bsctl display scale`)
+//!
+//! Step the FOCUSED monitor's scale up/down a fixed ladder at runtime,
+//! preserving its mode — display-scale.sh verb-for-verb. The ladder is
+//! `1.0 1.25 1.5 1.75 2.0 2.5 3.0` (rung 0 = native). Hyprland snaps
+//! fractional scales to its own 1/120 grid and the achievable values are
+//! irregular per panel, so the REPORTED scale can't drive deterministic
+//! stepping — the rung INDEX is persisted per monitor instead, at
+//! `${XDG_RUNTIME_DIR:-/tmp}/hypr-display-scale.<name>` (the index in
+//! decimal + newline, e.g. `1\n`; runtime-dir state, gone on reboot — like
+//! scale itself, which reverts to monitors.lua on reload).
+//!
+//! `up`/`down` start from the saved index when present, else the rung
+//! nearest the reported scale (ties toward the lower rung); step ±1; clamp
+//! to the ladder; persist the NEW index; then eval
+//! `hl.monitor({ output = "<name>", mode = "<WxH@RR>", position = "auto",
+//! scale = <rung formatted %.5f> })` — mode preserved from the monitor's
+//! current WxH + python-`round()`ed refresh rate. `reset` deletes the state
+//! file and evals the same chunk with `scale = "auto"` — the quoted Lua
+//! STRING, vs a bare Lua number for ladder rungs; the quoting is semantic.
+//! No focused monitor (or a malformed focused entry): silent exit 0. State
+//! is written before the dispatch, so the exit code is the eval's and a
+//! rejected eval still leaves the stepped index persisted (script parity).
 
 pub mod display;
 pub mod hook;
 pub mod ipc;
 pub mod poll;
 pub mod proto;
+pub mod scale;
 pub mod sys;
 pub mod usage;
 pub mod ws;

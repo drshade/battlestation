@@ -181,7 +181,7 @@ fn pct(v: Option<&Value>) -> Option<i64> {
     }
     match v {
         Value::Bool(true) => Some(1),
-        Value::Number(n) => Some(round_half_even(n.as_f64()?)),
+        Value::Number(n) => Some(crate::proto::round_half_even(n.as_f64()?)),
         _ => None,
     }
 }
@@ -204,18 +204,6 @@ fn falsy(v: &Value) -> bool {
         Value::String(s) => s.is_empty(),
         Value::Array(a) => a.is_empty(),
         Value::Object(o) => o.is_empty(),
-    }
-}
-
-/// python-3 `round()`: exact halves go to the even integer (Rust's
-/// f64::round goes away from zero instead).
-fn round_half_even(f: f64) -> i64 {
-    let floor = f.floor();
-    if f - floor == 0.5 {
-        let below = floor as i64;
-        if below % 2 == 0 { below } else { below + 1 }
-    } else {
-        f.round() as i64
     }
 }
 
@@ -282,18 +270,6 @@ mod tests {
             transform(br#"{"five_hour": {"utilization": "50"}, "seven_day": {}}"#),
             None
         );
-    }
-
-    #[test]
-    fn rounding_is_pythons_half_to_even() {
-        assert_eq!(round_half_even(34.2), 34);
-        assert_eq!(round_half_even(34.6), 35);
-        assert_eq!(round_half_even(62.5), 62); // python round(62.5) == 62
-        assert_eq!(round_half_even(63.5), 64);
-        assert_eq!(round_half_even(-2.5), -2);
-        assert_eq!(round_half_even(-1.5), -2);
-        assert_eq!(round_half_even(0.0), 0);
-        assert_eq!(round_half_even(100.0), 100);
     }
 
     #[test]

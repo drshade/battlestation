@@ -9,12 +9,12 @@
 -- Section headers below MUST stay in the "-- N. Name" form: the noctalia
 -- keybind-cheatsheet parser uses them to categorise binds (it matches each
 -- bind's description, or its literal prefix before "..", to the nearest header).
--- Full design rationale: scratch/keybinds.md
+-- (Design rationale lives in git history: docs/keybinds.md, retired once implemented.)
 local mainMod  = "SUPER"
 local hyperMod = "MOD3" -- caps:hyper makes Caps fire as MOD3 (verified live); see input.lua
 local noctCall = "qs -c noctalia-shell ipc call "
 local launchPrefix = "uwsm app -- " -- if you are not using UWSM, make this empty (e.g. "")
--- Workspace navigation by DISPLAY POSITION rather than raw Hyprland id: ws.sh
+-- Workspace navigation by DISPLAY POSITION rather than raw Hyprland id: bsctl ws
 -- maps position <-> real id through a persisted order the bar plugin can reorder.
 -- So "workspace N" below means the Nth pill, not necessarily Hyprland's ws N.
 local ws = "$HOME/.local/bin/bsctl ws"
@@ -104,8 +104,8 @@ hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " reset"), { d
 
 hl.bind(hyperMod .. " + Print",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit toggle"),       { description = "Screenshot toolkit" })
 hl.bind(hyperMod .. " + L",         hl.dsp.exec_cmd(noctCall .. "sessionMenu toggle"),                 { description = "Session menu (lock/logout/reboot)" })
-hl.bind(hyperMod .. " + comma",     hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh down"), { description = "Zoom display out (scale down)" })
-hl.bind(hyperMod .. " + period",    hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/display-scale.sh up"),   { description = "Zoom display in (scale up)" })
+hl.bind(hyperMod .. " + comma",     hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display scale down"), { description = "Zoom display out (scale down)" })
+hl.bind(hyperMod .. " + period",    hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display scale up"),   { description = "Zoom display in (scale up)" })
 hl.bind(hyperMod .. " + Backspace", hl.dsp.exec_cmd("qs -c noctalia-shell kill; sleep 1; qs -c noctalia-shell"), { description = "Restart Noctalia shell" })
 
 -- 6. Edit · Super
