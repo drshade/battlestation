@@ -15,8 +15,8 @@ and the usage cache. The **battlestation-workspaces** plugin is pure
 presentation: `bsctl watch` (flock-elected, hot-standby failover) folds agent
 hooks AND Hyprland's `.socket2.sock` events into one atomic `.widget.json`;
 the widget FileView-watches it — no polling, no compositor-snapshot reads,
-~50ms event-to-pixel. Two harnesses live in production: Claude Code and Codex
-(hooks in each harness's stowed config; per-kind presentation via the
+~50ms event-to-pixel. Three harnesses live in production: Claude Code, Codex
+and Antigravity (hooks in each harness's stowed config; per-kind presentation via the
 registry in `Cfg.qml` — adding a harness = one registry entry + one asset dir
 + one hooks config).
 
