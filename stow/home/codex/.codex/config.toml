@@ -6,47 +6,47 @@ service_tier = "default"
 [[hooks.SessionStart]]
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex waiting"
+command = "$HOME/.local/bin/bsctl agents set --kind codex waiting"
 
 [[hooks.UserPromptSubmit]]
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex thinking"
+command = "$HOME/.local/bin/bsctl agents set --kind codex thinking"
 
 [[hooks.PreToolUse]]
 matcher = "*"
 [[hooks.PreToolUse.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex tooling"
+command = "$HOME/.local/bin/bsctl agents set --kind codex tooling"
 
 [[hooks.PostToolUse]]
 matcher = "*"
 [[hooks.PostToolUse.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex thinking"
+command = "$HOME/.local/bin/bsctl agents set --kind codex thinking"
 
 [[hooks.PermissionRequest]]
 matcher = "*"
 [[hooks.PermissionRequest.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex waiting"
+command = "$HOME/.local/bin/bsctl agents set --kind codex waiting"
 
 [[hooks.Stop]]
 [[hooks.Stop.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex waiting"
+command = "$HOME/.local/bin/bsctl agents set --kind codex waiting"
 
 [[hooks.SubagentStart]]
 matcher = "*"
 [[hooks.SubagentStart.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex agent-start"
+command = "$HOME/.local/bin/bsctl agents set --kind codex subagent-start"
 
 [[hooks.SubagentStop]]
 matcher = "*"
 [[hooks.SubagentStop.hooks]]
 type = "command"
-command = "$HOME/.local/bin/bsctl hook --kind codex agent-stop"
+command = "$HOME/.local/bin/bsctl agents set --kind codex subagent-stop"
 
 [hooks.state]
 

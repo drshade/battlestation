@@ -34,9 +34,9 @@ Item {
   property real contentPreferredHeight: (mode === "settings" ? _settingsHeight : renameCol.implicitHeight + Style.marginL * 2)
 
   function renameSubmit() {
-    // Positional args keep the name opaque to the shell; bsctl ws escapes it and
-    // resets to the number when empty.
-    renameProc.command = ["sh", "-c", "$HOME/.local/bin/bsctl ws rename \"$1\" \"$2\"", "sh", String(wsId), renameInput.text];
+    // Positional args keep the name opaque to the shell; bsctl escapes it and
+    // `name set` resets to the number when the name is empty.
+    renameProc.command = ["sh", "-c", "$HOME/.local/bin/bsctl ws name set --ws-id \"$1\" --name \"$2\"", "sh", String(wsId), renameInput.text];
     renameProc.running = true;
     close();
   }

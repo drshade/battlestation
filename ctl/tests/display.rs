@@ -204,7 +204,7 @@ fn status_via_socket_disabled_panel_closed_lid_is_clean() {
     let fixture = monitors_all_fixture();
     env.start_socket("testinst", &[(MON_ALL_REQ, &fixture)]);
 
-    let out = env.display(&["status"]);
+    let out = env.display(&["get"]);
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("OUTPUT"), "{stdout}");
@@ -239,7 +239,7 @@ fn status_warnings_via_fallback() {
     )
     .unwrap();
 
-    let out = env.display(&["status"]);
+    let out = env.display(&["get"]);
     assert_eq!(out.status.code(), Some(0), "warnings must not change exit");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -250,7 +250,9 @@ fn status_warnings_via_fallback() {
     );
     assert!(stdout.contains("dpms state is mixed"), "{stdout}");
     assert!(
-        stdout.contains("DP-2 is enabled but dpms is off — run: bsctl display on DP-2"),
+        stdout.contains(
+            "DP-2 is enabled but dpms is off — run: bsctl display set dpms --display-name DP-2 --on"
+        ),
         "{stdout}"
     );
     assert_eq!(env.log("calls.log"), vec!["hyprctl monitors all -j"]);
@@ -263,7 +265,7 @@ fn status_json_emits_raw_structured_form() {
     let fixture = monitors_all_fixture();
     env.start_socket("testinst", &[(MON_ALL_REQ, &fixture)]);
 
-    let out = env.display(&["status", "--json"]);
+    let out = env.display(&["get", "--format", "json"]);
     assert_eq!(out.status.code(), Some(0));
     let v: Value = serde_json::from_slice(&out.stdout).expect("must be one JSON doc");
     assert_eq!(v["lid"], json!("closed"));
@@ -281,7 +283,7 @@ fn status_without_lid_dir_omits_lid_line() {
     let env = TestEnv::new("status-desktop");
     let fixture = monitors_all_fixture();
     env.start_socket("testinst", &[(MON_ALL_REQ, &fixture)]);
-    let out = env.display(&["status"]);
+    let out = env.display(&["get"]);
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("lid:"), "{stdout}");
@@ -303,16 +305,16 @@ fn on_off_read_before_toggle_via_socket() {
     );
 
     // already in the desired state: note + exit 0, NO dispatch
-    let out = env.display(&["on", "DP-1"]);
+    let out = env.display(&["set", "dpms", "--display-name", "DP-1", "--on"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stdout).contains("already on"));
     assert_eq!(env.log("socket.log"), vec![MON_ALL_REQ]);
 
     // differs: exactly one TABLE-FORM toggle for that one output
-    let out = env.display(&["off", "DP-1"]);
+    let out = env.display(&["set", "dpms", "--display-name", "DP-1", "--off"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stdout).contains("toggled off"));
-    let out = env.display(&["on", "DP-2"]);
+    let out = env.display(&["set", "dpms", "--display-name", "DP-2", "--on"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         env.log("socket.log"),
@@ -333,7 +335,7 @@ fn unknown_output_errors_listing_valid_names() {
     let env = TestEnv::new("unknown-output");
     let fixture = monitors_all_fixture();
     env.start_socket("testinst", &[(MON_ALL_REQ, &fixture)]);
-    let out = env.display(&["on", "HDMI-9"]);
+    let out = env.display(&["set", "dpms", "--display-name", "HDMI-9", "--on"]);
     assert_eq!(out.status.code(), Some(1));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("unknown output HDMI-9"), "{err}");
@@ -348,7 +350,10 @@ fn disabled_output_is_refused_with_remedy() {
     let env = TestEnv::new("disabled-refused");
     let fixture = monitors_all_fixture();
     env.start_socket("testinst", &[(MON_ALL_REQ, &fixture)]);
-    for args in [&["on", "eDP-1"][..], &["off", "eDP-1"]] {
+    for args in [
+        &["set", "dpms", "--display-name", "eDP-1", "--on"][..],
+        &["set", "dpms", "--display-name", "eDP-1", "--off"],
+    ] {
         let out = env.display(args);
         assert_eq!(out.status.code(), Some(1), "{args:?}");
         let err = String::from_utf8_lossy(&out.stderr);
@@ -369,7 +374,7 @@ fn non_ok_dispatch_reply_falls_back_to_hyprctl() {
         "testinst",
         &[(MON_ALL_REQ, &fixture), (TOGGLE_DP1, "error: nope")],
     );
-    let out = env.display(&["off", "DP-1"]);
+    let out = env.display(&["set", "dpms", "--display-name", "DP-1", "--off"]);
     assert_eq!(out.status.code(), Some(0)); // fake hyprctl exits 0
     assert_eq!(
         env.log("dispatch.log"),
@@ -501,7 +506,7 @@ fn scale_up_from_nothing_seeds_nearest_rung_via_socket() {
         &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
     );
 
-    let out = env.display(&["scale", "up"]);
+    let out = env.display(&["set", "scale", "--up"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty(), "script parity: silent on success");
     assert_eq!(
@@ -533,7 +538,7 @@ fn scale_up_prefers_saved_index_over_reported_scale() {
         &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
     );
 
-    let out = env.display(&["scale", "up"]);
+    let out = env.display(&["set", "scale", "--up"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         env.log("socket.log"),
@@ -560,7 +565,7 @@ fn scale_clamps_at_both_ends() {
         "testinst",
         &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
     );
-    let out = env.display(&["scale", "up"]);
+    let out = env.display(&["set", "scale", "--up"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         env.log("socket.log"),
@@ -583,7 +588,7 @@ fn scale_clamps_at_both_ends() {
         "testinst",
         &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
     );
-    let out = env.display(&["scale", "down"]);
+    let out = env.display(&["set", "scale", "--down"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         env.log("socket.log"),
@@ -611,7 +616,7 @@ fn scale_reset_deletes_state_and_evals_auto_string() {
         &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
     );
 
-    let out = env.display(&["scale", "reset"]);
+    let out = env.display(&["set", "scale", "--reset"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         env.log("socket.log"),
@@ -625,7 +630,7 @@ fn scale_reset_deletes_state_and_evals_auto_string() {
     );
     assert!(!env.scale_state().exists(), "reset must rm the state file");
     // reset with no state file is equally fine (rm -f)
-    let out = env.display(&["scale", "reset"]);
+    let out = env.display(&["set", "scale", "--reset"]);
     assert_eq!(out.status.code(), Some(0));
 }
 
@@ -639,7 +644,7 @@ fn scale_no_focused_monitor_is_silent_exit_0() {
     .to_string();
     env.start_socket("testinst", &[(MON_REQ, &fixture)]);
 
-    let out = env.display(&["scale", "up"]);
+    let out = env.display(&["set", "scale", "--up"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty() && out.stderr.is_empty());
     // queried, but never dispatched and never wrote state
@@ -655,7 +660,7 @@ fn scale_falls_back_to_hyprctl() {
     fs::write(env.fix.join("monitors.json"), scale_mons_fixture(1.0)).unwrap();
     fs::write(env.fix.join("workspaces.json"), scale_ws_fixture()).unwrap();
 
-    let out = env.display(&["scale", "up"]);
+    let out = env.display(&["set", "scale", "--up"]);
     assert_eq!(out.status.code(), Some(0));
     let eval = r#"hl.monitor({ output = "DP-1", mode = "3440x1440@100", position = "0x0", scale = 1.25000 })"#;
     assert_eq!(
@@ -680,7 +685,7 @@ fn scale_garbage_state_file_errors() {
     let fixture = scale_mons_fixture(1.0);
     env.start_socket("testinst", &[(MON_REQ, &fixture)]);
 
-    let out = env.display(&["scale", "up"]);
+    let out = env.display(&["set", "scale", "--up"]);
     assert_eq!(out.status.code(), Some(1));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("unreadable rung index"), "{err}");
@@ -688,6 +693,92 @@ fn scale_garbage_state_file_errors() {
     // no dispatch, state left for inspection
     assert_eq!(env.log("socket.log"), vec![MON_REQ]);
     assert_eq!(fs::read(env.scale_state()).unwrap(), b"not-a-rung\n");
+}
+
+#[test]
+fn scale_value_evals_explicit_scale_and_seeds_nearest_rung() {
+    let env = TestEnv::new("scale-value");
+    let fixture = scale_mons_fixture(1.0);
+    let eval = scale_eval_req("1.30000");
+    let ws = scale_ws_fixture();
+    env.start_socket(
+        "testinst",
+        &[(MON_REQ, &fixture), (WS_REQ, &ws), (&eval, "ok")],
+    );
+    let out = env.display(&["set", "scale", "--value", "1.3"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        env.log("socket.log"),
+        vec![
+            MON_REQ.to_string(),
+            WS_REQ.to_string(),
+            eval,
+            MON_REQ.to_string(), // reflow probe: same fixture -> delta 0 -> no reflow
+            WS_REQ.to_string(),
+        ]
+    );
+    // nearest rung to 1.3 is 1.25 (rung 1): later --up/--down step from there
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"1\n");
+
+    // a non-positive value is refused before any state or dispatch
+    let out = env.display(&["set", "scale", "--value", "0"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--value must be a positive scale"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn scale_selector_targets_a_named_unfocused_monitor() {
+    // Two monitors, DP-1 focused; --display-name eDP-1 must scale eDP-1.
+    let env = TestEnv::new("scale-selector");
+    let fixture = json!([
+        {"id": 0, "name": "eDP-1", "focused": false, "disabled": false,
+         "width": 2880, "height": 1800, "refreshRate": 120.0, "x": 0, "y": 0, "scale": 1.0},
+        {"id": 1, "name": "DP-1", "focused": true, "disabled": false,
+         "width": 3440, "height": 1440, "refreshRate": 100.0, "x": 2880, "y": 0, "scale": 1.0},
+    ])
+    .to_string();
+    let eval = r#"eval hl.monitor({ output = "eDP-1", mode = "2880x1800@120", position = "0x0", scale = 1.25000 })"#;
+    let ws = scale_ws_fixture();
+    env.start_socket(
+        "testinst",
+        &[(MON_REQ, &fixture), (WS_REQ, &ws), (eval, "ok")],
+    );
+    let out = env.display(&["set", "scale", "--display-name", "eDP-1", "--up"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        env.log("socket.log").contains(&eval.to_string()),
+        "{:?}",
+        env.log("socket.log")
+    );
+    assert_eq!(
+        fs::read(env.run.join("hypr-display-scale.eDP-1")).unwrap(),
+        b"1\n"
+    );
+    // an unknown selector errors listing the display numbering
+    let out = env.display(&["set", "scale", "--display-id", "9", "--up"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("1 = eDP-1, 2 = DP-1"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn dpms_by_display_id_resolves_the_enabled_numbering() {
+    // Enabled outputs by (x, y): DP-1 (x=0) = 1, DP-2 (x=3440) = 2; the
+    // disabled eDP-1 has no number. --display-id 2 must act on DP-2.
+    let env = TestEnv::new("dpms-by-id");
+    let fixture = monitors_all_fixture();
+    env.start_socket("testinst", &[(MON_ALL_REQ, &fixture), (TOGGLE_DP2, "ok")]);
+    let out = env.display(&["set", "dpms", "--display-id", "2", "--on"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("toggled on"));
+    assert_eq!(env.log("socket.log"), vec![MON_ALL_REQ, TOGGLE_DP2]);
 }
 
 // ---- instance discovery -----------------------------------------------------------
@@ -705,7 +796,7 @@ fn discovery_without_signature_picks_newest_instance_dir() {
     let fixture = monitors_all_fixture();
     env.start_socket("aaa_live_instance", &[(MON_ALL_REQ, &fixture)]);
 
-    let out = env.display(&["status"]);
+    let out = env.display(&["get"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(env.log("socket.log"), vec![MON_ALL_REQ]);
     assert!(env.log("calls.log").is_empty());

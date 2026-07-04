@@ -3,21 +3,19 @@
 // row of workspace pills. Colours/sizes live in Cfg; pills in WorkspacePill;
 // the animated bots in BotIcon.
 //
-// ONE data source: agent hooks and the compositor both flow through
-// `bsctl watch` (repo: ctl/src/watch.rs), which folds them into
-// <XDG_RUNTIME_DIR>/battlestation-ws/.widget.json; the stateFile FileView
-// below is the only state input. No compositor-service reads, no polling
-// timers, no staleness workarounds — the daemon subscribes to Hyprland's
-// event socket and rewrites the file the moment anything we render changes.
-// (CompositorService remains solely as the switch-workspace COMMAND boundary;
-// the order file keeps its own FileView — a different protocol, bsctl ws's.)
+// ONE data source: this widget subscribes to `bsctl status --format json
+// --stream` (repo: ctl/src/stream.rs) — the watcher Process below is the only
+// state input, one full-world JSON line at start and one per change. No files
+// are read or watched, no compositor-service reads, no polling timers: bsctl
+// owns every state file and republishes the moment anything we render
+// changes. Commands go through bsctl too (focus on click, `ws map set` on
+// drag) — the widget is pure presentation.
 import QtQuick
 import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Widgets
-import qs.Services.Compositor
 import qs.Services.UI
 
 Item {
@@ -52,10 +50,9 @@ Item {
   property var agentsBySid: ({})    // { "<sid>": [{id,type,description,started}] } running subagents
 
   // ---- compositor state -------------------------------------------------------
-  // All of it parsed from .widget.json's `compositor` section (schema:
-  // ctl/src/lib.rs) by applyCompositor(); plain properties, no live
-  // compositor objects. `special:*` workspaces are already excluded by watch.
-  property var liveIds: []          // live workspace ids, unordered
+  // All of it parsed from the stream's `workspaces`/`displays` sections
+  // (schema: ctl/src/lib.rs) by applyState(); plain properties, no live
+  // compositor objects. `special:*` workspaces are already excluded by bsctl.
   // Reactive lookups the pills read by id, so a pill never has to hold a
   // (throwaway) snapshot: names/outputs/occupancy by id.
   property var nameById: ({})
@@ -79,30 +76,29 @@ Item {
   // Highest FILTERED position that must stay visible (occupied or active).
   property int maxVisiblePos: 999
 
-  // ---- virtual ordering -----------------------------------------------------
-  // Preferred order as real workspace ids (bsctl ws's state file). Pills render in
-  // this order and are LABELLED BY POSITION, not by Hyprland id. The resolve
-  // rule mirrors bsctl ws: preferred ids that exist (in order), then any remaining
-  // live workspaces ascending. Missing/empty file => identity order.
+  // ---- battlespace order ------------------------------------------------------
+  // The stream's `workspaces` array IS the battlespace join, already in bs
+  // order (bs N = index N-1, contiguous by construction) — the old QML-side
+  // resolve of the order file is gone; bsctl is the single owner of that
+  // logic. Pills render in this order and are LABELLED BY BS-ID, not by
+  // Hyprland ws-id.
   //
   // Each bar instance shows ONLY the workspaces on its own output (root.screen),
-  // but the order and the position numbers stay GLOBAL -- positions are what
-  // SUPER+N / bsctl ws address, so a pill keeps its global number even when
+  // but the order and the bs numbers stay GLOBAL -- bs-ids are what
+  // SUPER+N / bsctl address, so a pill keeps its global number even when
   // pills before it live on another display. A workspace whose output is
   // unknown fails OPEN (every bar shows it) rather than silently vanishing.
   //
-  // Every state-file reload hands us fresh throwaway JSON, so we keep only
+  // Every stream line hands us fresh throwaway JSON, so we keep only
   // plain ids and look everything else up by id. displayList -- the
   // DelegateModel's model -- is rebuilt ONLY when the visible id SEQUENCE
   // changes, so pills (and the bots inside them) survive churn instead of
   // being recreated, which used to reset every bot's breathing/emote timer
   // and freeze animation on a busy workspace.
-  property var prefOrder: []
-  property var orderedIds: []   // resolved GLOBAL order (all displays), real ids
+  property var orderedIds: []   // GLOBAL bs order (all displays), real ws-ids
   property var displayIds: []   // orderedIds filtered to this screen + trimmed: what the ListView shows
-  property var displaySlots: [] // displaySlots[k] = 0-based slot of displayIds[k] in orderedIds (its global position)
+  property var displaySlots: [] // displaySlots[k] = 0-based slot of displayIds[k] in orderedIds (bs-id - 1)
   property var displayList: []  // [{id}] stable wrappers keyed by id
-  readonly property string orderFilePath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/battlestation-workspaces/order"
 
   // While a pill is being dragged we freeze displayList so a focus/occupancy
   // event can't reset the DelegateModel mid-gesture. dragIds tracks the live
@@ -111,47 +107,7 @@ Item {
   property var dragIds: []
   property int draggingIndex: -1
 
-  function parsePref(txt) {
-    prefOrder = String(txt || "").trim().split(/\s+/).map(function (s) {
-      return parseInt(s, 10);
-    }).filter(function (n) {
-      return !isNaN(n);
-    });
-    recomputeOrder();
-  }
-
-  // Resolve orderedIds from prefOrder against the compositor's live ids
-  // (both plain data — prefOrder from the order file, liveIds from the state
-  // file), then rebuild the visible row.
-  function recomputeOrder() {
-    var present = {};
-    for (var i = 0; i < liveIds.length; i++)
-      present[String(liveIds[i])] = true;
-    var out = [];
-    var seen = {};
-    for (var p = 0; p < prefOrder.length; p++) {
-      var id = String(prefOrder[p]);
-      if (present[id] === true && seen[id] !== true) {
-        out.push(prefOrder[p]);
-        seen[id] = true;
-      }
-    }
-    var live = liveIds.slice().sort(function (a, b) {
-      return a - b;
-    });
-    for (var k = 0; k < live.length; k++) {
-      var lid = String(live[k]);
-      if (seen[lid] !== true) {
-        out.push(live[k]);
-        seen[lid] = true;
-      }
-    }
-    orderedIds = out;
-    // maxVisiblePos is computed in rebuildDisplay, over the FILTERED list.
-    rebuildDisplay();
-  }
-
-  // Equality guards so state-file reloads only reassign
+  // Equality guards so stream updates only reassign
   // a reactive structure when its content actually changed -- otherwise
   // identical-but-new values churn the consumers (and rebuilding displayList
   // would recreate every pill + bot).
@@ -289,13 +245,13 @@ Item {
     for (var s = 0; s < full.length; s++)
       if (inDrag[String(full[s])] === true)
         full[s] = dragIds[k++];
-    // Persist via bsctl ws so the file format has a single author shared with the
-    // keybind side; the FileView below then reloads and re-resolves.
-    orderWriter.command = ["sh", "-c", "$HOME/.local/bin/bsctl ws set " + full.join(" ")];
+    // Persist via bsctl (the map file's only author); the stream then
+    // re-emits the world with the new join.
+    orderWriter.command = ["sh", "-c", "$HOME/.local/bin/bsctl ws map set " + full.join(" ")];
     orderWriter.running = true;
-    // Reflect the new order immediately so there's no flash before the reload
-    // (orderedIds too, so a state-file reload can't rebuild from the
-    // pre-drag order in the write->inotify window). The dragged ids keep the
+    // Reflect the new order immediately so there's no flash before the
+    // re-emission (orderedIds too, so a stream line can't rebuild from the
+    // pre-drag order in the write->re-emit window). The dragged ids keep the
     // same slot SET, so displaySlots stays valid as-is.
     orderedIds = full;
     displayIds = dragIds.slice();
@@ -306,23 +262,7 @@ Item {
     });
   }
 
-  // The order file: bsctl ws's protocol, re-resolved whenever a keybind or a
-  // drag rewrites it. (Workspace-set changes arrive through the state file.)
-  FileView {
-    id: orderFile
-    path: root.orderFilePath
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.parsePref(text())
-    onLoadFailed: {
-      root.prefOrder = [];
-      root.recomputeOrder();
-    }
-  }
-
   Component.onCompleted: {
-    root.recomputeOrder();
     // Register this bar so the keybind/IPC rename can attach its panel here.
     if (pluginApi && pluginApi.mainInstance && root.screen)
       pluginApi.mainInstance.registerBar(root.screen.name, root);
@@ -336,40 +276,34 @@ Item {
     id: orderWriter
   }
 
-  // ---- state watcher ----------------------------------------------------------
-  // Event-driven, not polled: `bsctl watch` (repo: ctl/src/watch.rs) is a
-  // long-lived daemon that inotify-watches the battlestation-ws state dir AND
-  // subscribes to Hyprland's .socket2.sock event stream, folding both into
-  // <XDG_RUNTIME_DIR>/battlestation-ws/.widget.json — one JSON object
-  // (protocol spec: ctl/src/lib.rs):
-  //   {"sessions": [{sid, ws, status, kind, title,
-  //                  agents: [{id, type, description, started}]}],
-  //    "compositor": {"workspaces": [{id, name, monitor, windows}],
-  //                   "monitors": [{name, x, y, focused, activeWs,
-  //                                 specialShowing}]}}
-  // `sessions` is the self-cleaning poll pass (dead-pid sessions, orphan
+  // ---- state stream -----------------------------------------------------------
+  // Event-driven, not polled: `bsctl status --format json --stream` (repo:
+  // ctl/src/stream.rs) emits one full-world JSON line immediately and one per
+  // change — the world object (protocol spec: ctl/src/lib.rs):
+  //   {"displays": [{id, name, x, y, focused, activeWs, specialShowing}],
+  //    "workspaces": [{ws, bs, name, display, windows, active, pref}],
+  //    "prefs": [{ws, display, present, live}],
+  //    "agents": [{session, kind, status, ws, title,
+  //                subagents: [{id, type, description, started}]}]}
+  // `agents` is the self-cleaning session pass (dead-pid sessions, orphan
   // markers, kill-leaked stale markers via the transcript-frozen GC);
-  // `compositor` is queried fresh per recompute (null when Hyprland is
-  // unreachable — we keep the previous compositor state). Rewritten
-  // atomically only when the content changes, plus a 10s tick for what
-  // inotify can't see (dying pids, markers aging out). Every bar instance
-  // runs one watcher; an exclusive flock makes one the writer and the rest hot
-  // standbys that take over if it dies, so multi-monitor needs no coordination
-  // here. The FileView reload()s on each write and feeds applyRecs(); `bsctl
-  // poll` remains available as a one-shot debugging fallback (sessions
-  // array only, by contract) if watch misbehaves.
-  readonly property string stateFilePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/battlestation-ws/.widget.json"
-  property bool stateEverLoaded: false
-
+  // `displays`/`workspaces` are queried fresh per emission (JSON null when
+  // Hyprland is unreachable — we keep the previous compositor state). Each
+  // bar instance owns its own subscriber process; there is no shared file
+  // and no election, so multi-monitor needs no coordination here. `bsctl
+  // status` (one-shot) is the debugging view of exactly this payload.
   Process {
     id: watcher
-    command: [Quickshell.env("HOME") + "/.local/bin/bsctl", "watch"]
+    command: [Quickshell.env("HOME") + "/.local/bin/bsctl", "status", "--format", "json", "--stream"]
     running: true
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: data => root.applyState(data)
+    }
   }
-  // Respawn guard — sparse, because the daemon is meant to live forever; this
-  // only picks it back up after a crash or a `make build` binary swap. Also
-  // nudges the FileView until its first successful load: the file may not
-  // exist yet while the daemon is starting (missing file = no update, wait).
+  // Respawn guard — sparse, because the subscriber is meant to live forever;
+  // this only picks it back up after a crash or a `make build` binary swap
+  // (the fresh stream re-emits the world on spawn, so no nudge is needed).
   Timer {
     interval: 5000
     running: true
@@ -377,27 +311,13 @@ Item {
     onTriggered: {
       if (!watcher.running)
         watcher.running = true;
-      if (!root.stateEverLoaded)
-        stateFile.reload();
     }
   }
 
-  FileView {
-    id: stateFile
-    path: root.stateFilePath
-    watchChanges: true
-    printErrors: false // missing until the daemon's first write — not an error
-    onFileChanged: reload()
-    onLoaded: {
-      root.stateEverLoaded = true;
-      root.applyRecs(text());
-    }
-  }
-
-  // Parse one .widget.json payload: compositor section first (a null
-  // compositor — Hyprland unreachable mid-restart — keeps the previous
-  // compositor state), then the sessions array.
-  function applyRecs(txt) {
+  // Parse one stream line: compositor sections first (null displays or
+  // workspaces — Hyprland unreachable mid-restart — keep the previous
+  // state), then the agents array.
+  function applyState(txt) {
     var data;
     try {
       data = JSON.parse(txt);
@@ -406,9 +326,9 @@ Item {
     }
     if (!data)
       return;
-    if (data.compositor)
-      applyCompositor(data.compositor);
-    var recs = data.sessions;
+    if (data.workspaces || data.displays)
+      applyCompositor(data.workspaces, data.displays);
+    var recs = data.agents;
     if (!recs || recs.length === undefined)
       return;
     var statusBySid = {};
@@ -419,15 +339,15 @@ Item {
     var fresh = {};     // wsid -> [sid] in poll order (for appending new bots)
     for (var i = 0; i < recs.length; i++) {
       var r = recs[i];
-      if (!r || !r.sid)
+      if (!r || !r.session)
         continue;
-      var sid = r.sid, ws = String(r.ws);
+      var sid = r.session, ws = String(r.ws);
       statusBySid[sid] = r.status || "";
       kindBySid[sid] = r.kind || "claude";
       titleBySid[sid] = r.title || "";
       // Reuse the prior list instance when its content is unchanged, so the
       // sub-bot Repeater bound to it never sees a new model on a mere reload.
-      var list = r.agents || [];
+      var list = r.subagents || [];
       var prior = root.agentsBySid[sid];
       agentsBySid[sid] = root.sameAgentList(prior, list) ? prior : list;
       if (!seen[ws]) {
@@ -470,46 +390,51 @@ Item {
       root.agentsBySid = agentsBySid;
   }
 
-  // Fold the compositor section into the plain-data properties, then
-  // re-resolve the row. Equality guards keep identical-but-new maps from
-  // churning the pills (rebuilding displayList would recreate every bot).
-  function applyCompositor(c) {
-    var wss = c.workspaces || [];
-    var live = [];
-    var names = {};
-    var outs = {};
-    var occ = {};
-    for (var i = 0; i < wss.length; i++) {
-      var w = wss[i];
-      live.push(w.id);
-      names[String(w.id)] = w.name || "";
-      outs[String(w.id)] = w.monitor || "";
-      if (w.windows > 0)
-        occ[String(w.id)] = true;
-    }
-    liveIds = live;
-    if (!sameKeySet(names, nameById))
-      nameById = names;
-    if (!sameKeySet(outs, outputById))
-      outputById = outs;
-    if (!sameKeySet(occ, occupiedMap))
-      occupiedMap = occ;
-    // This bar's monitor = the entry named like root.screen. A missing entry
-    // fails OPEN (no highlight suppression, no dimming) like the output
-    // filtering above.
-    var mine = null;
-    var mons = c.monitors || [];
-    var myName = (root.screen && root.screen.name) ? root.screen.name : "";
-    for (var m = 0; m < mons.length; m++) {
-      if (mons[m].name === myName) {
-        mine = mons[m];
-        break;
+  // Fold the stream's workspaces (the battlespace join, already in bs order)
+  // and displays into the plain-data properties, then rebuild the row. Either
+  // section can be null alone (partial compositor visibility) — each side
+  // keeps its previous state independently. Equality guards keep
+  // identical-but-new maps from churning the pills (rebuilding displayList
+  // would recreate every bot).
+  function applyCompositor(wss, displays) {
+    if (wss) {
+      var order = [];
+      var names = {};
+      var outs = {};
+      var occ = {};
+      for (var i = 0; i < wss.length; i++) {
+        var w = wss[i];
+        order.push(w.ws);
+        names[String(w.ws)] = w.name || "";
+        outs[String(w.ws)] = w.display || "";
+        if (w.windows > 0)
+          occ[String(w.ws)] = true;
       }
+      orderedIds = order; // bs order by construction: bs N = index N-1
+      if (!sameKeySet(names, nameById))
+        nameById = names;
+      if (!sameKeySet(outs, outputById))
+        outputById = outs;
+      if (!sameKeySet(occ, occupiedMap))
+        occupiedMap = occ;
     }
-    monActiveId = (mine && mine.activeWs !== null && mine.activeWs !== undefined) ? mine.activeWs : -1;
-    specialShowing = !!(mine && mine.specialShowing === true);
-    monitorFocused = !mine || mine.focused === true;
-    recomputeOrder();
+    if (displays) {
+      // This bar's display = the entry named like root.screen. A missing
+      // entry fails OPEN (no highlight suppression, no dimming) like the
+      // output filtering above.
+      var mine = null;
+      var myName = (root.screen && root.screen.name) ? root.screen.name : "";
+      for (var m = 0; m < displays.length; m++) {
+        if (displays[m].name === myName) {
+          mine = displays[m];
+          break;
+        }
+      }
+      monActiveId = (mine && mine.activeWs !== null && mine.activeWs !== undefined) ? mine.activeWs : -1;
+      specialShowing = !!(mine && mine.specialShowing === true);
+      monitorFocused = !mine || mine.focused === true;
+    }
+    rebuildDisplay();
   }
 
   // Right-click on empty bar area -> widget menu (pills handle their own right-click).
@@ -546,17 +471,15 @@ Item {
     PanelService.showContextMenu(contextMenu, root, root.screen, anchorItem);
   }
 
-  // Click-to-switch: look the live workspace up by id and hand it to the
-  // backend. The one remaining CompositorService use — a COMMAND, not state;
-  // everything rendered comes from .widget.json.
+  // Click-to-switch: dispatch through bsctl like every other command — the
+  // widget never talks to the compositor directly, for state OR commands.
   function switchToId(id) {
-    for (var i = 0; i < CompositorService.workspaces.count; i++) {
-      var w = CompositorService.workspaces.get(i);
-      if (w.id === id) {
-        CompositorService.switchToWorkspace(w);
-        return;
-      }
-    }
+    focusRunner.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "ws", "focus", "--ws-id", String(id)];
+    focusRunner.running = true;
+  }
+
+  Process {
+    id: focusRunner
   }
 
   Row {

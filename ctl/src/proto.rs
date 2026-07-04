@@ -235,8 +235,8 @@ pub fn marker_record(atype: &str, desc: &str) -> Value {
 
 /// Session file content:
 /// `{"ws": <int>, "status": ..., "kind": ..., "title": ..., "pid": <int>}`.
-/// `kind` is the harness discriminator (`bsctl hook --kind`, mandatory) —
-/// see the protocol contract in lib.rs.
+/// `kind` is the harness discriminator (`bsctl agents set --kind`,
+/// mandatory) — see the protocol contract in lib.rs.
 pub fn session_record(ws: i64, status: &str, title: &str, pid: i64, kind: &str) -> Value {
     json!({"ws": ws, "status": status, "kind": kind, "title": title, "pid": pid})
 }

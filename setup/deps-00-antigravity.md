@@ -9,7 +9,7 @@ once and complete the Google sign-in (credentials land in
 
 `~/.gemini/` is otherwise runtime state and secrets — never stow it wholesale.
 The `antigravity` package owns exactly one file, `~/.gemini/config/hooks.json`,
-carrying the battlestation-ws status hooks (`bsctl hook --kind agy …`; the
+carrying the agent-session status hooks (`bsctl agents set --kind agy …`; the
 protocol contract is in `ctl/src/lib.rs` — agy's hook payloads are camelCase
 protojson keyed by `conversationId`, which bsctl accepts as the session key).
 agy does not rewrite `hooks.json` at runtime, so no clean filter is needed.

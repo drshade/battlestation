@@ -3,13 +3,13 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "$HOME/.local/bin/bsctl hook --kind agy thinking"
+        "command": "$HOME/.local/bin/bsctl agents set --kind agy thinking"
       }
     ],
     "PostInvocation": [
       {
         "type": "command",
-        "command": "$HOME/.local/bin/bsctl hook --kind agy waiting"
+        "command": "$HOME/.local/bin/bsctl agents set --kind agy waiting"
       }
     ],
     "PreToolUse": [
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.local/bin/bsctl hook --kind agy tooling"
+            "command": "$HOME/.local/bin/bsctl agents set --kind agy tooling"
           }
         ]
       }
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.local/bin/bsctl hook --kind agy thinking"
+            "command": "$HOME/.local/bin/bsctl agents set --kind agy thinking"
           }
         ]
       }
@@ -37,7 +37,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "$HOME/.local/bin/bsctl hook --kind agy waiting"
+        "command": "$HOME/.local/bin/bsctl agents set --kind agy waiting"
       }
     ]
   }

@@ -108,7 +108,7 @@ fn socket_path() -> Option<PathBuf> {
 /// The EVENT socket, `<instance>/.socket2.sock` — same instance dir as the
 /// request socket. Protocol (verified live, Hyprland 0.55.4): connect, send
 /// nothing, read newline-delimited `EVENT>>DATA` lines forever; the
-/// compositor closes the stream only when it exits. `bsctl watch` is the
+/// compositor closes the stream only when it exits. The `--stream` engine is the
 /// consumer; there is no hyprctl fallback for a *stream*, so None (or a
 /// failed connect) means running without compositor events.
 pub fn event_socket_path() -> Option<PathBuf> {

@@ -57,11 +57,14 @@ symlinked into place with **GNU Stow**.
 - **bsctl owns stateful protocols; shell owns glue and recovery.** `ctl/` (a
   Rust crate, repo-tooling namespace like `bin/`) builds `~/.local/bin/bsctl`
   via `make build`. Logic that maintains shared state across multiple
-  consumers or is hot-path/JSON-heavy belongs there: the battlestation-ws protocol
-  (`bsctl hook` behind the Claude Code hooks, `bsctl poll` behind the
-  widget), the workspace display order (`bsctl ws`, driven by keybinds and
-  the widget) and the usage cache (`bsctl usage`). Protocol contracts are
-  specified in `ctl/src/lib.rs`. Plain system glue stays shell — and anything
+  consumers or is hot-path/JSON-heavy belongs there: agent-session tracking
+  (`bsctl agents set` behind every harness's hooks, the
+  `bsctl status --stream` feed behind the widget), the workspace verbs
+  (`bsctl ws` — focus/send/name/map/prefs, driven by keybinds and the
+  widget), display management (`bsctl display`) and the usage cache
+  (`bsctl usage`). Protocol contracts are specified in `ctl/src/lib.rs`;
+  bsctl is the only thing that reads or writes its state files — everything
+  else queries bsctl (one-shot or `--stream`). Plain system glue stays shell — and anything
   that must work **when the system is broken** (`restart_crashed_lock.sh`,
   `displays-on.sh`) stays shell *as policy*: a recovery path must never
   depend on a build artifact. bsctl is the one deployed artifact that is

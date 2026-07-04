@@ -1,99 +1,161 @@
-//! `bsctl watch` — long-lived daemon keeping `<state-dir>/.widget.json`
-//! current, so the widget FileView-watches ONE file instead of polling
-//! anything. Two event sources fold into one output: the agent-state dir
-//! (inotify; the sessions section reuses [`poll::poll`] wholesale) and
-//! Hyprland's `.socket2.sock` event stream (the compositor section, built
-//! fresh per recompute from `j/workspaces` + `j/monitors`). This module only
-//! owns *when* to recompute and the single-writer/failover discipline
-//! (contract + output schema in lib.rs) — with ONE deliberate exception to
-//! the passive-mirror role: on `monitoraddedv2` the arriving output's
-//! workspace->display preferences are applied
-//! ([`crate::ws::apply_preferences`], contract in lib.rs), moving the
-//! workspaces that prefer it back onto it. That apply is the only dispatch
-//! watch ever performs. Removals need nothing from watch — preferences are
-//! stamped at intent time by the `bsctl ws` verbs, never at teardown time,
+//! The streaming engine behind every `--stream` query: re-emit the query's
+//! full result to stdout (one line per emission) whenever it changes.
+//! Subscribers spawn `bsctl <query> --format json --stream` and read lines
+//! — nothing watches bsctl's state files but bsctl (contract in lib.rs).
+//! Three wake sources fold into one re-evaluation: inotify on the runtime
+//! agent-state dir AND on the persistent map/prefs dir, Hyprland's
+//! `.socket2.sock` event stream, and a slow tick (session pids dying and
+//! markers aging are invisible to inotify). Emissions are deduped on the
+//! serialized result, so a subscriber is never woken for nothing.
+//!
+//! ONE deliberate exception to the engine's read-only role: on
+//! `monitoraddedv2` the arriving output's workspace->display preferences
+//! are applied ([`crate::ws::apply_preferences`], contract in lib.rs).
+//! Several subscribers may be streaming at once, so a single APPLIER is
+//! elected with a nonblocking flock — see `Applier` below. Removals need
+//! nothing: preferences are stamped at intent time, never at teardown time,
 //! so there is no race against Hyprland's own evacuation.
 //!
 //! Never crash-loops: any transient error (state dir vanishing, inotify fd
 //! error, socket2 disconnect on compositor restart) is logged to stderr
-//! once, then re-initialized — including the flock, so a wounded winner
-//! cleanly hands over to a blocked standby. If socket2 can't connect at all
-//! (no Hyprland running), watch still works DEGRADED: agent-state events
-//! keep flowing, the compositor section rides the queries' failure path
-//! (null) — see [`EventSock::connect`].
+//! once, then re-initialized. If socket2 can't connect at all (no
+//! Hyprland running), the stream still works DEGRADED: file events keep
+//! flowing, compositor-derived sections ride the queries' failure path
+//! (null). A closed stdout (the subscriber went away) is the one CLEAN
+//! exit: streaming to nobody is done, not broken.
 
-use std::convert::Infallible;
 use std::ffi::CString;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
-
-use crate::{ipc, poll, sys, ws};
-
-/// The consolidated widget state file. Dot-prefixed on purpose: `poll`'s
-/// dotfile skip and `clear`'s `<sid>.*` sweep can never touch it.
-pub const OUTPUT_NAME: &str = ".widget.json";
-/// Single-writer exclusive flock; losers BLOCK here (hot standbys).
-pub const LOCK_NAME: &str = ".widget.lock";
+use crate::{ipc, sys, ws};
 
 /// Slow tick: inotify cannot see session pids dying or markers aging past
-/// the GC window, so recompute unconditionally this often.
+/// the GC window, so re-evaluate unconditionally this often.
 const TICK: Duration = Duration::from_secs(10);
 /// After a triggering event, drain further events this long before
-/// recomputing once (hooks write session file + marker in one burst).
+/// re-evaluating once (hooks write session file + marker in one burst).
 const COALESCE_MS: i32 = 50;
-/// Cap on coalescing rounds so a steady event stream can't starve the write.
+/// Cap on coalescing rounds so a steady event stream can't starve emission.
 const COALESCE_ROUNDS: u32 = 10;
 
-pub fn run() -> i32 {
-    let dir = sys::state_dir();
-    let proj = poll::projects_dir();
-    let mut last_err = String::new();
-    loop {
-        let e = match session(&dir, &proj) {
-            Err(e) => e,
-            Ok(never) => match never {},
-        };
-        // Log once per distinct failure, not once per retry — a permanently
-        // broken environment must not fill the widget's stderr at 1 line/s.
-        let msg = e.to_string();
-        if msg != last_err {
-            eprintln!("bsctl watch: {msg}; re-initializing");
-            last_err = msg;
+/// The single-applier election. Every streaming process may see a
+/// `monitoraddedv2`, but only one may dispatch the preference apply — two
+/// bars mean two subscribers, and a double apply would double the dispatch
+/// and the focus churn. The first process to see an arrival wins a
+/// NONBLOCKING flock on `<state-dir>/.apply.lock` and keeps it for its
+/// lifetime; losers skip, knowing a winner exists. When the winner dies the
+/// kernel drops its lock, so the next arrival event elects a survivor.
+struct Applier {
+    lock: Option<fs::File>,
+}
+
+impl Applier {
+    fn new() -> Self {
+        Applier { lock: None }
+    }
+
+    /// Apply the arriving outputs' preferences iff this process is (or just
+    /// became) the elected applier. Best-effort: a failed apply leaves the
+    /// preferences in place for `ws prefs reconcile`.
+    fn apply(&mut self, added: &[String], dir: &Path) {
+        if added.is_empty() {
+            return;
         }
-        std::thread::sleep(Duration::from_secs(1));
+        if self.lock.is_none()
+            && let Ok(f) = fs::File::create(dir.join(".apply.lock"))
+            && sys::flock_exclusive(&f, true)
+        {
+            self.lock = Some(f);
+        }
+        if self.lock.is_none() {
+            return; // another subscriber holds the apply role
+        }
+        for mon in added {
+            let _ = ws::apply_preferences(Some(mon));
+        }
     }
 }
 
-/// One lock-acquisition-to-error lifetime: acquire the flock (blocking —
-/// this is where standbys park), write the state once, then loop on
-/// inotify + the compositor event socket + the slow tick. Only ever returns
-/// an error; the caller re-inits — which is also the socket2 reconnect path
-/// after a compositor restart (its EOF surfaces as an error here).
-fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
-    fs::create_dir_all(dir)?;
-    // Single writer with seamless failover: the winner proceeds; losers
-    // block in flock and take over the instant the winner's fd closes
-    // (process death included). Reopened on every re-init so a re-created
-    // state dir can't leave us holding a lock on a deleted inode while a
-    // fresh instance wins the new one.
-    let lock = fs::File::create(dir.join(LOCK_NAME))?;
-    if !sys::flock_exclusive(&lock, false) {
-        return Err(io::Error::last_os_error());
+/// Emission dedupe: has the serialized result changed since the last
+/// emission? (True for the very first result — `prev` starts None.)
+pub fn changed(prev: &mut Option<String>, cur: &str) -> bool {
+    if prev.as_deref() == Some(cur) {
+        return false;
     }
-    migrate_legacy_dir(dir);
-    let ino = Inotify::new(dir)?;
-    // Compositor events; None = degraded mode (no Hyprland), agent-only.
-    let mut sock = EventSock::connect();
-    // On acquiring the lock (winner or successor): write once immediately.
+    *prev = Some(cur.to_string());
+    true
+}
+
+/// Drive `query` forever: emit its result now, then whenever it changes.
+/// An `Err` from the FIRST evaluation aborts with that exit code (a bad
+/// selector must fail loudly at spawn time, not stream nothing); later
+/// `Err`s skip the emission (mid-stream flux resolves by the next event).
+/// Exits 0 when stdout closes — the subscriber is done, not broken.
+pub fn run(mut query: impl FnMut() -> Result<String, i32>) -> i32 {
     let mut prev: Option<String> = None;
-    recompute(dir, proj, compositor_state, &mut prev)?;
+    match query() {
+        Err(code) => return code,
+        Ok(cur) => {
+            if emit(&mut prev, &cur).is_err() {
+                return 0; // subscriber already gone
+            }
+        }
+    }
+    let mut applier = Applier::new();
+    let mut last_err = String::new();
+    loop {
+        match session(&mut query, &mut prev, &mut applier) {
+            Ok(()) => return 0, // stdout closed: clean finish
+            Err(e) => {
+                // Log once per distinct failure, not once per retry — a
+                // permanently broken environment must not fill the
+                // subscriber's stderr at 1 line/s.
+                let msg = e.to_string();
+                if msg != last_err {
+                    eprintln!("bsctl --stream: {msg}; re-initializing");
+                    last_err = msg;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+    }
+}
+
+/// One init-to-error lifetime: watch both state dirs + socket2 + the slow
+/// tick, re-evaluating and emitting on change. Ok(()) = stdout closed (the
+/// clean finish, surfaced as BrokenPipe by [`emit`]); Err = transient, the
+/// caller re-inits — which is also the socket2 reconnect path after a
+/// compositor restart.
+fn session(
+    query: &mut impl FnMut() -> Result<String, i32>,
+    prev: &mut Option<String>,
+    applier: &mut Applier,
+) -> io::Result<()> {
+    let dir = sys::state_dir();
+    fs::create_dir_all(&dir)?;
+    let files_dir = ws::map_file()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    fs::create_dir_all(&files_dir)?;
+    // One inotify fd, two watches: the runtime agent-state dir and the
+    // persistent map/prefs dir. One trigger filter serves both — each dir's
+    // protocol files are exactly its non-dot entries.
+    let ino = Inotify::new(&[&dir, &files_dir])?;
+    // Compositor events; None = degraded mode (no Hyprland), files-only.
+    let mut sock = EventSock::connect();
+    // Re-init entry: state may have moved while we were broken (dedupe
+    // makes this free when it didn't).
+    let done = maybe_emit(query, prev)?;
+    if done {
+        return Ok(());
+    }
 
     let mut deadline = Instant::now() + TICK;
     loop {
@@ -105,7 +167,9 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
         )?;
         let Some((ino_ready, sock_ready)) = ready else {
             // Slow tick (poll(2) timeout expired).
-            recompute(dir, proj, compositor_state, &mut prev)?;
+            if maybe_emit(query, prev)? {
+                return Ok(());
+            }
             deadline = Instant::now() + TICK;
             continue;
         };
@@ -122,12 +186,11 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
             triggered |= plug.triggered;
         }
         if !triggered {
-            // Dotfile/debug.log churn or irrelevant compositor events only
-            // (incl. our own output writes): no recompute, and the tick
-            // deadline keeps running.
+            // Dotfile churn or irrelevant compositor events only: no
+            // re-evaluation, and the tick deadline keeps running.
             continue;
         }
-        // Coalesce the burst (from EITHER source) before recomputing once.
+        // Coalesce the burst (from EITHER source) before re-evaluating once.
         let mut rounds = 0;
         while rounds < COALESCE_ROUNDS {
             let Some((i, s)) = wait2(
@@ -146,168 +209,53 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
             }
             rounds += 1;
         }
-        recompute(dir, proj, compositor_state, &mut prev)?;
-        // Apply the arriving outputs' preferences AFTER the recompute so
-        // the widget shows the world before the moves land, then again as
-        // they do (the apply's own move events wake the loop). This is the
-        // ONLY dispatch watch ever performs — everywhere else it is a
-        // passive mirror (scope rule in lib.rs). Best-effort: a failed
-        // apply leaves the preferences in place for `ws reconcile`.
-        for mon in &plug.added {
-            let _ = ws::apply_preferences(Some(mon));
+        if maybe_emit(query, prev)? {
+            return Ok(());
         }
+        // Apply the arriving outputs' preferences AFTER emitting, so the
+        // subscriber sees the world before the moves land, then again as
+        // they do (the apply's own move events wake the loop). This is the
+        // engine's ONLY dispatch — everywhere else it is a passive mirror
+        // (scope rule in lib.rs) — and it is single-elected: see [`Applier`].
+        applier.apply(&plug.added, &dir);
         deadline = Instant::now() + TICK;
     }
 }
 
-/// One-time courtesy migration from the pre-rename state dir (`claude-ws`,
-/// a sibling of the current one). Strictly the dir is tmpfs and self-heals —
-/// every hook recreates its session file in the new dir on its next event,
-/// and the old dir dies at reboot — but live sessions would vanish from the
-/// widget until that next event. So on acquiring the writer lock, if the old
-/// dir still exists and the new dir has no protocol files yet, rename the
-/// old dir's protocol files (non-dot, non-debug.log — same filter as the
-/// poll pass) across. Best-effort: every failure is ignored, and nothing is
-/// ever deleted. Once the new dir has any protocol file the check is a
-/// no-op, so re-inits and failovers never re-run the move.
-fn migrate_legacy_dir(dir: &Path) {
-    migrate_legacy_state_dir();
-    let Some(old) = dir.parent().map(|p| p.join("claude-ws")) else {
-        return;
-    };
-    let Ok(old_rd) = fs::read_dir(&old) else {
-        return; // no legacy dir (the steady state)
-    };
-    let new_has_protocol_files = fs::read_dir(dir).is_ok_and(|rd| {
-        rd.flatten()
-            .any(|e| name_triggers(&e.file_name().to_string_lossy()))
-    });
-    if new_has_protocol_files {
-        return;
-    }
-    for e in old_rd.flatten() {
-        let name = e.file_name();
-        if name_triggers(&name.to_string_lossy()) {
-            let _ = fs::rename(e.path(), dir.join(&name));
-        }
-    }
-}
-
-/// Companion one-time move for the PERSISTENT state dir: the workspace
-/// order file lives under `.../state/battlestation-workspaces/` since the
-/// plugin rename (previously `claude-workspaces`, a sibling). Unlike the
-/// runtime dir this one survives reboots, so without the move a saved pill
-/// order would silently reset. Rename the whole old dir into place, only
-/// while the new one doesn't exist yet; best-effort, nothing deleted.
-fn migrate_legacy_state_dir() {
-    let order = crate::ws::order_file();
-    let Some(new_dir) = order.parent() else {
-        return;
-    };
-    let Some(state_root) = new_dir.parent() else {
-        return;
-    };
-    let old_dir = state_root.join("claude-workspaces");
-    if old_dir.is_dir() && !new_dir.exists() {
-        let _ = fs::rename(&old_dir, new_dir);
-    }
-}
-
-/// Run the poll pass, fetch fresh compositor state, and rewrite the output
-/// file — but only when the serialization changed (a FileView reload on
-/// every tick would wake the widget pointlessly), or when the file is
-/// missing (manual deletion; the no-change short-circuit would otherwise
-/// leave it gone until the state next changes). Content is one compact JSON
-/// object + trailing newline (schema in lib.rs): `sessions` is EXACTLY
-/// `bsctl poll`'s array; `compositor` is the fetcher's value (null on query
-/// failure — the widget keeps its last compositor state). The fetcher is
-/// injected so tests never touch a real compositor.
-fn recompute(
-    dir: &Path,
-    proj: &Path,
-    fetch_compositor: impl Fn() -> Value,
+/// Re-evaluate and emit if changed. Ok(true) = stdout closed (clean
+/// finish); a query error mid-stream skips the emission (the state is in
+/// flux — e.g. a filtered display mid-replug — and the next event
+/// re-evaluates); any other write error is transient.
+fn maybe_emit(
+    query: &mut impl FnMut() -> Result<String, i32>,
     prev: &mut Option<String>,
-) -> io::Result<()> {
-    let out = json!({
-        "sessions": Value::Array(poll::poll(sys::now_f64(), dir, proj)),
-        "compositor": fetch_compositor(),
-    });
-    let content = format!("{out}\n");
-    if prev.as_deref() != Some(content.as_str()) || !dir.join(OUTPUT_NAME).exists() {
-        write_atomic(dir, &content)?;
+) -> io::Result<bool> {
+    let Ok(cur) = query() else {
+        return Ok(false);
+    };
+    match emit(prev, &cur) {
+        Ok(()) => Ok(false),
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(true),
+        Err(e) => Err(e),
     }
-    *prev = Some(content);
-    Ok(())
 }
 
-/// The compositor section, built fresh from `j/workspaces` + `j/monitors`
-/// (~1ms socket queries; the hyprctl fallback inside [`ipc::json`] covers
-/// wire drift). Null when either query fails outright — degraded mode or a
-/// mid-restart compositor; the widget keeps its last state. Workspaces
-/// whose name starts with `special:` are excluded (the bar never renders
-/// them — same rule as `bsctl ws`); a monitor's `specialShowing` covers the
-/// scratchpad-visible case instead.
-fn compositor_state() -> Value {
-    let (Some(ws), Some(mons)) = (ipc::json("workspaces"), ipc::json("monitors")) else {
-        return Value::Null;
-    };
-    let (Some(ws), Some(mons)) = (ws.as_array(), mons.as_array()) else {
-        return Value::Null;
-    };
-    let workspaces: Vec<Value> = ws
-        .iter()
-        .filter(|w| {
-            !w.get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .starts_with("special:")
-        })
-        .map(|w| {
-            json!({
-                "id": w.get("id").cloned().unwrap_or(Value::Null),
-                "name": w.get("name").and_then(Value::as_str).unwrap_or(""),
-                "monitor": w.get("monitor").and_then(Value::as_str).unwrap_or(""),
-                "windows": w.get("windows").and_then(Value::as_i64).unwrap_or(0),
-            })
-        })
-        .collect();
-    let monitors: Vec<Value> = mons
-        .iter()
-        .map(|m| {
-            json!({
-                "name": m.get("name").and_then(Value::as_str).unwrap_or(""),
-                "x": m.get("x").cloned().unwrap_or(Value::Null),
-                "y": m.get("y").cloned().unwrap_or(Value::Null),
-                "focused": m.get("focused").and_then(Value::as_bool).unwrap_or(false),
-                "activeWs": m
-                    .pointer("/activeWorkspace/id")
-                    .cloned()
-                    .unwrap_or(Value::Null),
-                "specialShowing": !m
-                    .pointer("/specialWorkspace/name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .is_empty(),
-            })
-        })
-        .collect();
-    json!({ "workspaces": workspaces, "monitors": monitors })
+/// Write one emission line + flush, deduped via [`changed`].
+fn emit(prev: &mut Option<String>, cur: &str) -> io::Result<()> {
+    if !changed(prev, cur) {
+        return Ok(());
+    }
+    let mut out = io::stdout().lock();
+    writeln!(out, "{cur}")?;
+    out.flush()
 }
 
-/// Temp file + rename in the same dir (the crate's atomic-write pattern);
-/// the temp name is dot-prefixed like every other writer's, so poll/clear
-/// skip it and our own event filter ignores it.
-fn write_atomic(dir: &Path, content: &str) -> io::Result<()> {
-    let tmp = dir.join(format!(".{OUTPUT_NAME}.tmp"));
-    fs::write(&tmp, content)?;
-    fs::rename(&tmp, dir.join(OUTPUT_NAME))
-}
-
-/// Should an event on this dir entry trigger a recompute? Exactly the names
-/// the poll pass reads: dotfiles (our own output + temp writes, hook temp
-/// files) and debug.log can never change the output — and reacting to our
-/// own `.widget.json` rename would self-trigger forever. An empty name is
-/// an event about the watch dir itself, not an entry.
+/// Should an event on this dir entry trigger a re-evaluation? Non-dot,
+/// non-debug.log names are exactly the protocol files (session files and
+/// markers in the runtime dir; `map` and `prefs` in the persistent dir) —
+/// dotfiles are writers' in-flight temp files and locks, and debug.log is
+/// diagnostics. An empty name is an event about a watched dir itself, not
+/// an entry.
 pub fn name_triggers(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && name != "debug.log"
 }
@@ -371,7 +319,7 @@ pub fn event_triggers(line: &str) -> bool {
 }
 
 /// The arriving output's name from a `monitoraddedv2>>id,name,description`
-/// line — the only plug event watch acts on (a removal needs nothing:
+/// line — the only plug event the engine acts on (a removal needs nothing:
 /// preferences are stamped at intent time, and Hyprland's evacuation is
 /// left alone). V2 only, because Hyprland emits the legacy
 /// `monitoradded>>name` alongside and classifying both would apply the
@@ -496,28 +444,33 @@ impl EventSock {
     }
 }
 
-/// Thin RAII wrapper over an inotify fd watching ONE directory.
+/// Thin RAII wrapper over ONE inotify fd watching every given directory
+/// (one watch descriptor per dir; [`parse_events`] reads only mask + name,
+/// so the shared [`name_triggers`] filter serves all of them).
 struct Inotify {
     fd: RawFd,
 }
 
 impl Inotify {
-    fn new(dir: &Path) -> io::Result<Self> {
+    fn new(dirs: &[&Path]) -> io::Result<Self> {
         let fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC) };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
         let ino = Inotify { fd }; // Drop closes the fd on the error paths below
-        let cpath = CString::new(dir.as_os_str().as_bytes())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in state dir path"))?;
         let mask = libc::IN_CREATE
             | libc::IN_MOVED_TO
             | libc::IN_DELETE
             | libc::IN_ATTRIB
             | libc::IN_MODIFY
             | libc::IN_CLOSE_WRITE;
-        if unsafe { libc::inotify_add_watch(ino.fd, cpath.as_ptr(), mask) } < 0 {
-            return Err(io::Error::last_os_error());
+        for dir in dirs {
+            let cpath = CString::new(dir.as_os_str().as_bytes()).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "NUL in state dir path")
+            })?;
+            if unsafe { libc::inotify_add_watch(ino.fd, cpath.as_ptr(), mask) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
         Ok(ino)
     }
@@ -579,13 +532,13 @@ mod tests {
     #[test]
     fn parses_event_stream() {
         let mut buf = ev(libc::IN_CREATE, "sid-1");
-        buf.extend(ev(libc::IN_MOVED_TO, ".widget.json"));
+        buf.extend(ev(libc::IN_MOVED_TO, ".map.tmp"));
         buf.extend(ev(libc::IN_IGNORED, "")); // dir-level event, no name
         assert_eq!(
             parse_events(&buf),
             vec![
                 (libc::IN_CREATE, "sid-1".to_string()),
-                (libc::IN_MOVED_TO, ".widget.json".to_string()),
+                (libc::IN_MOVED_TO, ".map.tmp".to_string()),
                 (libc::IN_IGNORED, String::new()),
             ]
         );
@@ -597,79 +550,31 @@ mod tests {
     }
 
     #[test]
-    fn trigger_filter_matches_polls_skip_rule() {
+    fn trigger_filter_covers_both_watched_dirs() {
+        // runtime dir: session files and markers trigger
         assert!(name_triggers("0198f2-uuid")); // session file
         assert!(name_triggers("0198f2-uuid.9d0aa1")); // marker
-        assert!(!name_triggers(".widget.json")); // our own output
-        assert!(!name_triggers("..widget.json.tmp")); // our own temp
+        // persistent dir: the map and prefs files trigger
+        assert!(name_triggers("map"));
+        assert!(name_triggers("prefs"));
+        // dotfiles are temp writes and locks; debug.log is diagnostics
         assert!(!name_triggers(".sid.tmp")); // hook temp
-        assert!(!name_triggers(".widget.lock"));
+        assert!(!name_triggers(".map.tmp")); // map temp
+        assert!(!name_triggers(".prefs.tmp")); // prefs temp
+        assert!(!name_triggers(".lock")); // state-file write lock
+        assert!(!name_triggers(".apply.lock")); // applier election
         assert!(!name_triggers("debug.log"));
-        assert!(!name_triggers("")); // event about the dir itself
+        assert!(!name_triggers("")); // event about a watched dir itself
     }
 
     #[test]
-    fn recompute_writes_only_on_change() {
-        let dir = std::env::temp_dir().join(format!("bsctl-watch-ut-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let proj = dir.join("no-projects");
-        let out = dir.join(OUTPUT_NAME);
-        let no_comp = || Value::Null; // degraded-mode fetcher
-
+    fn emission_dedupes_on_serialized_result() {
         let mut prev = None;
-        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
-        // The object schema: poll's array nested under "sessions",
-        // compositor null in degraded mode, trailing newline.
-        assert_eq!(
-            fs::read(&out).unwrap(),
-            b"{\"compositor\":null,\"sessions\":[]}\n"
-        );
-
-        // Unchanged output + file still present -> the write is skipped.
-        // Provable without sleeping: a skipped write can't restore mtime, so
-        // plant a sentinel mtime and check it survives.
-        let past = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let times = fs::FileTimes::new().set_accessed(past).set_modified(past);
-        fs::File::options()
-            .write(true)
-            .open(&out)
-            .unwrap()
-            .set_times(times)
-            .unwrap();
-        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
-        assert_eq!(
-            fs::metadata(&out).unwrap().modified().unwrap(),
-            past,
-            "no-change recompute must not rewrite"
-        );
-
-        // Missing output file -> rewritten even though the content matches.
-        fs::remove_file(&out).unwrap();
-        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
-        assert_eq!(
-            fs::read(&out).unwrap(),
-            b"{\"compositor\":null,\"sessions\":[]}\n"
-        );
-
-        // A state change -> rewritten with the new content.
-        fs::write(
-            dir.join("s1"),
-            r#"{"ws":7,"status":"waiting","kind":"claude","title":"T","pid":1}"#,
-        )
-        .unwrap();
-        recompute(&dir, &proj, no_comp, &mut prev).unwrap();
-        let v: Value = serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
-        assert_eq!(v["sessions"][0]["sid"], "s1");
-        assert_eq!(v["sessions"][0]["ws"], 7);
-
-        // A compositor change alone -> rewritten too.
-        let comp = json!({"workspaces": [], "monitors": []});
-        recompute(&dir, &proj, || comp.clone(), &mut prev).unwrap();
-        let v: Value = serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
-        assert_eq!(v["compositor"], comp);
-
-        let _ = fs::remove_dir_all(&dir);
+        assert!(changed(&mut prev, "a"), "first result always emits");
+        assert!(!changed(&mut prev, "a"), "same result never re-emits");
+        assert!(changed(&mut prev, "b"), "a change emits");
+        assert!(!changed(&mut prev, "b"));
+        assert!(changed(&mut prev, "a"), "a change BACK emits too");
     }
 
     #[test]

@@ -28,12 +28,17 @@ pub enum Action {
     Up,
     Down,
     Reset,
+    /// An explicit scale (`--value`). Hyprland snaps whatever we send to its
+    /// own 1/120 grid, so the applied value may differ slightly; the saved
+    /// rung index becomes the NEAREST rung so later up/down steps stay
+    /// deterministic from here.
+    Value(f64),
 }
 
 // ---- pure logic (proto.rs-style: deterministic, unit-tested) ---------------
 
-/// The focused monitor's dispatch-relevant state, lifted from a `j/monitors`
-/// array (the ENABLED-only view — the script's `hyprctl monitors -j`).
+/// One monitor's dispatch-relevant state, lifted from a `j/monitors` array
+/// (the ENABLED-only view — the script's `hyprctl monitors -j`).
 pub struct Focused {
     pub name: String,
     pub mode: String,     // WxH@RR, RR python-rounded — preserved by the dispatch
@@ -41,15 +46,9 @@ pub struct Focused {
     pub scale: f64,
 }
 
-/// First entry with `focused == true`, or None (script parity: python's
-/// loop prints nothing, the sh side exits 0 silently). A focused entry with
-/// missing/mistyped fields is also None — the reference python raises there,
-/// which lands on the same silent-exit-0 path.
-pub fn focused_from(monitors: &Value) -> Option<Focused> {
-    let m = monitors.as_array()?.iter().find(|m| {
-        // Hyprland emits a JSON bool; python's truthiness check reduces to it.
-        m.get("focused").and_then(Value::as_bool).unwrap_or(false)
-    })?;
+/// Lift one monitor entry. An entry with missing/mistyped fields is None —
+/// the reference python raises there, which lands on the silent-exit-0 path.
+fn lift(m: &Value) -> Option<Focused> {
     Some(Focused {
         name: m.get("name")?.as_str()?.to_string(),
         mode: format!(
@@ -61,6 +60,27 @@ pub fn focused_from(monitors: &Value) -> Option<Focused> {
         position: format!("{}x{}", num_token(m.get("x"))?, num_token(m.get("y"))?),
         scale: m.get("scale")?.as_f64()?,
     })
+}
+
+/// First entry with `focused == true`, or None (script parity: python's
+/// loop prints nothing, the sh side exits 0 silently).
+pub fn focused_from(monitors: &Value) -> Option<Focused> {
+    let m = monitors.as_array()?.iter().find(|m| {
+        // Hyprland emits a JSON bool; python's truthiness check reduces to it.
+        m.get("focused").and_then(Value::as_bool).unwrap_or(false)
+    })?;
+    lift(m)
+}
+
+/// The named entry, or None. Same silent-tolerance as [`focused_from`] for
+/// malformed entries; the CALLER validates the name against the display
+/// numbering first (so an unknown name errors loudly there, not here).
+pub fn named_from(monitors: &Value, name: &str) -> Option<Focused> {
+    let m = monitors
+        .as_array()?
+        .iter()
+        .find(|m| m.get("name").and_then(Value::as_str) == Some(name))?;
+    lift(m)
 }
 
 /// A raw JSON number as python `print` renders it — ints stay bare
@@ -223,23 +243,54 @@ pub fn state_path(name: &str) -> PathBuf {
 
 // ---- command ----------------------------------------------------------------
 
-/// `bsctl display scale up|down|reset`. Ordering matches the script: state
-/// first (write the new index / rm the file), dispatch last — so the exit
-/// code is the dispatch's, and a rejected dispatch still leaves the stepped
-/// index persisted (script parity).
-pub fn run(action: Action) -> i32 {
+/// `bsctl display set scale [selector] (--up|--down|--reset|--value <v>)`.
+/// No selector targets the FOCUSED monitor (what the zoom keybinds mean).
+/// Ordering matches the script: state first (write the new index / rm the
+/// file), dispatch last — so the exit code is the dispatch's, and a
+/// rejected dispatch still leaves the stepped index persisted (script
+/// parity).
+pub fn run(action: Action, sel: Option<&crate::ws::DisplaySel>) -> i32 {
     let Some(mons) = ipc::json("monitors") else {
         eprintln!("bsctl display scale: monitors query failed (socket and hyprctl)");
         return 1;
     };
-    let Some(f) = focused_from(&mons) else {
-        return 0; // no focused monitor: silent no-op (script parity)
+    let f = match sel {
+        None => match focused_from(&mons) {
+            Some(f) => f,
+            None => return 0, // no focused monitor: silent no-op (script parity)
+        },
+        Some(sel) => {
+            // Validate against the display numbering first so unknown
+            // ids/names error loudly with the valid list.
+            let ds = crate::ws::displays_from(&mons);
+            let i = match crate::ws::resolve_display_sel("set scale", sel, &ds) {
+                Ok(i) => i,
+                Err(c) => return c,
+            };
+            match named_from(&mons, &ds[i].name) {
+                Some(f) => f,
+                None => return 0, // malformed entry: the silent no-op path
+            }
+        }
     };
     let state = state_path(&f.name);
     let luascale = match action {
         Action::Reset => {
             let _ = fs::remove_file(&state); // rm -f
             r#""auto""#.to_string()
+        }
+        Action::Value(v) => {
+            if !(v.is_finite() && v > 0.0) {
+                eprintln!("bsctl display set scale: --value must be a positive scale (got {v})");
+                return 1;
+            }
+            // Persist the NEAREST rung so later --up/--down step
+            // deterministically from wherever --value landed.
+            if let Err(e) = fs::write(&state, format!("{}\n", nearest_rung(v))) {
+                eprintln!("bsctl display set scale: {}: {e}", state.display());
+                return 1;
+            }
+            format_scale(v)
         }
         Action::Up | Action::Down => {
             let delta = if matches!(action, Action::Up) { 1 } else { -1 };

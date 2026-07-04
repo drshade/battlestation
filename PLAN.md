@@ -8,27 +8,28 @@ multi-harness arcs: the commit log of 2026-07-03).
 ## Where things stand (2026-07-04)
 
 `ctl/` builds `bsctl` — the single owner of the desktop's stateful protocols
-(contracts in `ctl/src/lib.rs`): the multi-harness **battlestation-ws** status
-protocol (`hook --kind <harness>` / `poll` / `watch`), workspace display
-order incl. display-level verbs, the sparse workspace→display preference
-(stamped only by `ws prefer`/`ws movetodisplay`, applied when an output
-arrives; `ws prefs`/`forget`/`reconcile`), display management
-(status/dpms/reset/scale), and the usage cache. The **battlestation-workspaces** plugin is pure
-presentation: `bsctl watch` (flock-elected, hot-standby failover) folds agent
-hooks AND Hyprland's `.socket2.sock` events into one atomic `.widget.json`;
-the widget FileView-watches it — no polling, no compositor-snapshot reads,
-~50ms event-to-pixel. Three harnesses live in production: Claude Code, Codex
-and Antigravity (hooks in each harness's stowed config; per-kind presentation via the
-registry in `Cfg.qml` — adding a harness = one registry entry + one asset dir
-+ one hooks config).
+(contracts in `ctl/src/lib.rs`), one grammar over a fixed nomenclature
+(bs-id = battlespace position, ws-id, display-id/-name): `status` (the
+world — text for humans, `--format json --stream` for subscribers),
+`ws focus`/`ws send` (all movement), `ws name`/`map`/`prefs`,
+`display get/set/reset`, `agents set` (the harness hook endpoint) /
+`agents get`, and the usage cache. Nothing watches state files but bsctl:
+each bar instance of the **battlestation-workspaces** plugin spawns
+`bsctl status --format json --stream` (NDJSON, emit-on-change, ~50ms
+event-to-pixel) and renders lines; commands flow back through bsctl
+(`ws focus` on click, `ws map set` on drag). Three harnesses live in
+production: Claude Code, Codex and Antigravity (`agents set --kind <k>` in
+each harness's stowed config; per-kind presentation via the registry in
+`Cfg.qml` — adding a harness = one registry entry + one asset dir + one
+hooks config).
 
 ## Open
 
 1. **Next harness: opencode.** The recipe is proven twice (Codex, then
    Antigravity — which surfaced one real integration cost each: Codex's
    trust gate, agy's conversationId payloads): investigate the harness's
-   hook/notify surface, wire its config to `bsctl hook --kind <k> <verb>`,
-   add a registry entry + asset dir. Unknown-kind sessions already render
+   hook/notify surface, wire its config to `bsctl agents set --kind <k>
+   <verb>`, add a registry entry + asset dir. Unknown-kind sessions already render
    as claude, so partial integration is safe at every step. (gemini-cli is
    dead — Google folded it into Antigravity, which even squats its
    `~/.gemini` config dir; already integrated, kind `agy`.)
@@ -51,6 +52,29 @@ registry in `Cfg.qml` — adding a harness = one registry entry + one asset dir
 
 ## Recently completed (prune once absorbed)
 
+- **bsctl grammar restructure (2026-07-04):** the whole CLI re-cut for
+  humans and machines around domain nouns and a fixed nomenclature
+  (bs-id/ws-id/display-id/display-name), designed in full before anyone
+  depends on it — the last cheap moment for breaking renames. `hook` →
+  `agents set` (name the domain, not the mechanism), `poll` → `agents
+  get`; five overlapping movement verbs → `ws focus` (never mutates) +
+  `ws send window|workspace [--focus]` over one selector set; `order` →
+  `ws map` (set takes ws-ids in battlespace order — stable denotation;
+  position-relative payloads compose badly); every read verb `get` with
+  `--format text|json`. The pub-sub inverted: watch/`.widget.json`/the
+  flock writer election and hot-standby machinery are DELETED — each
+  subscriber spawns `bsctl <query> --stream` (NDJSON, emit-on-change,
+  EPIPE = clean exit) and the one dispatch power (preference-apply on
+  monitor arrival) kept exactly-once via a tiny nonblocking-flock applier
+  election. State files renamed `map`/`prefs`, bsctl-private, writers
+  flocked; one-time local `mv`, no migration code by design. Keybinds,
+  widget QML (net deletion — the stream carries the precomputed
+  battlespace join, so the QML resolve died) and all three harness
+  configs retargeted in the same change. Lessons: the keybinds header
+  comment contradicted the actual HYPER+N follow semantics — behavior,
+  not prose, was authority (and the prose is now fixed); Rust ignores
+  SIGPIPE, so a CLI meant for pipelines must reset it or `| head`
+  panics.
 - **Workspace→display preference (2026-07-04):** a workspace CAN prefer an
   output; most never do — sparse by design. Only two writers, both
   explicit homing acts: `ws prefer` and `ws movetodisplay`; reorders, bulk
@@ -92,58 +116,5 @@ registry in `Cfg.qml` — adding a harness = one registry entry + one asset dir
   absolute-target reflow (idempotent against Hyprland's own). Lesson:
   Hyprland re-flows auto-positioned monitors on SOME runtime changes but not
   others; never apply relative deltas to observed state.
-
-
-# bsctl improvements
-- we should have better ergonomics, e.g.:
-  # this set of commands + switches allows for many combinations:
-  #   switch focus to other workspace -                   'ws focus --ws <x>'
-  #   move window to other workspace -                    'ws focus --ws <x> --active-window-follows'
-  #   switch focus to other display -                     'ws focus --display <d>'
-  #   move window to active workspace on other display -  'ws focus --display <d> --active-window-follows'
-  #   move workspace to other display (keeps ws-id) -     'ws focus --display <d> --active-workspace-follows'
-  #   switch focus to left/right workspace -              'ws focus --ws-rel +1'
-  #                                                       'ws focus --ws-rel -1'
-  #   move window to left/right workspace -               'ws focus --ws-rel +1 --active-window-follows' #                                                       'ws focus --ws-rel -1 --active-window-follows'
-  # '--active-workspace-follows' really should only work with --display-id - doesn't make sense, unless we try and merge or something (but i suspect that is unexpected behaviour)
-  #
-  # some nomenclature:
-  #   <bs-id>         -> the battlespace id (which maps one-to-one to a hyprland workspace id)
-  #   <ws-id>         -> the hyprland workspace id 
-  #   <display-id>    -> the hyprland display id (1, 2, 3) from left to right
-  #   <display-name>  -> the hyprland display name (e.g. 'eDP-1', 'DP-1')
-
-  bsctl ws focus [--bs-id <bs-id>|--bs-rel <+num|-num>|--ws-id <ws-id>|--display-id <display-id>]
-  bsctl ws send window [--bs-id <bs-id>|--bs-rel <+num|-num>|--ws-id <ws-id>] [--focus]                  # send active window to workspace, optionally focusing too
-  bsctl ws send workspace --display-id <display-id> [--focus]     # send active workspace to display, optionally focusing too
-
-  # Allow getting, setting and removing names flexibly
-  bsctl ws name get [--all|--bs-id <bs-id>|--ws-id <ws-id>|--display-id <display-id>] # default --all
-  bsctl ws name set [--bs-id <bs-id>|--ws-id <ws-id>] --name <name>
-  bsctl ws name rm [--all|--bs-id <bs-id>|--ws-id <ws-id>|--display-id <display-id>]
-
-  # Query workspaces order (bs-id to ws-id mapping), optionally filtered by display?
-  bsctl ws map get  # needs thought on what this should return based on who queries it?
-  bsctl ws map set  # needs thought on how this should look, but needs to allow for moving order of workspaces (bs to ws map)
-
-  # preferences
-  bsctl ws prefs get [--all|--bs-id <ws-id>|--ws-id <ws-id>] # default --all
-  bsctl ws prefs add [--bs-id <bs-id>|--ws-id <ws-id>] --display-id <display-id>
-  bsctl ws prefs rm [--bs-id <bs-id>|--ws-id <ws-id>|--all]
-  bsctl ws prefs reconcile
-
-  # displays
-  bsctl display get [--all|--display-id <display-id>] # default --all
-  bsctl display set dpms --display-id <display-id> [--on|--off]
-  bsctl display set scale --display-id <display-id> [--reset|--value <scale-value>] 
-
-  # agent sessions
-  bsctl agents set --kind <harness> [waiting|thinking|tooling|clear|subagent-start|subagent-stop] [--session-id <session-id>]
-  bsctl agents get [--kind <harness>] [--all|--session-id <session-id>] # default --all
-
-  # for any of the above commands which are queried programmatically (maybe by widget or by hyprctl) we should add a --format [text|json|csv|whatever_makes_sense]
-  # and my ideal is that anything that queries workspaces, agent sessions etc should really be invoking bsctl, and not reading the underlying files directly (and bsctl should manage the file lock to ensure that concurrent reads/writes are correctly locked).
-  # i would prefer that nothing directly watches the files underneath - but rather poll or called 'bsctl watch' for changes (and we need to discuss whatever functionality this should have to make it easy), and we republish the full state of the world to that subscriber on each change through an output stream. For this - do we add a --stream switch to those queries which need them e.g. 'bsctl agents get --all --format json --stream' will write the state to stdout, and continue to write on each update.
-
 
 

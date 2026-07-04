@@ -1,8 +1,11 @@
-//! `bsctl poll` — one flat pass over the battlestation-ws state dir, emitting ONE
-//! JSON array line, mirroring the pollScript python in the
-//! battlestation-workspaces BarWidget.qml:
+//! The session scan — one flat pass over the battlestation-ws state dir,
+//! yielding one record per live session:
 //!
-//! `[{sid, ws, status, kind, title, agents: [{id, type, description, started}]}]`
+//! `{sid, ws, status, kind, title, agents: [{id, type, description, started}]}`
+//!
+//! (The record keys are the historical on-disk spellings; the `agents get` /
+//! `status` surfaces remap them to the published `session`/`subagents`
+//! schema.)
 //!
 //! Self-cleaning: a session file whose pid is dead OR that doesn't parse is
 //! deleted along with its markers, as are orphan markers whose session file
@@ -19,17 +22,10 @@ use serde_json::{Value, json};
 
 use crate::{proto, sys};
 
-pub fn run() -> i32 {
-    let out = poll(sys::now_f64(), &sys::state_dir(), &projects_dir());
-    println!("{}", Value::Array(out));
-    0
-}
-
 /// `os.path.expanduser("~/.claude/projects")` — via $HOME. ($HOME is always
 /// set under a session; if it somehow isn't, the glob just never matches and
 /// stale markers lose their transcript rescue, same as a bogus HOME.)
-/// pub(crate): `watch` runs the same pass against the same roots.
-pub(crate) fn projects_dir() -> PathBuf {
+pub fn projects_dir() -> PathBuf {
     std::env::var_os("HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
@@ -37,8 +33,8 @@ pub(crate) fn projects_dir() -> PathBuf {
         .join(".claude/projects")
 }
 
-/// The whole poll pass, with `now` and both roots injected for tests.
-pub fn poll(now: f64, dir: &Path, proj: &Path) -> Vec<Value> {
+/// The whole scan pass, with `now` and both roots injected for tests.
+pub fn scan(now: f64, dir: &Path, proj: &Path) -> Vec<Value> {
     let names: Vec<String> = match fs::read_dir(dir) {
         Ok(rd) => rd
             .flatten()

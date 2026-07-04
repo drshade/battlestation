@@ -76,6 +76,7 @@ impl TestEnv {
         let mut c = Command::new(BIN);
         c.env("XDG_RUNTIME_DIR", &self.run)
             .env("HOME", &self.home)
+            .env("XDG_STATE_HOME", self.root.join("state"))
             .env("PATH", &self.path)
             .env_remove("CLAUDE_WS_DEBUG")
             // Socket discovery must scan THIS env's <run>/hypr, not resolve
@@ -87,7 +88,19 @@ impl TestEnv {
     /// A well-wired Claude hook call (`--kind` is mandatory; the kindless
     /// form is pinned as a no-op in `kindless_hook_is_a_noop`).
     fn hook(&self, verb: &str, payload: &str) -> i32 {
-        self.hook_args(&["hook", "--kind", "claude", verb], payload)
+        self.hook_args(&["agents", "set", "--kind", "claude", verb], payload)
+    }
+
+    /// `agents get` with extra args, parsed as one JSON value.
+    fn agents_get(&self, extra: &[&str]) -> Value {
+        let out = self
+            .cmd()
+            .args(["agents", "get", "--format", "json"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "agents get must exit 0");
+        serde_json::from_slice(&out.stdout).expect("agents get must print one JSON array")
     }
 
     fn hook_args(&self, args: &[&str], payload: &str) -> i32 {
@@ -106,12 +119,6 @@ impl TestEnv {
             assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "{e}");
         }
         child.wait().unwrap().code().unwrap()
-    }
-
-    fn poll(&self) -> Value {
-        let out = self.cmd().arg("poll").output().unwrap();
-        assert_eq!(out.status.code(), Some(0), "poll must exit 0");
-        serde_json::from_slice(&out.stdout).expect("poll must print one JSON array")
     }
 
     fn read_json(&self, name: &str) -> Value {
@@ -186,7 +193,7 @@ fn session_write_with_kind_codex() {
     let env = TestEnv::new("session-kind");
     let payload = json!({"session_id": "sess-k"}).to_string();
     assert_eq!(
-        env.hook_args(&["hook", "--kind", "codex", "tooling"], &payload),
+        env.hook_args(&["agents", "set", "--kind", "codex", "tooling"], &payload),
         0
     );
     let rec = env.read_json("sess-k");
@@ -194,12 +201,15 @@ fn session_write_with_kind_codex() {
     assert_eq!(rec["status"], json!("tooling"));
     // --kind=<k> form writes the same record
     assert_eq!(
-        env.hook_args(&["hook", "--kind=gemini", "waiting"], &payload),
+        env.hook_args(&["agents", "set", "--kind=gemini", "waiting"], &payload),
         0
     );
     assert_eq!(env.read_json("sess-k")["kind"], json!("gemini"));
     // an empty --kind value is kindless -> no-op: the record is untouched
-    assert_eq!(env.hook_args(&["hook", "--kind=", "waiting"], &payload), 0);
+    assert_eq!(
+        env.hook_args(&["agents", "set", "--kind=", "waiting"], &payload),
+        0
+    );
     assert_eq!(env.read_json("sess-k")["kind"], json!("gemini"));
 }
 
@@ -212,19 +222,87 @@ fn kindless_hook_is_a_noop() {
     let tp = env.make_transcript();
     let payload = json!({"session_id": "sess-nk", "transcript_path": tp}).to_string();
     for args in [
-        &["hook", "waiting"][..],           // no --kind at all
-        &["hook", "--kind=", "thinking"],   // empty kind value
-        &["hook", "--kind", "", "tooling"], // empty kind token
+        &["agents", "set", "waiting"][..],           // no --kind at all
+        &["agents", "set", "--kind=", "thinking"],   // empty kind value
+        &["agents", "set", "--kind", "", "tooling"], // empty kind token
     ] {
         assert_eq!(env.hook_args(args, &payload), 0, "{args:?}");
     }
     // markers too: agent verbs are equally kind-gated
     let ap = json!({"session_id": "sess-nk", "agent_id": "a1"}).to_string();
-    assert_eq!(env.hook_args(&["hook", "agent-start"], &ap), 0);
+    assert_eq!(env.hook_args(&["agents", "set", "subagent-start"], &ap), 0);
     let entries: Vec<_> = fs::read_dir(env.state_dir())
         .map(|rd| rd.flatten().map(|e| e.file_name()).collect())
         .unwrap_or_default();
     assert!(entries.is_empty(), "state dir must stay empty: {entries:?}");
+}
+
+#[test]
+fn session_id_override_and_agents_get_filters() {
+    let env = TestEnv::new("sid-override");
+    // The argv override writes the record under ITS id even when the
+    // payload carries none (the scripting/testing seam; harness hooks keep
+    // delivering ids inside the event JSON).
+    assert_eq!(
+        env.hook_args(
+            &[
+                "agents",
+                "set",
+                "--kind",
+                "codex",
+                "waiting",
+                "--session-id",
+                "ovr-1"
+            ],
+            "{}",
+        ),
+        0
+    );
+    let rec = env.read_json("ovr-1");
+    assert_eq!(rec["status"], json!("waiting"));
+    assert_eq!(rec["kind"], json!("codex"));
+    // ...and outranks a payload session_id when both are present.
+    let payload = json!({"session_id": "payload-sid"}).to_string();
+    assert_eq!(
+        env.hook_args(
+            &[
+                "agents",
+                "set",
+                "--kind",
+                "codex",
+                "thinking",
+                "--session-id=ovr-1"
+            ],
+            &payload,
+        ),
+        0
+    );
+    assert_eq!(env.read_json("ovr-1")["status"], json!("thinking"));
+    assert!(!env.state_dir().join("payload-sid").exists());
+
+    // agents get: the NEW schema (session/subagents), filterable.
+    let all = env.agents_get(&[]);
+    assert_eq!(all.as_array().unwrap().len(), 1);
+    assert_eq!(all[0]["session"], json!("ovr-1"));
+    assert_eq!(all[0]["kind"], json!("codex"));
+    assert_eq!(all[0]["subagents"], json!([]));
+    assert!(
+        all[0].get("sid").is_none(),
+        "the old sid spelling must be gone from agents get"
+    );
+    assert!(
+        env.agents_get(&["--kind", "claude"])
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        env.agents_get(&["--session-id", "ovr-1"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -240,7 +318,10 @@ fn codex_title_derives_from_prompt_and_sticks() {
     })
     .to_string();
     assert_eq!(
-        env.hook_args(&["hook", "--kind", "codex", "thinking"], &prompt_ev),
+        env.hook_args(
+            &["agents", "set", "--kind", "codex", "thinking"],
+            &prompt_ev
+        ),
         0
     );
     let rec = env.read_json("cx-1");
@@ -250,7 +331,7 @@ fn codex_title_derives_from_prompt_and_sticks() {
     // A following tool event (no prompt, no transcript title) keeps it.
     let tool_ev = json!({"session_id": "cx-1"}).to_string();
     assert_eq!(
-        env.hook_args(&["hook", "--kind", "codex", "tooling"], &tool_ev),
+        env.hook_args(&["agents", "set", "--kind", "codex", "tooling"], &tool_ev),
         0
     );
     let rec = env.read_json("cx-1");
@@ -263,7 +344,7 @@ fn codex_title_derives_from_prompt_and_sticks() {
     })
     .to_string();
     assert_eq!(
-        env.hook_args(&["hook", "--kind", "codex", "thinking"], &prompt2),
+        env.hook_args(&["agents", "set", "--kind", "codex", "thinking"], &prompt2),
         0
     );
     assert_eq!(
@@ -295,7 +376,7 @@ fn session_write_without_hyprctl_writes_nothing() {
     let env = TestEnv::new("no-hyprctl");
     // PATH with no hyprctl at all: spawning it fails -> silent exit 0.
     let mut child = Command::new(BIN)
-        .args(["hook", "--kind", "claude", "thinking"])
+        .args(["agents", "set", "--kind", "claude", "thinking"])
         .env("XDG_RUNTIME_DIR", &env.run)
         .env("PATH", env.root.join("nowhere").display().to_string())
         .stdin(Stdio::piped())
@@ -351,15 +432,15 @@ fn agent_start_meta_json_fallback_and_stop() {
     .unwrap();
 
     let payload = json!({"session_id": "s1", "agent_id": "a1", "transcript_path": tp}).to_string();
-    assert_eq!(env.hook("agent-start", &payload), 0);
+    assert_eq!(env.hook("subagent-start", &payload), 0);
     let m = env.read_json("s1.a1");
     assert_eq!(
         m,
         json!({"type": "Explore", "description": "Search the tree"})
     );
 
-    // agent-stop removes exactly that marker
-    assert_eq!(env.hook("agent-stop", &payload), 0);
+    // subagent-stop removes exactly that marker
+    assert_eq!(env.hook("subagent-stop", &payload), 0);
     assert!(!env.state_dir().join("s1.a1").exists());
 }
 
@@ -371,14 +452,14 @@ fn agent_start_payload_fields_win_and_missing_id_is_noop() {
         "agent_type": "fork", "description": "Do a thing"
     })
     .to_string();
-    assert_eq!(env.hook("agent-start", &payload), 0);
+    assert_eq!(env.hook("subagent-start", &payload), 0);
     assert_eq!(
         env.read_json("s2.b2"),
         json!({"type": "fork", "description": "Do a thing"})
     );
     // No agent_id -> silent no-op
-    assert_eq!(env.hook("agent-start", r#"{"session_id":"s2"}"#), 0);
-    assert_eq!(env.hook("agent-stop", r#"{"session_id":"s2"}"#), 0);
+    assert_eq!(env.hook("subagent-start", r#"{"session_id":"s2"}"#), 0);
+    assert_eq!(env.hook("subagent-stop", r#"{"session_id":"s2"}"#), 0);
     assert!(env.state_dir().join("s2.b2").exists());
 }
 
@@ -447,11 +528,11 @@ fn clear_sweeps_session_and_markers_only() {
     assert!(env.state_dir().join("other.a").exists());
 }
 
-// ---- poll --------------------------------------------------------------------
+// ---- agents get: the sweeping read ------------------------------------------
 
 #[test]
-fn poll_sweeps_dead_orphans_and_stale_markers() {
-    let env = TestEnv::new("poll");
+fn agents_get_sweeps_dead_orphans_and_stale_markers() {
+    let env = TestEnv::new("sweep");
     let now = SystemTime::now();
     let stale = now - Duration::from_secs(40 * 60);
 
@@ -496,16 +577,16 @@ fn poll_sweeps_dead_orphans_and_stale_markers() {
     env.write_state(".live.tmp", "{}");
     env.write_state("debug.log", "=== noise");
 
-    let out = env.poll();
+    let out = env.agents_get(&[]);
     let arr = out.as_array().unwrap();
     assert_eq!(arr.len(), 1, "only the live session survives: {out}");
     let s = &arr[0];
-    assert_eq!(s["sid"], json!("live"));
+    assert_eq!(s["session"], json!("live"));
     assert_eq!(s["ws"], json!(3));
     assert_eq!(s["status"], json!("tooling"));
     assert_eq!(s["kind"], json!("claude"));
     assert_eq!(s["title"], json!("T"));
-    let agents = s["agents"].as_array().unwrap();
+    let agents = s["subagents"].as_array().unwrap();
     let ids: Vec<&str> = agents.iter().map(|a| a["id"].as_str().unwrap()).collect();
     // rescued has the oldest mtime, then a2, then a1 — sorted by (started, id)
     assert_eq!(ids, vec!["rescued", "a2", "a1"]);
@@ -529,10 +610,10 @@ fn poll_sweeps_dead_orphans_and_stale_markers() {
 }
 
 #[test]
-fn poll_empty_or_missing_dir_prints_empty_array() {
-    let env = TestEnv::new("poll-empty");
+fn agents_get_empty_or_missing_dir_prints_empty_array() {
+    let env = TestEnv::new("get-empty");
     // state dir doesn't even exist yet
-    assert_eq!(env.poll(), json!([]));
+    assert_eq!(env.agents_get(&[]), json!([]));
 }
 
 // ---- injected-ws write path (the factored hyprctl seam) ----------------------
@@ -541,7 +622,7 @@ fn poll_empty_or_missing_dir_prints_empty_array() {
 fn write_session_unit_seam() {
     let env = TestEnv::new("write-seam");
     fs::create_dir_all(env.state_dir()).unwrap();
-    bsctl::hook::write_session(
+    bsctl::agents::write_session(
         &env.state_dir(),
         "seam",
         "waiting",
@@ -555,8 +636,8 @@ fn write_session_unit_seam() {
         env.read_json("seam"),
         json!({"ws": 7, "status": "waiting", "kind": "claude", "title": "A title", "pid": 1})
     );
-    // and the poller picks it straight up (pid 1 alive)
-    let out = bsctl::poll::poll(
+    // and the scan picks it straight up (pid 1 alive)
+    let out = bsctl::sessions::scan(
         bsctl_now(),
         &env.state_dir(),
         &env.home.join(".claude/projects"),
@@ -572,229 +653,181 @@ fn bsctl_now() -> f64 {
         .as_secs_f64()
 }
 
-// ---- watch ---------------------------------------------------------------
-// The daemon side: spawn the built binary's `watch` against the TestEnv
-// state dir, poke the dir, and assert `.widget.json` CONVERGES (bounded
-// waits on conditions, not fixed sleeps) to what `poll` would emit.
+// ---- --stream ------------------------------------------------------------
+// The engine side: spawn the built binary's streaming form against the
+// TestEnv and assert the emission stream CONVERGES (bounded channel waits,
+// never unbounded reads). `status --format json --stream` is the widget's
+// subscription; `agents get --stream` proves the per-query forms share the
+// engine.
 
-/// A spawned `bsctl watch`, killed on drop so a panicking test never leaks
-/// a daemon holding the lock.
-struct Watcher(std::process::Child);
-
-impl Watcher {
-    fn spawn(env: &TestEnv) -> Self {
-        Watcher(
-            env.cmd()
-                .arg("watch")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap(),
-        )
-    }
-    fn kill(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
+/// A spawned streaming query: the child plus a channel of its parsed
+/// emissions (a reader thread pumps stdout lines). Killed on drop so a
+/// panicking test never leaks a subscriber.
+struct Streamer {
+    child: std::process::Child,
+    lines: std::sync::mpsc::Receiver<Value>,
 }
 
-impl Drop for Watcher {
-    fn drop(&mut self) {
-        self.kill();
+impl Streamer {
+    fn spawn(env: &TestEnv, args: &[&str]) -> Self {
+        let mut child = env
+            .cmd()
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                    break;
+                };
+                if tx.send(v).is_err() {
+                    break;
+                }
+            }
+        });
+        Streamer { child, lines }
     }
-}
 
-/// Poll `cond` every 10ms for up to 5s; panic with `what` on timeout.
-fn wait_for(mut cond: impl FnMut() -> bool, what: &str) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while std::time::Instant::now() < deadline {
-        if cond() {
-            return;
+    /// The next emission, bounded; panics with `what` on timeout.
+    fn next(&self, what: &str) -> Value {
+        self.lines
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
+    }
+
+    /// Pull emissions until one satisfies `pred` (a burst may land as one
+    /// or several emissions — coalescing is a latency knob, not a schema
+    /// promise); bounded per pull, so a stalled stream panics with `what`.
+    fn converge(&self, what: &str, pred: impl Fn(&Value) -> bool) -> Value {
+        for _ in 0..20 {
+            let v = self.next(what);
+            if pred(&v) {
+                return v;
+            }
         }
-        std::thread::sleep(Duration::from_millis(10));
+        panic!("stream never converged: {what}");
     }
-    panic!("timed out waiting for {what}");
+
+    /// Assert NO emission arrives within `ms` — the absence proof (the one
+    /// spot a bounded wait is unavoidable).
+    fn expect_silence(&self, ms: u64, what: &str) {
+        if let Ok(v) = self.lines.recv_timeout(Duration::from_millis(ms)) {
+            panic!("unexpected emission during {what}: {v}");
+        }
+    }
 }
 
-/// Parsed `.widget.json`, or None while missing/in-flight.
-fn widget_json(env: &TestEnv) -> Option<Value> {
-    let b = fs::read(env.state_dir().join(".widget.json")).ok()?;
-    serde_json::from_slice(&b).ok()
+impl Drop for Streamer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 #[test]
-fn watch_converges_to_poll_output() {
-    let env = TestEnv::new("watch-converge");
-    let _w = Watcher::spawn(&env);
+fn stream_status_converges_and_matches_agents_get() {
+    let env = TestEnv::new("stream-converge");
+    let s = Streamer::spawn(&env, &["status", "--format", "json", "--stream"]);
 
-    // On acquiring the lock the daemon writes once immediately, even with
-    // an empty (freshly created) state dir. No Hyprland in this env, so the
-    // compositor section is null (degraded mode).
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["sessions"] == json!([])),
-        "initial empty .widget.json",
-    );
-    let raw = fs::read(env.state_dir().join(".widget.json")).unwrap();
-    assert_eq!(
-        raw, b"{\"compositor\":null,\"sessions\":[]}\n",
-        "exactly the object schema + trailing newline"
-    );
+    // First emission is immediate, even with a freshly created state dir.
+    // No Hyprland in this env: the compositor sections are null (NOT [] —
+    // a consumer keeps its last state), prefs/agents honestly empty.
+    let first = s.next("initial world");
+    assert_eq!(first["displays"], Value::Null);
+    assert_eq!(first["workspaces"], Value::Null);
+    assert_eq!(first["prefs"], json!([]));
+    assert_eq!(first["agents"], json!([]));
 
-    // A session file appearing (what a hook write looks like) must show up.
+    // A session file appearing (what a hook write looks like) must emit.
     env.write_state(
         "w1",
         r#"{"ws":5,"status":"thinking","kind":"claude","title":"T","pid":1}"#,
     );
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("w1")),
-        "session w1 in .widget.json",
-    );
+    let v = s.converge("session w1 in the stream", |v| {
+        v["agents"][0]["session"] == json!("w1")
+    });
+    assert_eq!(v["agents"][0]["status"], json!("thinking"));
 
-    // A marker touched in -> agents list converges; and the sessions section
-    // must equal a fresh `poll` (still the bare array — the documented
-    // divergence) over the same dir.
+    // A marker touched in -> subagents converge; and the agents section
+    // must equal a fresh `agents get` over the same dir.
     env.write_state("w1.a1", r#"{"type":"explore","description":"d"}"#);
-    wait_for(
-        || {
-            widget_json(&env).is_some_and(|v| {
-                v["sessions"][0]["agents"]
-                    .as_array()
-                    .is_some_and(|a| a.len() == 1)
-            })
-        },
-        "marker w1.a1 in .widget.json",
-    );
-    assert_eq!(widget_json(&env).unwrap()["sessions"], env.poll());
+    let v = s.converge("marker w1.a1 in the stream", |v| {
+        v["agents"][0]["subagents"]
+            .as_array()
+            .is_some_and(|a| a.len() == 1)
+    });
+    assert_eq!(v["agents"], env.agents_get(&[]));
 
-    // Marker removed -> agents empty; session removed -> back to [].
+    // Marker removed -> subagents empty; session removed -> back to [].
     fs::remove_file(env.state_dir().join("w1.a1")).unwrap();
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["sessions"][0]["agents"] == json!([])),
-        "marker removal reflected",
-    );
+    s.converge("marker removal reflected", |v| {
+        v["agents"][0]["subagents"] == json!([])
+    });
     fs::remove_file(env.state_dir().join("w1")).unwrap();
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["sessions"] == json!([])),
-        "session removal reflected",
-    );
+    s.converge("session removal reflected", |v| v["agents"] == json!([]));
 }
 
 #[test]
-fn watch_ignores_dotfiles_and_unchanged_output() {
-    let env = TestEnv::new("watch-dotfiles");
-    let _w = Watcher::spawn(&env);
-    wait_for(|| widget_json(&env).is_some(), "initial .widget.json");
+fn stream_emits_nothing_for_dotfiles_or_noise() {
+    let env = TestEnv::new("stream-dotfiles");
+    let s = Streamer::spawn(&env, &["status", "--format", "json", "--stream"]);
+    s.next("initial world");
 
-    // Plant a sentinel mtime on the output, then churn only names the
-    // filter must ignore. A rewrite would clobber the sentinel, so a
-    // surviving sentinel proves no rewrite happened (the one spot a bounded
-    // sleep is unavoidable — we're asserting an absence).
-    let past = SystemTime::now() - Duration::from_secs(1000);
-    env.set_mtime(".widget.json", past);
+    // Churn only names the trigger filter must ignore: no emission may
+    // arrive (dedupe would also stop a re-evaluated identical world, but
+    // the filter stops the wake-up itself).
     env.write_state(".scratch.tmp", "{}");
     env.write_state("debug.log", "=== noise");
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(
-        fs::metadata(env.state_dir().join(".widget.json"))
-            .unwrap()
-            .modified()
-            .unwrap(),
-        past,
-        "dotfile/debug.log events must not rewrite the output"
-    );
+    s.expect_silence(300, "dotfile/debug.log churn");
 }
 
 #[test]
-fn watch_failover_between_two_instances() {
-    let env = TestEnv::new("watch-failover");
-    let mut a = Watcher::spawn(&env);
-    // A wins the lock (proven by the file appearing) ...
-    wait_for(|| widget_json(&env).is_some(), "winner's first write");
-    // ... so B can only block in flock as the standby.
-    let _b = Watcher::spawn(&env);
-
+fn two_streamers_serve_two_subscribers() {
+    // No election gates the OUTPUT anymore (that died with .widget.json):
+    // every subscriber gets the full stream. (The flock election gates only
+    // the preference-apply dispatch, which this env never triggers.)
+    let env = TestEnv::new("stream-two");
+    let a = Streamer::spawn(&env, &["status", "--format", "json", "--stream"]);
+    let b = Streamer::spawn(&env, &["status", "--format", "json", "--stream"]);
+    a.next("first subscriber's initial world");
+    b.next("second subscriber's initial world");
     env.write_state(
-        "f1",
+        "t1",
         r#"{"ws":1,"status":"waiting","kind":"claude","title":"","pid":1}"#,
     );
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("f1")),
-        "winner tracking state",
-    );
-
-    // Kill the winner; the standby must acquire the lock and take over —
-    // only B is alive to observe this write.
-    a.kill();
-    env.write_state(
-        "f2",
-        r#"{"ws":2,"status":"tooling","kind":"claude","title":"","pid":1}"#,
-    );
-    wait_for(
-        || {
-            widget_json(&env).is_some_and(|v| {
-                v["sessions"]
-                    .as_array()
-                    .is_some_and(|arr| arr.iter().any(|s| s["sid"] == json!("f2")))
-            })
-        },
-        "survivor taking over the file",
-    );
+    for (name, s) in [("a", &a), ("b", &b)] {
+        s.converge(&format!("subscriber {name} seeing t1"), |v| {
+            v["agents"][0]["session"] == json!("t1")
+        });
+    }
 }
 
 #[test]
-fn watch_migrates_legacy_state_dir_once() {
-    let env = TestEnv::new("watch-migrate");
-    // Fabricate the pre-rename dir with a live session + marker, plus files
-    // the migration must leave behind (dotfiles, debug.log).
-    let old = env.run.join("claude-ws");
-    fs::create_dir_all(&old).unwrap();
-    fs::write(
-        old.join("m1"),
-        r#"{"ws":4,"status":"waiting","kind":"claude","title":"","pid":1}"#,
-    )
-    .unwrap();
-    fs::write(old.join("m1.a1"), r#"{"type":"explore","description":"d"}"#).unwrap();
-    fs::write(old.join(".widget.json"), "[]\n").unwrap();
-    fs::write(old.join("debug.log"), "=== noise").unwrap();
-
-    let _w = Watcher::spawn(&env);
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("m1")),
-        "migrated session in .widget.json",
+fn agents_get_stream_shares_the_engine() {
+    let env = TestEnv::new("stream-agents");
+    let s = Streamer::spawn(&env, &["agents", "get", "--format", "json", "--stream"]);
+    assert_eq!(s.next("initial agents"), json!([]));
+    env.write_state(
+        "g1",
+        r#"{"ws":2,"status":"tooling","kind":"codex","title":"","pid":1}"#,
     );
-    let sd = env.state_dir();
-    assert!(sd.join("m1").exists() && sd.join("m1.a1").exists());
-    assert!(!old.join("m1").exists() && !old.join("m1.a1").exists());
-    // Non-protocol files stay put; nothing is deleted.
-    assert!(old.join(".widget.json").exists());
-    assert!(old.join("debug.log").exists());
-
-    // One-time: once the new dir has protocol files, a later start must not
-    // pull stale legacy files back in.
-    fs::write(
-        old.join("m2"),
-        r#"{"ws":9,"status":"waiting","kind":"claude","title":"","pid":1}"#,
-    )
-    .unwrap();
-    drop(_w);
-    // Deleting the output first makes the successor's lock acquisition
-    // observable: its initial recompute rewrites the file, and the migration
-    // check runs before that write — so the reappearance proves the check ran.
-    fs::remove_file(sd.join(".widget.json")).unwrap();
-    let _w2 = Watcher::spawn(&env);
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["sessions"][0]["sid"] == json!("m1")),
-        "successor writing the new dir",
-    );
-    assert!(old.join("m2").exists(), "second start must not migrate");
-    assert!(!sd.join("m2").exists());
+    let v = s.converge("g1 in the agents stream", |v| {
+        v[0]["session"] == json!("g1")
+    });
+    assert_eq!(v[0]["kind"], json!("codex"));
 }
 
-// ---- watch: compositor events (fake socket2) --------------------------------
+// ---- --stream: compositor events (fake socket2) ------------------------------
 // A fake Hyprland instance dir under <run>/hypr/<name>/ with BOTH sockets:
 // `.socket.sock` answers `j/workspaces` / `j/monitors` from mutable canned
 // JSON (one request per connection, like the real wire), `.socket2.sock`
-// accepts the watch daemon and lets the test push `EVENT>>DATA` lines.
+// accepts the streaming engine and lets the test push `EVENT>>DATA` lines.
 
 struct FakeHypr {
     ws_json: std::sync::Arc<std::sync::Mutex<String>>,
@@ -842,7 +875,7 @@ impl FakeHypr {
         *self.mon_json.lock().unwrap() = monitors.to_string();
     }
 
-    /// The watch daemon's socket2 connection (bounded, so a daemon that
+    /// The engine's socket2 connection (bounded, so a subscriber that
     /// never connects fails the test instead of hanging it).
     fn accept_event_client(&self) -> std::os::unix::net::UnixStream {
         self.events.set_nonblocking(true).unwrap();
@@ -856,7 +889,7 @@ impl FakeHypr {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     assert!(
                         std::time::Instant::now() < deadline,
-                        "watch never connected to .socket2.sock"
+                        "the stream never connected to .socket2.sock"
                     );
                     std::thread::sleep(Duration::from_millis(10));
                 }
@@ -902,100 +935,85 @@ fn fake_state_b() -> (Value, Value) {
 }
 
 #[test]
-fn watch_socket2_event_refreshes_compositor_section() {
-    let env = TestEnv::new("watch-socket2");
+fn stream_socket2_event_reemits_the_world() {
+    let env = TestEnv::new("stream-socket2");
     let fake = FakeHypr::start(&env);
     let (ws_a, mon_a) = fake_state_a();
     fake.set_state(&ws_a, &mon_a);
-    let _w = Watcher::spawn(&env);
+    let s = Streamer::spawn(&env, &["status", "--format", "json", "--stream"]);
     let mut conn = fake.accept_event_client();
 
-    // Initial write already carries the compositor section, PROJECTED to
-    // the schema (special:* workspaces excluded, extra fields dropped,
-    // activeWs/specialShowing derived).
-    let comp_a = json!({
-        "workspaces": [{"id": 7, "name": "seven", "monitor": "DP-1", "windows": 2}],
-        "monitors": [{"name": "DP-1", "x": 0, "y": 0, "focused": true,
-                      "activeWs": 7, "specialShowing": false}],
-    });
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["compositor"] == comp_a),
-        "initial compositor section",
+    // The first emission already carries the world PROJECTED to the schema:
+    // special:* excluded, the battlespace join applied, extra fields gone.
+    let first = s.next("initial world with compositor");
+    assert_eq!(
+        first["displays"],
+        json!([{"id": 1, "name": "DP-1", "x": 0, "y": 0, "focused": true,
+                "activeWs": 7, "specialShowing": false}])
+    );
+    assert_eq!(
+        first["workspaces"],
+        json!([{"ws": 7, "bs": 1, "name": "seven", "display": "DP-1",
+                "windows": 2, "active": true, "pref": null}])
     );
 
-    // Serve fresh state, then push a relevant event: the recompute must
-    // re-query and land state B — no widget/timer involvement anywhere.
+    // Serve fresh state, then push a relevant event: the engine must
+    // re-query and emit state B — no subscriber/timer involvement anywhere.
     let (ws_b, mon_b) = fake_state_b();
     fake.set_state(&ws_b, &mon_b);
     conn.write_all(b"moveworkspacev2>>7,seven,DP-2\n").unwrap();
-    let comp_b = json!({
-        "workspaces": [{"id": 7, "name": "seven", "monitor": "DP-2", "windows": 2}],
-        "monitors": [{"name": "DP-1", "x": 0, "y": 0, "focused": false,
-                      "activeWs": 1, "specialShowing": true},
-                     {"name": "DP-2", "x": 2304, "y": 0, "focused": true,
-                      "activeWs": 7, "specialShowing": false}],
+    let v = s.converge("moveworkspace event re-emitting the world", |v| {
+        v["workspaces"][0]["display"] == json!("DP-2")
     });
-    wait_for(
-        || widget_json(&env).is_some_and(|v| v["compositor"] == comp_b),
-        "moveworkspace event refreshing the compositor section",
+    assert_eq!(
+        v["displays"],
+        json!([{"id": 1, "name": "DP-1", "x": 0, "y": 0, "focused": false,
+                "activeWs": 1, "specialShowing": true},
+               {"id": 2, "name": "DP-2", "x": 2304, "y": 0, "focused": true,
+                "activeWs": 7, "specialShowing": false}])
     );
-    // Sessions ride along untouched (empty here).
-    assert_eq!(widget_json(&env).unwrap()["sessions"], json!([]));
-}
+    assert_eq!(v["agents"], json!([]));
 
-#[test]
-fn watch_socket2_irrelevant_events_do_not_write() {
-    let env = TestEnv::new("watch-socket2-noise");
-    let fake = FakeHypr::start(&env);
-    let (ws_a, mon_a) = fake_state_a();
-    fake.set_state(&ws_a, &mon_a);
-    let _w = Watcher::spawn(&env);
-    let mut conn = fake.accept_event_client();
-    wait_for(|| widget_json(&env).is_some(), "initial .widget.json");
-
-    // Sentinel mtime, then only IGNORED events: no rewrite may happen even
-    // though the lines arrive on the socket (same absence-proof pattern as
-    // the dotfile test — a bounded sleep is unavoidable).
-    let past = SystemTime::now() - Duration::from_secs(1000);
-    env.set_mtime(".widget.json", past);
+    // Only noise on the socket -> no emission (relevance filter, then
+    // dedupe as the second line of defense).
     conn.write_all(
         b"windowtitle>>555abc\nwindowtitlev2>>555abc,New Title\nactivewindow>>kitty,fish\n",
     )
     .unwrap();
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(
-        fs::metadata(env.state_dir().join(".widget.json"))
-            .unwrap()
-            .modified()
-            .unwrap(),
-        past,
-        "irrelevant socket2 events must not rewrite the output"
-    );
+    s.expect_silence(300, "irrelevant socket2 events");
 }
 
 #[test]
-fn watch_without_socket2_degrades_to_sessions_only() {
-    // No fake instance dir at all: socket2 can't connect (degraded mode)
-    // and the compositor queries fail (stub hyprctl rejects them) -> the
-    // agent-state side must keep working with compositor: null.
-    let env = TestEnv::new("watch-degraded");
-    let _w = Watcher::spawn(&env);
-    wait_for(
-        || widget_json(&env) == Some(json!({"sessions": [], "compositor": null})),
-        "degraded initial write",
+fn stream_reemits_on_map_file_edit() {
+    // The engine's SECOND inotify watch: a `ws map set` from another
+    // process lands in the persistent dir and must re-emit the world with
+    // the new battlespace order — the widget's pill-drag path end to end.
+    let env = TestEnv::new("stream-map-edit");
+    let fake = FakeHypr::start(&env);
+    fake.set_state(
+        &json!([
+            {"id": 7, "name": "seven", "monitor": "DP-1", "windows": 1},
+            {"id": 9, "name": "nine", "monitor": "DP-1", "windows": 0},
+        ]),
+        &json!([
+            {"name": "DP-1", "x": 0, "y": 0, "focused": true,
+             "activeWorkspace": {"id": 7, "name": "seven"},
+             "specialWorkspace": {"id": 0, "name": ""}},
+        ]),
     );
-    env.write_state(
-        "d1",
-        r#"{"ws":3,"status":"waiting","kind":"claude","title":"","pid":1}"#,
-    );
-    wait_for(
-        || {
-            widget_json(&env).is_some_and(|v| {
-                v["sessions"][0]["sid"] == json!("d1") && v["compositor"].is_null()
-            })
-        },
-        "sessions flowing in degraded mode",
-    );
+    let s = Streamer::spawn(&env, &["status", "--format", "json", "--stream"]);
+    let first = s.next("initial world");
+    assert_eq!(first["workspaces"][0]["ws"], json!(7), "identity order");
+
+    let code = env
+        .cmd()
+        .args(["ws", "map", "set", "9", "7"])
+        .status()
+        .unwrap();
+    assert!(code.success());
+    s.converge("map edit re-emitting the world", |v| {
+        v["workspaces"][0]["ws"] == json!(9) && v["workspaces"][1]["ws"] == json!(7)
+    });
 }
 
 #[test]
@@ -1006,9 +1024,9 @@ fn tool_verb_heals_empty_marker_fields_from_meta() {
     let env = TestEnv::new("marker-heal");
     let tp = env.make_transcript();
 
-    // agent-start with a bare payload and NO meta.json yet -> empty fields
+    // subagent-start with a bare payload and NO meta.json yet -> empty fields
     let start = json!({"session_id": "s9", "agent_id": "h1", "transcript_path": tp}).to_string();
-    assert_eq!(env.hook("agent-start", &start), 0);
+    assert_eq!(env.hook("subagent-start", &start), 0);
     assert_eq!(
         env.read_json("s9.h1"),
         json!({"type": "", "description": ""})

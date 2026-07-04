@@ -16,7 +16,7 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 use crate::ipc;
-use crate::ws::lua_escape;
+use crate::ws::{self, DisplaySel, lua_escape};
 
 // ---- pure logic (proto.rs-style: deterministic, unit-tested) ---------------
 
@@ -94,9 +94,12 @@ pub fn is_internal(name: &str) -> bool {
 }
 
 /// The aligned status table (header + one row per output; description last
-/// so its 48-char truncation caps the line).
-pub fn format_table(outs: &[Output]) -> String {
-    const HDR: [&str; 7] = [
+/// so its 48-char truncation caps the line). `ids` maps output name ->
+/// display-id; a disabled output has no number (ids only count what's
+/// plugged in and enabled) and shows `-`.
+pub fn format_table(outs: &[Output], ids: &[(String, usize)]) -> String {
+    const HDR: [&str; 8] = [
+        "ID",
         "OUTPUT",
         "ENABLED",
         "DPMS",
@@ -105,10 +108,14 @@ pub fn format_table(outs: &[Output]) -> String {
         "POSITION",
         "DESCRIPTION",
     ];
-    let rows: Vec<[String; 7]> = outs
+    let rows: Vec<[String; 8]> = outs
         .iter()
         .map(|o| {
             [
+                ids.iter()
+                    .find(|(n, _)| *n == o.name)
+                    .map(|(_, i)| i.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
                 o.name.clone(),
                 (if o.enabled { "yes" } else { "no" }).to_string(),
                 (if o.dpms { "on" } else { "off" }).to_string(),
@@ -119,20 +126,20 @@ pub fn format_table(outs: &[Output]) -> String {
             ]
         })
         .collect();
-    let mut widths: [usize; 7] = HDR.map(str::len);
+    let mut widths: [usize; 8] = HDR.map(str::len);
     for r in &rows {
         for (w, cell) in widths.iter_mut().zip(r.iter()) {
             *w = (*w).max(cell.chars().count());
         }
     }
-    let render = |cells: [&str; 7]| -> String {
+    let render = |cells: [&str; 8]| -> String {
         let mut line = String::new();
         for (i, c) in cells.iter().enumerate() {
             if i > 0 {
                 line.push_str("  ");
             }
             line.push_str(c);
-            if i < 6 {
+            if i < 7 {
                 // last column unpadded
                 line.extend(std::iter::repeat_n(' ', widths[i] - c.chars().count()));
             }
@@ -142,7 +149,9 @@ pub fn format_table(outs: &[Output]) -> String {
     let mut out = render(HDR);
     for r in &rows {
         out.push('\n');
-        out.push_str(&render([&r[0], &r[1], &r[2], &r[3], &r[4], &r[5], &r[6]]));
+        out.push_str(&render([
+            &r[0], &r[1], &r[2], &r[3], &r[4], &r[5], &r[6], &r[7],
+        ]));
     }
     out
 }
@@ -168,7 +177,7 @@ pub fn warnings(outs: &[Output], lid_closed: Option<bool>) -> Vec<String> {
     }
     for o in enabled.iter().filter(|o| !o.dpms) {
         w.push(format!(
-            "WARNING: {} is enabled but dpms is off — run: bsctl display on {} (or displays-on.sh)",
+            "WARNING: {} is enabled but dpms is off — run: bsctl display set dpms --display-name {} --on (or displays-on.sh)",
             o.name, o.name
         ));
     }
@@ -253,31 +262,122 @@ fn config_home() -> PathBuf {
 
 // ---- commands ---------------------------------------------------------------
 
-/// `bsctl display status [--json]` — the report. Warnings never change the
-/// exit status; only failing to query the compositor at all exits non-zero.
-pub fn status(json_out: bool) -> i32 {
+/// The display-id numbering over a `monitors all` array: enabled outputs
+/// by (x, y), name -> 1-based id (the same numbering `ws` uses — one remap,
+/// two faces).
+fn id_map(mons: &Value) -> Vec<(String, usize)> {
+    ws::displays_from(mons)
+        .into_iter()
+        .enumerate()
+        .map(|(i, d)| (d.name, i + 1))
+        .collect()
+}
+
+/// Resolve a display selector against the FULL output set (`monitors all`):
+/// ids number the enabled outputs (the shared remap), names may also hit a
+/// DISABLED output — `set dpms` wants that so its is-disabled refusal (with
+/// remedy) can fire instead of a know-nothing "unknown output".
+fn resolve_output<'o>(
+    verb: &str,
+    sel: &DisplaySel,
+    outs: &'o [Output],
+    ids: &[(String, usize)],
+) -> Result<&'o Output, i32> {
+    let name = match sel {
+        DisplaySel::Name(n) => n.clone(),
+        DisplaySel::Id(n) => match ids.iter().find(|(_, i)| i == n) {
+            Some((name, _)) => name.clone(),
+            None => {
+                let list = ids
+                    .iter()
+                    .map(|(name, i)| format!("{i} = {name}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                eprintln!("bsctl display {verb}: no display {n} (displays: {list})");
+                return Err(1);
+            }
+        },
+    };
+    outs.iter().find(|o| o.name == name).ok_or_else(|| {
+        let names: Vec<&str> = outs.iter().map(|o| o.name.as_str()).collect();
+        eprintln!(
+            "bsctl display {verb}: unknown output {name} (valid: {})",
+            names.join(", ")
+        );
+        1
+    })
+}
+
+/// One `display get --format json` result as its JSON line — the raw
+/// structured form: the unmodified monitor objects (narrowed by the
+/// selector) plus the derived lid + warnings. Shared by the one-shot json
+/// path and its `--stream` form.
+pub fn get_json(sel: Option<&DisplaySel>) -> Result<String, i32> {
+    let mons = monitors_all()?;
+    let outs = outputs_from(&mons);
+    let ids = id_map(&mons);
+    let only = match sel {
+        Some(sel) => Some(resolve_output("get", sel, &outs, &ids)?.name.clone()),
+        None => None,
+    };
+    let lid = lid_closed();
+    let warns = warnings(&outs, lid);
+    let lid_v = match lid {
+        Some(true) => json!("closed"),
+        Some(false) => json!("open"),
+        None => Value::Null,
+    };
+    let mons_v = match &only {
+        None => mons,
+        Some(name) => Value::Array(
+            mons.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter(|m| m.get("name").and_then(Value::as_str) == Some(name))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default(),
+        ),
+    };
+    Ok(json!({"lid": lid_v, "monitors": mons_v, "warnings": warns}).to_string())
+}
+
+/// `bsctl display get [selector] [--format json]` — the report. Warnings
+/// never change the exit status; only failing to query the compositor at
+/// all (or an unknown selector) exits non-zero. A selector narrows the
+/// TABLE (and the json's monitors) to one output; the lid line and the
+/// warnings stay — they are the report's value and cost nothing.
+pub fn get(sel: Option<&DisplaySel>, json_out: bool) -> i32 {
+    if json_out {
+        return match get_json(sel) {
+            Ok(s) => {
+                println!("{s}");
+                0
+            }
+            Err(c) => c,
+        };
+    }
     let mons = match monitors_all() {
         Ok(v) => v,
         Err(c) => return c,
     };
     let outs = outputs_from(&mons);
+    let ids = id_map(&mons);
+    let only = match sel {
+        Some(sel) => match resolve_output("get", sel, &outs, &ids) {
+            Ok(o) => Some(o.name.clone()),
+            Err(c) => return c,
+        },
+        None => None,
+    };
     let lid = lid_closed();
     let warns = warnings(&outs, lid);
-    if json_out {
-        // Raw structured form for future tooling: the unmodified monitor
-        // objects plus the derived lid + warnings.
-        let lid_v = match lid {
-            Some(true) => json!("closed"),
-            Some(false) => json!("open"),
-            None => Value::Null,
-        };
-        println!(
-            "{}",
-            json!({"lid": lid_v, "monitors": mons, "warnings": warns})
-        );
-        return 0;
-    }
-    println!("{}", format_table(&outs));
+    let shown: Vec<Output> = match &only {
+        None => outs,
+        Some(name) => outs.into_iter().filter(|o| o.name == *name).collect(),
+    };
+    println!("{}", format_table(&shown, &ids));
     if let Some(closed) = lid {
         println!("lid: {}", if closed { "closed" } else { "open" });
     }
@@ -287,23 +387,22 @@ pub fn status(json_out: bool) -> i32 {
     0
 }
 
-/// `bsctl display on|off <output>` — safe dpms targeting per lib.rs: read
-/// the output's current dpmsStatus from `j/monitors all`, toggle (table
-/// form) only if it differs. Idempotent by construction.
-pub fn set_dpms(name: &str, want_on: bool) -> i32 {
+/// `bsctl display set dpms <selector> (--on|--off)` — safe dpms targeting
+/// per lib.rs: read the output's current dpmsStatus from `j/monitors all`,
+/// toggle (table form) only if it differs. Idempotent by construction.
+pub fn set_dpms(sel: &DisplaySel, want_on: bool) -> i32 {
     let mons = match monitors_all() {
         Ok(v) => v,
         Err(c) => return c,
     };
     let outs = outputs_from(&mons);
-    let Some(o) = outs.iter().find(|o| o.name == name) else {
-        let names: Vec<&str> = outs.iter().map(|o| o.name.as_str()).collect();
-        eprintln!(
-            "bsctl display: unknown output {name} (valid: {})",
-            names.join(", ")
-        );
-        return 1;
+    let ids = id_map(&mons);
+    let o = match resolve_output("set dpms", sel, &outs, &ids) {
+        Ok(o) => o,
+        Err(c) => return c,
     };
+    let name = o.name.clone();
+    let name = name.as_str();
     let want = if want_on { "on" } else { "off" };
     match dpms_decision(o.enabled, o.dpms, want_on) {
         Dpms::Disabled => {
@@ -508,16 +607,18 @@ mod tests {
     #[test]
     fn table_is_aligned_and_truncated() {
         let outs = outputs_from(&mons_fixture());
-        let t = format_table(&outs);
+        // ids number the ENABLED outputs only; a disabled panel shows "-"
+        let ids = vec![("DP-1".to_string(), 1)];
+        let t = format_table(&outs, &ids);
         assert_eq!(
             t,
-            "OUTPUT  ENABLED  DPMS  MODE           SCALE  POSITION  DESCRIPTION\n\
-             eDP-1   no       on    2880x1800@120  1.25   0x0       LG Display 0x07C6\n\
-             DP-1    yes      on    3440x1440@100  1      0x0       HP Inc. OMEN 34c CNC32023FL"
+            "ID  OUTPUT  ENABLED  DPMS  MODE           SCALE  POSITION  DESCRIPTION\n\
+             -   eDP-1   no       on    2880x1800@120  1.25   0x0       LG Display 0x07C6\n\
+             1   DP-1    yes      on    3440x1440@100  1      0x0       HP Inc. OMEN 34c CNC32023FL"
         );
         // a long description is capped at 48 chars + ellipsis
         let long = outputs_from(&json!([{"name": "DP-9", "description": "x".repeat(80)}]));
-        let row = format_table(&long).lines().last().unwrap().to_string();
+        let row = format_table(&long, &[]).lines().last().unwrap().to_string();
         assert!(row.ends_with(&format!("{}…", "x".repeat(47))));
     }
 
@@ -556,7 +657,10 @@ mod tests {
         assert_eq!(w.len(), 2, "{w:?}");
         assert!(w[0].contains("mixed"), "{w:?}");
         assert!(w[1].contains("DP-2 is enabled but dpms is off"), "{w:?}");
-        assert!(w[1].contains("bsctl display on DP-2"), "{w:?}");
+        assert!(
+            w[1].contains("bsctl display set dpms --display-name DP-2 --on"),
+            "{w:?}"
+        );
         // all enabled outputs off: not mixed, one warning per output
         let outs = outputs_from(&json!([
             {"name": "DP-1", "disabled": false, "dpmsStatus": false},

@@ -4,7 +4,8 @@
 --   SHIFT       — "…with the window" suffix (e.g. send-and-follow).
 --   ALT / CTRL  — almost nothing; reserved for app-internal + rare exceptions.
 -- The number row is the whole story for WORKSPACES:
---   SUPER+N go there · HYPER+N throw it there · HYPER+SHIFT+N throw it & go.
+--   SUPER+N go there · HYPER+N throw the window there & follow ·
+--   HYPER+SHIFT+N throw it & stay.
 -- The F-row is the same story one level up, for DISPLAYS:
 --   SUPER+Fn look at display n · HYPER+Fn take this workspace there & follow
 --   · HYPER+SHIFT+Fn send it & stay.
@@ -17,9 +18,10 @@ local mainMod  = "SUPER"
 local hyperMod = "MOD3" -- caps:hyper makes Caps fire as MOD3 (verified live); see input.lua
 local noctCall = "qs -c noctalia-shell ipc call "
 local launchPrefix = "uwsm app -- " -- if you are not using UWSM, make this empty (e.g. "")
--- Workspace navigation by DISPLAY POSITION rather than raw Hyprland id: bsctl ws
--- maps position <-> real id through a persisted order the bar plugin can reorder.
--- So "workspace N" below means the Nth pill, not necessarily Hyprland's ws N.
+-- Workspace navigation by BATTLESPACE id (bs-id) rather than raw Hyprland
+-- ws-id: bsctl maps bs-id <-> ws-id through a persisted map the bar plugin
+-- can reorder. So "workspace N" below means the Nth pill (bs-id N), not
+-- necessarily Hyprland's ws N.
 local ws = "$HOME/.local/bin/bsctl ws"
 
 -- Universal copy/paste/cut: send Ctrl+Insert / Shift+Insert, honored by GUI apps
@@ -36,10 +38,10 @@ end
 
 -- 1. Navigate · Super
 
--- Focus workspace by display position (one loop so they list contiguously in
+-- Focus workspace by battlespace id (one loop so they list contiguously in
 -- the keybind cheatsheet).
 for i = 1, 10 do
-    hl.bind(mainMod .. " + " .. (i % 10), hl.dsp.exec_cmd(ws .. " goto " .. i), { description = "Focus workspace " .. i })
+    hl.bind(mainMod .. " + " .. (i % 10), hl.dsp.exec_cmd(ws .. " focus --bs-id " .. i), { description = "Focus workspace " .. i })
 end
 
 -- Focus window within the current workspace
@@ -88,41 +90,42 @@ hl.bind(hyperMod .. " + Down",  hl.dsp.window.move({ direction = "d" }), { descr
 
 -- 4. Workspace · Hyper
 
--- Throw the active window to a workspace by display position.
+-- Throw the active window to a workspace by battlespace id.
 -- Plain = send & follow; SHIFT = send & stay. (One loop per group so each lists
 -- contiguously in the cheatsheet.)
 for i = 1, 10 do
-    hl.bind(hyperMod .. " + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i .. " --follow"), { description = "Send window to workspace " .. i .. " & follow" })
+    hl.bind(hyperMod .. " + " .. (i % 10), hl.dsp.exec_cmd(ws .. " send window --bs-id " .. i .. " --focus"), { description = "Send window to workspace " .. i .. " & follow" })
 end
 for i = 1, 10 do
-    hl.bind(hyperMod .. " + SHIFT + " .. (i % 10), hl.dsp.exec_cmd(ws .. " movewindow " .. i), { description = "Send window to workspace " .. i })
+    hl.bind(hyperMod .. " + SHIFT + " .. (i % 10), hl.dsp.exec_cmd(ws .. " send window --bs-id " .. i), { description = "Send window to workspace " .. i })
 end
 
 hl.bind(hyperMod .. " + S", hl.dsp.window.move({ workspace = "special" }),                  { description = "Send window to scratchpad" })
 hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces rename"), { description = "Rename workspace" })
--- Clear any manual pill reordering: positions map back to 1,2,3,... (ascending id).
-hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " reset"), { description = "Reset workspace order to default" })
+-- Clear any manual pill reordering: the battlespace map falls back to
+-- identity (bs-id N = the Nth live ws-id, ascending).
+hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " map reset"), { description = "Reset workspace order to default" })
 
 -- 5. Displays
 
--- Display n = the nth enabled output LEFT TO RIGHT (bsctl ws numbers by
--- x-position, not connector name), mirroring the number-row verb grammar.
+-- Display id n = the nth enabled output LEFT TO RIGHT (bsctl numbers displays
+-- by x-position, not connector name), mirroring the number-row verb grammar.
 for i = 1, 3 do
-    hl.bind(mainMod .. " + F" .. i, hl.dsp.exec_cmd(ws .. " display " .. i), { description = "Focus display " .. i })
+    hl.bind(mainMod .. " + F" .. i, hl.dsp.exec_cmd(ws .. " focus --display-id " .. i), { description = "Focus display " .. i })
 end
 for i = 1, 3 do
-    hl.bind(hyperMod .. " + F" .. i, hl.dsp.exec_cmd(ws .. " movetodisplay " .. i .. " --follow"), { description = "Send workspace to display " .. i .. " & follow" })
+    hl.bind(hyperMod .. " + F" .. i, hl.dsp.exec_cmd(ws .. " send workspace --display-id " .. i .. " --focus"), { description = "Send workspace to display " .. i .. " & follow" })
 end
 for i = 1, 3 do
-    hl.bind(hyperMod .. " + SHIFT + F" .. i, hl.dsp.exec_cmd(ws .. " movetodisplay " .. i), { description = "Send workspace to display " .. i })
+    hl.bind(hyperMod .. " + SHIFT + F" .. i, hl.dsp.exec_cmd(ws .. " send workspace --display-id " .. i), { description = "Send workspace to display " .. i })
 end
 
 -- 6. System · Hyper
 
 hl.bind(hyperMod .. " + Print",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit toggle"),       { description = "Screenshot toolkit" })
 hl.bind(hyperMod .. " + L",         hl.dsp.exec_cmd(noctCall .. "sessionMenu toggle"),                 { description = "Session menu (lock/logout/reboot)" })
-hl.bind(hyperMod .. " + comma",     hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display scale down"), { description = "Zoom display out (scale down)" })
-hl.bind(hyperMod .. " + period",    hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display scale up"),   { description = "Zoom display in (scale up)" })
+hl.bind(hyperMod .. " + comma",     hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display set scale --down"), { description = "Zoom display out (scale down)" })
+hl.bind(hyperMod .. " + period",    hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display set scale --up"),   { description = "Zoom display in (scale up)" })
 hl.bind(hyperMod .. " + Backspace", hl.dsp.exec_cmd("qs -c noctalia-shell kill; sleep 1; qs -c noctalia-shell"), { description = "Restart Noctalia shell" })
 
 -- 7. Edit · Super

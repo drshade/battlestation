@@ -1,8 +1,10 @@
-//! `bsctl hook --kind <harness> <verb>` — the hook-event endpoint,
-//! mirroring claude-ws-status.sh verb-for-verb. A hook must NEVER block or
-//! error loudly, so every failure path is silent and the exit code is always
-//! 0: bad JSON on stdin is an empty payload, a missing transcript is an
-//! empty title, hyprctl being absent (or no owning window) means "write
+//! `bsctl agents` — the agent-session surface. `agents set` is the
+//! hook-event endpoint the harness configs call (hook-event JSON on stdin),
+//! mirroring claude-ws-status.sh verb-for-verb; `agents get` is the
+//! readable query over the same state. A hook must NEVER block or error
+//! loudly, so every `set` failure path is silent and the exit code is
+//! always 0: bad JSON on stdin is an empty payload, a missing transcript is
+//! an empty title, hyprctl being absent (or no owning window) means "write
 //! nothing". `--kind` is mandatory — a kindless call is a silent no-op (an
 //! outdated caller must stop updating, not guess a harness).
 
@@ -11,40 +13,59 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
-use crate::{ipc, proto, sys};
+use crate::{ipc, proto, sessions, sys};
 
-/// Parse `[--kind <k>|--kind=<k>] [verb]` out of everything after `hook`.
-/// Parsed HERE, not by clap: a valueless `--kind` (a miswired hook command)
-/// must exit 0 silently like every other hook malformation, and a clap
-/// `--kind <k>` option errors loudly (exit 2 + stderr) when the value is
-/// missing — there is no clap configuration that keeps a required-value
-/// option silent. So clap hands the raw tokens through and the tolerant
-/// parse lives with the rest of the hook's tolerance. `--kind` is MANDATORY
-/// (no default): an absent/valueless/empty kind makes the whole call a
-/// silent no-op, so an outdated kindless caller simply stops updating —
-/// the visible symptom that says "rewire me" without ever breaking a hook.
-/// A valueless `--kind` also swallows any verb slot, same outcome.
-fn parse_args(args: &[String]) -> (String, Option<&str>) {
-    match args.first().map(String::as_str) {
-        Some("--kind") => (
-            args.get(1).cloned().unwrap_or_default(),
-            args.get(2).map(String::as_str),
-        ),
-        Some(a) if a.starts_with("--kind=") => (
-            a["--kind=".len()..].to_string(),
-            args.get(1).map(String::as_str),
-        ),
-        _ => (String::new(), args.first().map(String::as_str)),
+/// Tolerantly parse everything after `agents set`: `--kind <k>`/`--kind=<k>`,
+/// an optional `--session-id <s>`/`--session-id=<s>` override, and the first
+/// remaining token as the verb. Parsed HERE, not by clap: a valueless
+/// `--kind` (a miswired hook command) must exit 0 silently like every other
+/// hook malformation, and a clap `--kind <k>` option errors loudly (exit 2 +
+/// stderr) when the value is missing — there is no clap configuration that
+/// keeps a required-value option silent. So clap hands the raw tokens
+/// through and the tolerant parse lives with the rest of the endpoint's
+/// tolerance. `--kind` is MANDATORY (no default): an absent/valueless/empty
+/// kind makes the whole call a silent no-op, so an outdated kindless caller
+/// simply stops updating — the visible symptom that says "rewire me"
+/// without ever breaking a hook. A trailing valueless flag swallows only its
+/// own value slot; flag-shaped junk falls into the verb slot and dies as an
+/// unknown verb, silently.
+fn parse_args(args: &[String]) -> (String, String, Option<&str>) {
+    let mut kind = String::new();
+    let mut session = String::new();
+    let mut verb: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a == "--kind" {
+            kind = args.get(i + 1).cloned().unwrap_or_default();
+            i += 2;
+        } else if let Some(v) = a.strip_prefix("--kind=") {
+            kind = v.to_string();
+            i += 1;
+        } else if a == "--session-id" {
+            session = args.get(i + 1).cloned().unwrap_or_default();
+            i += 2;
+        } else if let Some(v) = a.strip_prefix("--session-id=") {
+            session = v.to_string();
+            i += 1;
+        } else {
+            if verb.is_none() {
+                verb = Some(a);
+            }
+            i += 1;
+        }
     }
+    (kind, session, verb)
 }
 
-/// Dispatch a hook call: `args` is everything after `hook` (the mandatory
-/// `--kind`, then the verb); `argv` is everything after the binary name and
-/// is only used for the optional debug log line.
-pub fn run(args: &[String], argv: &[String]) -> i32 {
-    let (kind, verb) = parse_args(args);
+/// Dispatch an `agents set` call: `args` is everything after `set` (the
+/// mandatory `--kind`, the verb, the optional `--session-id` override);
+/// `argv` is everything after the binary name and is only used for the
+/// optional debug log line.
+pub fn set(args: &[String], argv: &[String]) -> i32 {
+    let (kind, session, verb) = parse_args(args);
     let Some(verb) = verb.filter(|v| !v.is_empty()) else {
         return 0; // the reference exits before even creating the state dir
     };
@@ -61,10 +82,16 @@ pub fn run(args: &[String], argv: &[String]) -> i32 {
         debug_log(&dir, argv, &input);
     }
 
+    // The argv override outranks the payload's session key everywhere a
+    // session id is derived — the payload stays the normal source (harness
+    // hooks deliver ids inside the event JSON, not on argv).
+    let over = (!session.is_empty()).then_some(session.as_str());
     match verb {
-        "agent-start" => agent_start(&dir, &input),
-        "agent-stop" => agent_stop(&dir, &input),
-        "waiting" | "thinking" | "tooling" | "clear" => session_verb(&dir, verb, &input, &kind),
+        "subagent-start" => agent_start(&dir, &input, over),
+        "subagent-stop" => agent_stop(&dir, &input, over),
+        "waiting" | "thinking" | "tooling" | "clear" => {
+            session_verb(&dir, verb, &input, &kind, over)
+        }
         _ => {} // unknown verbs are ignored, exit 0
     }
     0
@@ -84,16 +111,18 @@ fn debug_log(dir: &Path, argv: &[String], input: &[u8]) {
     let _ = f.write_all(b"\n");
 }
 
-/// agent-start: write one subagent marker (fast path: no hyprctl). If the
-/// payload lacks description or agent_type, fall back to the subagent's
+/// subagent-start: write one subagent marker (fast path: no hyprctl). If
+/// the payload lacks description or agent_type, fall back to the subagent's
 /// meta.json next to the transcript.
-fn agent_start(dir: &Path, input: &[u8]) {
+fn agent_start(dir: &Path, input: &[u8], over: Option<&str>) {
     let d = proto::parse_payload(input);
     let aid = proto::field(&d, "agent_id");
     if aid.is_empty() {
         return;
     }
-    let sid = proto::session_id(&d);
+    let sid = over
+        .map(str::to_string)
+        .unwrap_or_else(|| proto::session_id(&d));
     let mut atype = proto::field(&d, "agent_type");
     let mut desc = proto::field(&d, "description");
     if desc.is_empty() || atype.is_empty() {
@@ -106,14 +135,16 @@ fn agent_start(dir: &Path, input: &[u8]) {
     );
 }
 
-/// agent-stop: remove that subagent marker.
-fn agent_stop(dir: &Path, input: &[u8]) {
+/// subagent-stop: remove that subagent marker.
+fn agent_stop(dir: &Path, input: &[u8], over: Option<&str>) {
     let d = proto::parse_payload(input);
     let aid = proto::field(&d, "agent_id");
     if aid.is_empty() {
         return;
     }
-    let sid = proto::session_id(&d);
+    let sid = over
+        .map(str::to_string)
+        .unwrap_or_else(|| proto::session_id(&d));
     let _ = fs::remove_file(dir.join(format!("{sid}.{aid}")));
 }
 
@@ -121,17 +152,19 @@ fn agent_stop(dir: &Path, input: &[u8]) {
 /// harness discriminator from the mandatory `--kind`; it lands in the
 /// session record only — markers carry no kind (sub-agents inherit their
 /// session's kind in the widget).
-fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str) {
+fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str, over: Option<&str>) {
     let d = proto::parse_payload(input);
     // No session key -> silent no-op. Falling back to a "default" session
     // file here would FABRICATE a session: its pid would be whatever claude
-    // process is our ancestor, so the poller could never sweep it while that
+    // process is our ancestor, so the scan could never sweep it while that
     // process lives (observed live 2026-07-02 — a payload-less test
     // invocation planted a phantom bot on the bar). The "default" fallback
     // survives only in the marker names of agent-start/agent-stop, where an
-    // orphan is swept by the next poll. The key is session_id, or agy's
+    // orphan is swept by the next scan. The key is session_id, or agy's
     // camelCase conversationId (proto::session_key).
-    let sid = proto::session_key(&d);
+    let sid = over
+        .map(str::to_string)
+        .unwrap_or_else(|| proto::session_key(&d));
     if sid.is_empty() {
         return;
     }
@@ -284,6 +317,68 @@ fn read_meta_fallback(d: &Value, sid: &str, aid: &str, desc: &mut String, atype:
     proto::apply_meta_fallback(&meta, desc, atype);
 }
 
+/// The scan records remapped to the published schema, filtered: the on-disk
+/// `sid`/`agents` spellings become `session`/`subagents`. Pure — `status`
+/// builds its agents section from the same rows, so the two surfaces can
+/// never drift.
+pub fn agent_rows(recs: Vec<Value>, kind: Option<&str>, session: Option<&str>) -> Vec<Value> {
+    recs.into_iter()
+        .filter(|r| kind.is_none_or(|k| proto::field(r, "kind") == k))
+        .filter(|r| session.is_none_or(|s| proto::field(r, "sid") == s))
+        .map(|r| {
+            json!({
+                "session": r.get("sid").cloned().unwrap_or(Value::Null),
+                "kind": r.get("kind").cloned().unwrap_or(Value::Null),
+                "status": r.get("status").cloned().unwrap_or(Value::Null),
+                "ws": r.get("ws").cloned().unwrap_or(Value::Null),
+                "title": r.get("title").cloned().unwrap_or(Value::Null),
+                "subagents": r.get("agents").cloned().unwrap_or_else(|| json!([])),
+            })
+        })
+        .collect()
+}
+
+/// One `agents get` result as its JSON line — the streaming form re-runs
+/// exactly this (an empty state dir is an honest `[]`, so it never fails).
+pub fn get_json(kind: Option<&str>, session: Option<&str>) -> String {
+    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    Value::Array(agent_rows(recs, kind, session)).to_string()
+}
+
+/// `agents get [--kind K] [--session-id S] [--format json]` — the readable
+/// query over the session state, sweeping exactly like the scan it wraps
+/// (dead pids, orphan/stale markers); text is one line per session.
+pub fn get(kind: Option<&str>, session: Option<&str>, json_out: bool) -> i32 {
+    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let rows = agent_rows(recs, kind, session);
+    if json_out {
+        println!("{}", Value::Array(rows));
+        return 0;
+    }
+    for r in rows {
+        let subs = r["subagents"].as_array().map_or(0, Vec::len);
+        let title = proto::field(&r, "title");
+        println!(
+            "{}  {}  {}  ws {}{}{}",
+            proto::field(&r, "session"),
+            proto::field(&r, "kind"),
+            proto::field(&r, "status"),
+            r.get("ws").and_then(Value::as_i64).unwrap_or(-1),
+            if title.is_empty() {
+                String::new()
+            } else {
+                format!("  \"{title}\"")
+            },
+            match subs {
+                0 => String::new(),
+                1 => "  (1 subagent)".to_string(),
+                n => format!("  ({n} subagents)"),
+            },
+        );
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,29 +389,52 @@ mod tests {
 
     #[test]
     fn arg_parse_is_tolerant() {
-        assert_eq!(parse_args(&s(&["waiting"])), ("".into(), Some("waiting")));
+        let p = |v: &[&str]| {
+            let a = s(v);
+            let (k, sid, verb) = parse_args(&a);
+            (k, sid, verb.map(str::to_string))
+        };
         assert_eq!(
-            parse_args(&s(&["--kind", "codex", "tooling"])),
-            ("codex".into(), Some("tooling"))
+            p(&["waiting"]),
+            ("".into(), "".into(), Some("waiting".to_string()))
         );
         assert_eq!(
-            parse_args(&s(&["--kind=codex", "tooling"])),
-            ("codex".into(), Some("tooling"))
+            p(&["--kind", "codex", "tooling"]),
+            ("codex".into(), "".into(), Some("tooling".to_string()))
+        );
+        assert_eq!(
+            p(&["--kind=codex", "tooling"]),
+            ("codex".into(), "".into(), Some("tooling".to_string()))
         );
         // valueless --kind swallows the verb slot -> silent no-op upstream
-        assert_eq!(parse_args(&s(&["--kind"])), ("".into(), None));
+        assert_eq!(p(&["--kind"]), ("".into(), "".into(), None));
         // --kind with a value but no verb -> no verb, still silent
-        assert_eq!(parse_args(&s(&["--kind", "codex"])), ("codex".into(), None));
+        assert_eq!(p(&["--kind", "codex"]), ("codex".into(), "".into(), None));
         // empty kind value -> kindless -> silent no-op upstream (kind is
         // mandatory; there is no default)
         assert_eq!(
-            parse_args(&s(&["--kind=", "waiting"])),
-            ("".into(), Some("waiting"))
+            p(&["--kind=", "waiting"]),
+            ("".into(), "".into(), Some("waiting".to_string()))
         );
-        // a kindless verb parses but run() no-ops it (mandatory --kind)
-        assert_eq!(parse_args(&s(&["waiting"])), ("".into(), Some("waiting")));
         // flag-shaped junk is just an unknown verb
-        assert_eq!(parse_args(&s(&["--bogus"])), ("".into(), Some("--bogus")));
-        assert_eq!(parse_args(&[]), ("".into(), None));
+        assert_eq!(
+            p(&["--bogus"]),
+            ("".into(), "".into(), Some("--bogus".to_string()))
+        );
+        assert_eq!(parse_args(&[]), ("".into(), "".into(), None));
+        // the --session-id override parses in any position, both spellings
+        assert_eq!(
+            p(&["--kind", "codex", "waiting", "--session-id", "sx"]),
+            ("codex".into(), "sx".into(), Some("waiting".to_string()))
+        );
+        assert_eq!(
+            p(&["--session-id=sx", "--kind=codex", "clear"]),
+            ("codex".into(), "sx".into(), Some("clear".to_string()))
+        );
+        // a valueless --session-id swallows only its own slot
+        assert_eq!(
+            p(&["--kind", "codex", "waiting", "--session-id"]),
+            ("codex".into(), "".into(), Some("waiting".to_string()))
+        );
     }
 }

@@ -15,7 +15,7 @@ battlestation/
 │   ├── stow-home.sh       #   stow home/ into $HOME      (run as you)
 │   └── stow-root.sh       #   stow root/ into /          (run with sudo)
 ├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + aur/flatpak
-├── ctl/                   # bsctl (Rust): battlestation-ws protocol binary — `make build` → ~/.local/bin/bsctl
+├── ctl/                   # bsctl (Rust): the desktop's stateful protocols — `make build` → ~/.local/bin/bsctl
 ├── setup/                 # reproducible per-topic setup notes (never stowed)
 ├── AGENTS.md              # how to work in this repo (read this first)
 └── README.md

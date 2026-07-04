@@ -1,38 +1,56 @@
-//! `bsctl ws` — workspace display-order commands, mirroring ws.sh
-//! verb-for-verb, plus the display-level verbs (`display`, `movetodisplay`)
-//! and the workspace->display preference (sparse; written only by `prefer`
-//! and `movetodisplay`, listed/dropped/applied by
-//! `prefs`/`forget`/`reconcile`, and applied by `bsctl watch` when an
-//! output arrives). The order-file protocol, the
-//! display-position model, the
-//! display numbering and the preference protocol are specified in lib.rs
-//! ("Workspace display order"); this module keeps the script's observable
-//! behavior exactly: same dispatch strings (Hyprland's Lua parser is picky
-//! — these are the known-good forms, the monitor ones discovered by live
-//! probing), same file bytes, same exit codes (usage errors 2 via clap;
-//! position-off-the-end 1, the sh `[ -n "$id" ] && dispatch` leftover
-//! status).
+//! `bsctl ws` — the workspace verbs: `focus` and `send` (one selector
+//! grammar, mutation split — focus never mutates, send always does), `name`,
+//! the battlespace `map` (bs-id -> ws-id), and the sparse workspace->display
+//! `prefs` (written only by `prefs add` and `send workspace`, applied by
+//! `prefs reconcile` and by the `--stream` engine when an output arrives).
+//! The
+//! map-file protocol, the battlespace model, the display numbering and the
+//! preference protocol are specified in lib.rs ("Workspace display order");
+//! the dispatch strings are byte-pinned (Hyprland's Lua parser is picky —
+//! these are the known-good forms, the monitor ones discovered by live
+//! probing). Exit codes: usage errors 2 via clap; a bs-id off the map's end
+//! is a silent exit 1 (keybinds hit it constantly — SUPER+8 with five
+//! workspaces — and their stderr goes nowhere useful).
 
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
-use crate::ipc;
+use crate::{ipc, sys};
 
-/// `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/order`
+/// `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/map`
 /// (an empty env var counts as unset, like the sh `:-` default).
-pub fn order_file() -> PathBuf {
+pub fn map_file() -> PathBuf {
     env::var_os("XDG_STATE_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".local/state")
         })
-        .join("battlestation-workspaces/order")
+        .join("battlestation-workspaces/map")
+}
+
+/// Serialize every read-modify-write of the map/prefs files: a blocking
+/// exclusive flock on `<dir>/.lock` held across load->modify->save, released
+/// on drop. READERS take no lock — every write lands by atomic rename (or a
+/// single write(2) for the map), so a reader sees old or new bytes, never a
+/// torn file; the lock only stops two writers from losing an update to each
+/// other. Best-effort: if the lock file can't be created the write proceeds
+/// unlocked (state must never be droppable because /run filled up).
+fn with_state_lock<T>(f: impl FnOnce() -> T) -> T {
+    let lock = map_file().with_file_name(".lock");
+    if let Some(dir) = lock.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let held = fs::File::create(&lock)
+        .ok()
+        .filter(|l| sys::flock_exclusive(l, false));
+    let out = f();
+    drop(held);
+    out
 }
 
 // ---- pure logic (proto.rs-style: deterministic, unit-tested) ---------------
@@ -203,13 +221,13 @@ pub fn name_of(workspaces: &Value, id: i64) -> String {
 
 // ---- workspace->display preference ------------------------------------------
 
-/// `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/preferred`
+/// `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/prefs`
 /// — one `<id> <output>` pair per line, sorted by id, trailing newline. A
-/// sibling of the order file with the same persistence rationale: a
+/// sibling of the map file with the same persistence rationale: a
 /// preference is user INTENT, and intent outlives boots (workspace ids are
 /// stable habits under global numbering).
-pub fn pref_file() -> PathBuf {
-    order_file().with_file_name("preferred")
+pub fn prefs_file() -> PathBuf {
+    map_file().with_file_name("prefs")
 }
 
 /// Preference-file parse. Lines that aren't exactly `<id> <output>` are
@@ -247,35 +265,38 @@ pub fn load_prefs_from(path: &Path) -> BTreeMap<i64, String> {
 pub fn save_prefs_to(path: &Path, prefs: &BTreeMap<i64, String>) {
     let Some(dir) = path.parent() else { return };
     let _ = fs::create_dir_all(dir);
-    let tmp = dir.join(".preferred.tmp");
+    let tmp = dir.join(".prefs.tmp");
     if fs::write(&tmp, serialize_prefs(prefs)).is_ok() {
         let _ = fs::rename(&tmp, path);
     }
 }
 
-/// [`load_prefs_from`] / [`save_prefs_to`] bound to [`pref_file`].
+/// [`load_prefs_from`] / [`save_prefs_to`] bound to [`prefs_file`].
 pub fn load_prefs() -> BTreeMap<i64, String> {
-    load_prefs_from(&pref_file())
+    load_prefs_from(&prefs_file())
 }
 
 fn save_prefs(prefs: &BTreeMap<i64, String>) {
-    save_prefs_to(&pref_file(), prefs)
+    save_prefs_to(&prefs_file(), prefs)
 }
 
 /// Stamp preferences — the write side of the model's one rule: a
 /// preference records EXPLICIT user intent, so the stamping call sites are
-/// exactly the two homing verbs (`prefer`, `movetodisplay`) and nothing
-/// else; reorders and bulk operations never stamp, and watch and Hyprland
+/// exactly the two homing verbs (`prefs add`, `send workspace`) and nothing
+/// else; reorders and bulk operations never stamp, and the stream engine and Hyprland
 /// never stamp (evacuations and automatic restores are not intent).
+/// Locked: two concurrent stamps must not lose each other's update.
 pub fn stamp(pairs: &[(i64, String)]) {
     if pairs.is_empty() {
         return;
     }
-    let mut prefs = load_prefs();
-    for (id, output) in pairs {
-        prefs.insert(*id, output.clone());
-    }
-    save_prefs(&prefs);
+    with_state_lock(|| {
+        let mut prefs = load_prefs();
+        for (id, output) in pairs {
+            prefs.insert(*id, output.clone());
+        }
+        save_prefs(&prefs);
+    })
 }
 
 /// Bounded settle-and-restore: re-read placement every 200ms (monitor
@@ -320,8 +341,9 @@ pub fn restore_strays(
     }
 }
 
-/// The apply side, shared by `ws reconcile` (every present output) and
-/// watch's monitoradded handling (`only` = the arriving output): move each
+/// The apply side, shared by `ws prefs reconcile` (every present output)
+/// and the stream engine's monitoradded handling (`only` = the arriving
+/// output): move each
 /// live workspace that prefers a present output and sits elsewhere, via
 /// the bounded settle machinery ([`restore_strays`]). Returns the moves it
 /// planned (id -> output) for callers that report, or None when the
@@ -383,11 +405,94 @@ pub fn apply_preferences(only: Option<&str>) -> Option<Vec<(i64, String)>> {
     Some(moves)
 }
 
+// ---- selectors ----------------------------------------------------------------
+
+/// A workspace-shaped selector: which workspace a verb should act on.
+/// The three coordinate systems are deliberate (nomenclature in lib.rs):
+/// `Bs` addresses by battlespace id (1-based position in the resolved map —
+/// what the number-row keybinds mean), `BsRel` steps through battlespace
+/// order from the active workspace, `Ws` is the raw Hyprland id (stable
+/// across reorders — what scripts and prefs mean).
+pub enum WsSel {
+    Bs(usize),
+    BsRel(i64),
+    Ws(i64),
+}
+
+/// A display-shaped selector: by display-id (1-based, leftmost first — a
+/// pure remap of the enabled outputs) or by the compositor's output name.
+pub enum DisplaySel {
+    Id(usize),
+    Name(String),
+}
+
+/// `focus`/`send window` accept either shape; the split is what lets clap
+/// enforce per-verb selector subsets while the resolution lives here once.
+pub enum Target {
+    Ws(WsSel),
+    Display(DisplaySel),
+}
+
+/// Resolve a workspace selector to a real ws-id. Err carries the exit code:
+/// a bs-id off the map's end is a SILENT exit 1 (module-header rationale);
+/// bs-rel over an empty world is a no-op exit 0 (nothing to step through);
+/// a raw ws-id resolves without any query (Hyprland will create it on
+/// focus — documented in the CLI help).
+pub fn resolve_ws_sel(sel: &WsSel) -> Result<i64, i32> {
+    match sel {
+        WsSel::Ws(id) => Ok(*id),
+        WsSel::Bs(n) => {
+            let ws = workspaces_json()?;
+            resolve(&read_map(), &live_ids(&ws))
+                .get(n - 1)
+                .copied()
+                .ok_or(1)
+        }
+        WsSel::BsRel(delta) => {
+            let ws = workspaces_json()?;
+            let resolved = resolve(&read_map(), &live_ids(&ws));
+            if resolved.is_empty() {
+                return Err(0);
+            }
+            let Some(active) = ipc::json("activeworkspace") else {
+                eprintln!("bsctl ws: activeworkspace query failed (socket and hyprctl)");
+                return Err(1);
+            };
+            // Position of the active id in the resolved order; an active
+            // workspace outside it (e.g. special) defaults to position 1.
+            let pos = active
+                .get("id")
+                .and_then(Value::as_i64)
+                .and_then(|cur| resolved.iter().position(|&id| id == cur))
+                .map(|i| i + 1);
+            Ok(resolved[step(pos, *delta, resolved.len()) - 1])
+        }
+    }
+}
+
+/// Resolve a display selector to its index in `ds`; unknown ids/names error
+/// loudly listing the valid numbering (the fix is in the message).
+pub fn resolve_display_sel(verb: &str, sel: &DisplaySel, ds: &[Display]) -> Result<usize, i32> {
+    match sel {
+        DisplaySel::Id(n) => {
+            if *n >= 1 && *n <= ds.len() {
+                Ok(n - 1)
+            } else {
+                Err(no_such_display(verb, &n.to_string(), ds))
+            }
+        }
+        DisplaySel::Name(name) => ds
+            .iter()
+            .position(|d| d.name == *name)
+            .ok_or_else(|| no_such_display(verb, name, ds)),
+    }
+}
+
 // ---- commands ---------------------------------------------------------------
 
-/// Preference file content; missing file reads as empty (identity order).
-fn read_pref() -> String {
-    fs::read_to_string(order_file()).unwrap_or_default()
+/// Map-file content; missing file reads as empty (identity order).
+fn read_map() -> String {
+    fs::read_to_string(map_file()).unwrap_or_default()
 }
 
 /// `hyprctl workspaces -j` (socket-first via ipc), or the script's set -e
@@ -409,16 +514,16 @@ fn monitors_json() -> Result<Value, i32> {
     })
 }
 
-/// Out-of-range display error: name the valid numbering so the fix is in
-/// the message (e.g. `displays: 1 = eDP-1, 2 = DP-1`).
-fn no_such_display(verb: &str, n: usize, ds: &[Display]) -> i32 {
+/// Unknown display error: name the valid numbering so the fix is in the
+/// message (e.g. `displays: 1 = eDP-1, 2 = DP-1`).
+fn no_such_display(verb: &str, wanted: &str, ds: &[Display]) -> i32 {
     let list = ds
         .iter()
         .enumerate()
         .map(|(i, d)| format!("{} = {}", i + 1, d.name))
         .collect::<Vec<_>>()
         .join(", ");
-    eprintln!("bsctl ws {verb}: no display {n} (displays: {list})");
+    eprintln!("bsctl ws {verb}: no display {wanted} (displays: {list})");
     1
 }
 
@@ -431,53 +536,100 @@ fn focused_index(verb: &str, ds: &[Display]) -> Result<usize, i32> {
     })
 }
 
-pub fn display(n: usize) -> i32 {
-    let mons = match monitors_json() {
-        Ok(v) => v,
-        Err(c) => return c,
-    };
-    let ds = displays_from(&mons);
-    match ds.get(n - 1) {
-        Some(d) => ipc::dispatch(&focus_monitor_cmd(&d.name)),
-        None => no_such_display("display", n, &ds),
+/// `ws focus <selector>` — pure navigation, never mutates: workspace
+/// targets focus that workspace (wherever it lives), display targets focus
+/// that display (its active workspace).
+pub fn focus(target: &Target) -> i32 {
+    match target {
+        Target::Ws(sel) => match resolve_ws_sel(sel) {
+            Ok(id) => ipc::dispatch(&focus_cmd(id)),
+            Err(c) => c,
+        },
+        Target::Display(sel) => {
+            let mons = match monitors_json() {
+                Ok(v) => v,
+                Err(c) => return c,
+            };
+            let ds = displays_from(&mons);
+            match resolve_display_sel("focus", sel, &ds) {
+                Ok(i) => ipc::dispatch(&focus_monitor_cmd(&ds[i].name)),
+                Err(c) => c,
+            }
+        }
     }
 }
 
-pub fn movetodisplay(n: usize, follow: bool) -> i32 {
+/// `ws send window <selector> [--focus]` — move the active window: to the
+/// selected workspace, or (display targets) to that display's ACTIVE
+/// workspace. `--focus` follows the window; without it the keyboard stays.
+pub fn send_window(target: &Target, focus: bool) -> i32 {
+    let id = match target {
+        Target::Ws(sel) => match resolve_ws_sel(sel) {
+            Ok(id) => id,
+            Err(c) => return c,
+        },
+        Target::Display(sel) => {
+            let mons = match monitors_json() {
+                Ok(v) => v,
+                Err(c) => return c,
+            };
+            let ds = displays_from(&mons);
+            let i = match resolve_display_sel("send window", sel, &ds) {
+                Ok(i) => i,
+                Err(c) => return c,
+            };
+            let Some(active) = ds[i].active_ws else {
+                eprintln!(
+                    "bsctl ws send window: display {} has no active workspace",
+                    ds[i].name
+                );
+                return 1;
+            };
+            active
+        }
+    };
+    ipc::dispatch(&move_cmd(id, focus))
+}
+
+/// `ws send workspace (--display-id|--display-name) [--focus]` — move the
+/// ACTIVE workspace to a display, keeping its ws-id. One of the two
+/// preference writers: an explicit move is the user re-deciding this
+/// workspace's home.
+pub fn send_workspace(sel: &DisplaySel, focus: bool) -> i32 {
     let mons = match monitors_json() {
         Ok(v) => v,
         Err(c) => return c,
     };
     let ds = displays_from(&mons);
-    let Some(target) = ds.get(n - 1) else {
-        return no_such_display("movetodisplay", n, &ds);
-    };
-    let cur = match focused_index("movetodisplay", &ds) {
+    let tgt = match resolve_display_sel("send workspace", sel, &ds) {
         Ok(i) => i,
         Err(c) => return c,
     };
-    if cur == n - 1 {
+    let cur = match focused_index("send workspace", &ds) {
+        Ok(i) => i,
+        Err(c) => return c,
+    };
+    if cur == tgt {
         return 0; // already on that display: nothing to move
     }
     let Some(ws_id) = ds[cur].active_ws else {
         eprintln!(
-            "bsctl ws movetodisplay: focused display {} has no active workspace",
+            "bsctl ws send workspace: focused display {} has no active workspace",
             ds[cur].name
         );
         return 1;
     };
-    let code = ipc::dispatch(&move_workspace_cmd(ws_id, &target.name));
+    let code = ipc::dispatch(&move_workspace_cmd(ws_id, &ds[tgt].name));
     if code != 0 {
         return code;
     }
-    // The move landed: stamp the preference — an explicit move is the user
-    // re-deciding this workspace's home (and the stamp must not depend on
-    // the focus pin below succeeding).
-    stamp(&[(ws_id, target.name.clone())]);
+    // The move landed: stamp the preference (and the stamp must not depend
+    // on the focus pin below succeeding).
+    stamp(&[(ws_id, ds[tgt].name.clone())]);
     // Pin focus explicitly rather than trusting the move's inherent focus
-    // behavior (version-dependent): follow lands on the moved workspace,
+    // behavior (version-dependent): --focus lands on the moved workspace,
     // stay re-focuses the source display — both no-op when already true.
-    if follow {
+    if focus {
         ipc::dispatch(&focus_cmd(ws_id))
     } else {
         ipc::dispatch(&focus_monitor_cmd(&ds[cur].name))
@@ -525,143 +677,303 @@ pub fn restore_plan(before: &[(i64, String)], after: &[(i64, String)]) -> Vec<St
         .collect()
 }
 
-pub fn goto(pos: usize) -> i32 {
-    let ws = match workspaces_json() {
-        Ok(v) => v,
+/// A name/map row filter: everything, one workspace, or one display's
+/// workspaces.
+pub enum RowFilter {
+    All,
+    Ws(WsSel),
+    Display(DisplaySel),
+}
+
+/// One row of the battlespace join: everything the map/name/status views
+/// print.
+pub struct BsRow {
+    pub bs: usize,
+    pub ws: i64,
+    pub name: String,
+    pub display: String,
+    pub windows: i64,
+    pub active: bool,
+}
+
+/// The full battlespace join, pure: map bytes + the two compositor
+/// snapshots in, rows in battlespace order out. `active` = some display is
+/// showing the workspace. Shared by the ws views and the `status` world
+/// snapshot, so the two can never disagree about what a battlespace is.
+pub fn bs_join(map_content: &str, ws: &Value, mons: &Value) -> Vec<BsRow> {
+    let ds = displays_from(mons);
+    let actives: Vec<i64> = ds.iter().filter_map(|d| d.active_ws).collect();
+    let placements = monitor_map(ws);
+    let windows_of = |id: i64| -> i64 {
+        ws.as_array()
+            .and_then(|a| {
+                a.iter()
+                    .find(|w| w.get("id").and_then(Value::as_i64) == Some(id))
+            })
+            .and_then(|w| w.get("windows"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+    };
+    resolve(map_content, &live_ids(ws))
+        .into_iter()
+        .enumerate()
+        .map(|(i, id)| BsRow {
+            bs: i + 1,
+            ws: id,
+            name: name_of(ws, id),
+            display: placements
+                .iter()
+                .find(|(pid, _)| *pid == id)
+                .map(|(_, m)| m.clone())
+                .unwrap_or_default(),
+            windows: windows_of(id),
+            active: actives.contains(&id),
+        })
+        .collect()
+}
+
+/// The resolved battlespace join, queried live and filtered. Errors carry
+/// the exit code (query failures, unknown display/bs selectors).
+fn bs_rows(verb: &str, filter: &RowFilter) -> Result<Vec<BsRow>, i32> {
+    let ws = workspaces_json()?;
+    let mons = monitors_json()?;
+    let ds = displays_from(&mons);
+    let only_ws = match filter {
+        RowFilter::Ws(sel) => Some(resolve_ws_sel(sel)?),
+        _ => None,
+    };
+    let only_display = match filter {
+        RowFilter::Display(sel) => Some(ds[resolve_display_sel(verb, sel, &ds)?].name.clone()),
+        _ => None,
+    };
+    Ok(bs_join(&read_map(), &ws, &mons)
+        .into_iter()
+        .filter(|r| only_ws.is_none_or(|w| w == r.ws))
+        .filter(|r| only_display.as_ref().is_none_or(|od| r.display == *od))
+        .collect())
+}
+
+/// A workspace's human name, or None for the unnamed default (Hyprland
+/// names every workspace its own number until someone renames it).
+pub fn human_name(row_name: &str, ws: i64) -> Option<String> {
+    (!row_name.is_empty() && row_name != "null" && row_name != ws.to_string())
+        .then(|| row_name.to_string())
+}
+
+/// `ws name get [filter]` — one line per matched workspace:
+/// `bs <n>  ws <id>  "<name>"` (or `(unnamed)` while the name is still the
+/// id's number).
+pub fn name_get(filter: &RowFilter) -> i32 {
+    let rows = match bs_rows("name get", filter) {
+        Ok(r) => r,
         Err(c) => return c,
     };
-    match resolve(&read_pref(), &live_ids(&ws)).get(pos - 1) {
-        Some(id) => ipc::dispatch(&focus_cmd(*id)),
-        None => 1, // position off the end: no dispatch, exit 1 (script parity)
+    for r in rows {
+        let name = match human_name(&r.name, r.ws) {
+            Some(n) => format!("\"{n}\""),
+            None => "(unnamed)".to_string(),
+        };
+        println!("bs {}  ws {}  {}", r.bs, r.ws, name);
+    }
+    0
+}
+
+/// `ws name set (--bs-id|--ws-id) --name <name>` — Hyprland can't renumber
+/// an id; this only changes the display name (hl.dsp.workspace.rename — the
+/// Lua config parser rejects `hyprctl dispatch renameworkspace`).
+pub fn name_set(sel: &WsSel, name: &str) -> i32 {
+    match resolve_ws_sel(sel) {
+        Ok(id) => ipc::dispatch(&rename_cmd(id, Some(name))),
+        Err(c) => c,
     }
 }
 
-pub fn movewindow(pos: usize, follow: bool) -> i32 {
-    let ws = match workspaces_json() {
-        Ok(v) => v,
+/// `ws name rm [filter]` — reset matched workspaces' names back to their
+/// numbers (rename_cmd's empty-name default). All matches are attempted;
+/// the exit code is the first failure's.
+pub fn name_rm(filter: &RowFilter) -> i32 {
+    let rows = match bs_rows("name rm", filter) {
+        Ok(r) => r,
         Err(c) => return c,
     };
-    match resolve(&read_pref(), &live_ids(&ws)).get(pos - 1) {
-        Some(id) => ipc::dispatch(&move_cmd(*id, follow)),
-        None => 1,
+    let mut code = 0;
+    for r in rows {
+        let c = ipc::dispatch(&rename_cmd(r.ws, None));
+        if code == 0 {
+            code = c;
+        }
     }
+    code
 }
 
-pub fn relative(delta: i64, mov: bool) -> i32 {
-    let ws = match workspaces_json() {
-        Ok(v) => v,
+/// `ws map get [--display-*] [--format json]` — the resolved battlespace
+/// join, one row per battlespace: bs-id, ws-id, name, display, windows,
+/// active. THE learning view of the model (bs 3 = "SUPER+3 goes here").
+pub fn map_get(filter: &RowFilter, json_out: bool) -> i32 {
+    let rows = match bs_rows("map get", filter) {
+        Ok(r) => r,
         Err(c) => return c,
     };
-    let resolved = resolve(&read_pref(), &live_ids(&ws));
-    if resolved.is_empty() {
+    if json_out {
+        println!("{}", Value::Array(map_rows_json(&rows)));
         return 0;
     }
-    // Current position of `hyprctl activeworkspace -j`'s id in the resolved
-    // order; a workspace outside the order (e.g. special) defaults to 1.
-    let Some(active) = ipc::json("activeworkspace") else {
-        eprintln!("bsctl ws: activeworkspace query failed (socket and hyprctl)");
-        return 1;
-    };
-    let pos = active
-        .get("id")
-        .and_then(Value::as_i64)
-        .and_then(|cur| resolved.iter().position(|&id| id == cur))
-        .map(|i| i + 1);
-    let id = resolved[step(pos, delta, resolved.len()) - 1];
-    let cmd = if mov {
-        move_cmd(id, true)
-    } else {
-        focus_cmd(id)
-    };
-    ipc::dispatch(&cmd)
+    for r in rows {
+        let name = match human_name(&r.name, r.ws) {
+            Some(n) => format!(" \"{n}\""),
+            None => String::new(),
+        };
+        println!(
+            "bs {}  ws {}{}  on {}  {} window{}{}",
+            r.bs,
+            r.ws,
+            name,
+            if r.display.is_empty() {
+                "?"
+            } else {
+                &r.display
+            },
+            r.windows,
+            if r.windows == 1 { "" } else { "s" },
+            if r.active { "  [active]" } else { "" },
+        );
+    }
+    0
 }
 
-pub fn set(ids: &[i64]) -> i32 {
-    let p = order_file();
+/// The map rows as their published JSON shape — shared by `map get
+/// --format json` and its `--stream` form.
+pub fn map_rows_json(rows: &[BsRow]) -> Vec<Value> {
+    rows.iter()
+        .map(|r| {
+            json!({
+                "bs": r.bs,
+                "ws": r.ws,
+                "name": human_name(&r.name, r.ws),
+                "display": r.display,
+                "windows": r.windows,
+                "active": r.active,
+            })
+        })
+        .collect()
+}
+
+/// One `map get --format json` result as its JSON line (the streaming form).
+pub fn map_json(filter: &RowFilter) -> Result<String, i32> {
+    Ok(Value::Array(map_rows_json(&bs_rows("map get", filter)?)).to_string())
+}
+
+/// `ws map set <ws-id>..` — ws-ids in battlespace order, the FULL list
+/// (stable denotation: tokens are ws-ids, never positions — a permutation
+/// of positions would be relative to the map it replaces and compose
+/// confusingly). Bytes are `id id id\n`; the write is locked but lands via
+/// one write(2), so readers never tear.
+pub fn map_set(ids: &[i64]) -> i32 {
+    let p = map_file();
     if let Some(d) = p.parent() {
         let _ = fs::create_dir_all(d);
     }
-    // `printf '%s\n' "$*"`: ids space-joined + trailing newline. The bar
-    // plugin FileView-watches and parses this exact format — keep the bytes.
     let body = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(" ") + "\n";
-    match fs::write(&p, body) {
+    with_state_lock(|| match fs::write(&p, body) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("bsctl ws set: {}: {e}", p.display());
+            eprintln!("bsctl ws map set: {}: {e}", p.display());
             1
         }
-    }
+    })
 }
 
-pub fn reset() -> i32 {
-    // Empty (not delete) the preference so resolve() falls back to identity
-    // order. Truncating IN PLACE is what makes the bar plugin's FileView
-    // watch fire, so the pills re-render to 1,2,3,... immediately.
-    let p = order_file();
+/// `ws map reset` — truncate IN PLACE (resolve() then falls back to
+/// identity order). Not in the design sketch, but without it the only route
+/// back to identity is hand-editing the file, which the
+/// everything-through-bsctl rule exists to prevent.
+pub fn map_reset() -> i32 {
+    let p = map_file();
     if let Some(d) = p.parent() {
         let _ = fs::create_dir_all(d);
     }
-    match fs::write(&p, "") {
+    with_state_lock(|| match fs::write(&p, "") {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("bsctl ws reset: {}: {e}", p.display());
+            eprintln!("bsctl ws map reset: {}: {e}", p.display());
             1
         }
-    }
+    })
 }
 
-pub fn get() -> i32 {
-    // `cat "$ORDER_FILE" 2>/dev/null || true` — raw bytes, silent if missing.
-    if let Ok(b) = fs::read(order_file()) {
-        let _ = std::io::stdout().write_all(&b);
-    }
-    0
+/// The preferences with reality annotations, pure: `(ws, display, present,
+/// live)` per entry — present = the output is enabled now, live = the
+/// workspace still exists. Shared by `prefs get` and the `status` world
+/// snapshot.
+pub fn pref_rows(
+    prefs: &BTreeMap<i64, String>,
+    ds: &[Display],
+    live: &[i64],
+) -> Vec<(i64, String, bool, bool)> {
+    prefs
+        .iter()
+        .map(|(id, output)| {
+            (
+                *id,
+                output.clone(),
+                ds.iter().any(|d| d.name == *output),
+                live.contains(id),
+            )
+        })
+        .collect()
 }
 
-pub fn rename(id: i64, name: Option<&str>) -> i32 {
-    // Hyprland can't renumber an id; this only changes the display name. The
-    // Lua config parser rejects `hyprctl dispatch renameworkspace`, so the
-    // rename goes through hl.dsp.workspace.rename (same as focus/move).
-    ipc::dispatch(&rename_cmd(id, name))
+/// The pref rows as their published JSON shape.
+pub fn pref_rows_json(rows: &[(i64, String, bool, bool)]) -> Vec<Value> {
+    rows.iter()
+        .map(|(id, output, present, alive)| {
+            json!({"ws": id, "display": output, "present": present, "live": alive})
+        })
+        .collect()
 }
 
-pub fn order() -> i32 {
-    let ws = match workspaces_json() {
-        Ok(v) => v,
-        Err(c) => return c,
-    };
-    for (i, id) in resolve(&read_pref(), &live_ids(&ws)).iter().enumerate() {
-        println!("{} -> ws {} ({})", i + 1, id, name_of(&ws, *id));
-    }
-    0
-}
-
-/// `prefs`: list the workspace->display preferences with reality
-/// annotations — the output's presence among the enabled outputs, and
-/// whether the workspace still exists. Empty preferences print nothing
-/// (like `ws get`), without touching the compositor.
-pub fn prefs() -> i32 {
+/// `prefs get`'s annotated rows, queried live and filtered. Empty
+/// preferences short-circuit to no rows without touching the compositor.
+fn prefs_rows_live(sel: Option<&WsSel>) -> Result<Vec<(i64, String, bool, bool)>, i32> {
     let prefs = load_prefs();
     if prefs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let only = match sel {
+        Some(s) => Some(resolve_ws_sel(s)?),
+        None => None,
+    };
+    let mons = monitors_json()?;
+    let ws = workspaces_json()?;
+    let rows = pref_rows(&prefs, &displays_from(&mons), &live_ids(&ws));
+    Ok(rows
+        .into_iter()
+        .filter(|(id, ..)| only.is_none_or(|o| o == *id))
+        .collect())
+}
+
+/// One `prefs get --format json` result as its JSON line (the streaming
+/// form).
+pub fn prefs_json(sel: Option<&WsSel>) -> Result<String, i32> {
+    Ok(Value::Array(pref_rows_json(&prefs_rows_live(sel)?)).to_string())
+}
+
+/// `ws prefs get [--bs-id|--ws-id] [--format json]` — the preferences with
+/// reality annotations: the output's presence among the enabled outputs,
+/// and whether the workspace still exists. Empty preferences print nothing
+/// (and query nothing).
+pub fn prefs_get(sel: Option<&WsSel>, json_out: bool) -> i32 {
+    let rows = match prefs_rows_live(sel) {
+        Ok(r) => r,
+        Err(c) => return c,
+    };
+    if json_out {
+        println!("{}", Value::Array(pref_rows_json(&rows)));
         return 0;
     }
-    let mons = match monitors_json() {
-        Ok(v) => v,
-        Err(c) => return c,
-    };
-    let ws = match workspaces_json() {
-        Ok(v) => v,
-        Err(c) => return c,
-    };
-    let ds = displays_from(&mons);
-    let live = live_ids(&ws);
-    for (id, output) in prefs {
-        let mut notes = vec![if ds.iter().any(|d| d.name == output) {
-            "present"
-        } else {
-            "absent"
-        }];
-        if !live.contains(&id) {
+    for (id, output, present, alive) in rows {
+        let mut notes = vec![if present { "present" } else { "absent" }];
+        if !alive {
             notes.push("ws gone");
         }
         println!("ws {id} -> {output} ({})", notes.join(", "));
@@ -669,26 +981,27 @@ pub fn prefs() -> i32 {
     0
 }
 
-/// `prefer <id> [<output>]`: set one preference explicitly. A named output
-/// is accepted verbatim even when absent — pre-declaring a home for a dock
-/// display is legitimate; with no output the workspace's CURRENT display
-/// is stamped, so the id must be live.
-pub fn prefer(id: i64, output: Option<&str>) -> i32 {
-    let output = match output {
-        Some(o) => o.to_string(),
-        None => {
-            let ws = match workspaces_json() {
+/// `ws prefs add (--bs-id|--ws-id) (--display-id|--display-name)` — the
+/// explicit preference writer. `--display-name` is accepted VERBATIM even
+/// when absent — pre-declaring a home for the dock display is the feature's
+/// main move; `--display-id` must resolve (an id only numbers what's
+/// plugged in).
+pub fn prefs_add(sel: &WsSel, display: &DisplaySel) -> i32 {
+    let id = match resolve_ws_sel(sel) {
+        Ok(id) => id,
+        Err(c) => return c,
+    };
+    let output = match display {
+        DisplaySel::Name(name) => name.clone(),
+        DisplaySel::Id(_) => {
+            let mons = match monitors_json() {
                 Ok(v) => v,
                 Err(c) => return c,
             };
-            match monitor_map(&ws).into_iter().find(|(wid, _)| *wid == id) {
-                Some((_, mon)) => mon,
-                None => {
-                    eprintln!(
-                        "bsctl ws prefer: workspace {id} is not live (name an output to pre-declare one)"
-                    );
-                    return 1;
-                }
+            let ds = displays_from(&mons);
+            match resolve_display_sel("prefs add", display, &ds) {
+                Ok(i) => ds[i].name.clone(),
+                Err(c) => return c,
             }
         }
     };
@@ -696,30 +1009,36 @@ pub fn prefer(id: i64, output: Option<&str>) -> i32 {
     0
 }
 
-/// `forget <id>` / `forget --all` (clap enforces exactly one, so None here
-/// MEANS --all): drop preferences. Forgetting an unknown id is a quiet
-/// success — idempotent; `--all` writes the empty file (atomically, like
-/// every preference write) rather than deleting it.
-pub fn forget(id: Option<i64>) -> i32 {
-    let Some(id) = id else {
-        save_prefs(&BTreeMap::new());
+/// `ws prefs rm (--bs-id|--ws-id|--all)` (clap enforces exactly one, so a
+/// None selector MEANS --all): drop preferences. Removing an id that has no
+/// preference is a quiet success — idempotent; `--all` writes the empty
+/// file (atomically, like every preference write) rather than deleting it.
+pub fn prefs_rm(sel: Option<&WsSel>) -> i32 {
+    let Some(sel) = sel else {
+        with_state_lock(|| save_prefs(&BTreeMap::new()));
         return 0;
     };
-    let mut prefs = load_prefs();
-    if prefs.remove(&id).is_some() {
-        save_prefs(&prefs);
-    }
+    let id = match resolve_ws_sel(sel) {
+        Ok(id) => id,
+        Err(c) => return c,
+    };
+    with_state_lock(|| {
+        let mut prefs = load_prefs();
+        if prefs.remove(&id).is_some() {
+            save_prefs(&prefs);
+        }
+    });
     0
 }
 
-/// `reconcile`: apply the preferences — move every live workspace that
-/// prefers a present output and sits elsewhere, printing each move. The
-/// manual counterpart of watch's monitoradded apply, for when watch wasn't
-/// running at replug time.
+/// `ws prefs reconcile`: apply the preferences — move every live workspace
+/// that prefers a present output and sits elsewhere, printing each move.
+/// The manual counterpart of the stream engine's monitoradded apply, for
+/// when nothing was streaming at replug time.
 pub fn reconcile() -> i32 {
     match apply_preferences(None) {
         None => {
-            eprintln!("bsctl ws reconcile: compositor query failed (socket and hyprctl)");
+            eprintln!("bsctl ws prefs reconcile: compositor query failed (socket and hyprctl)");
             1
         }
         Some(moves) => {
@@ -901,7 +1220,7 @@ mod tests {
     }
 
     #[test]
-    fn pref_file_roundtrip_and_junk_tolerance() {
+    fn prefs_file_roundtrip_and_junk_tolerance() {
         let mut prefs = BTreeMap::new();
         prefs.insert(9, "DP-2".to_string());
         prefs.insert(11, "DP-2".to_string());
@@ -923,21 +1242,31 @@ mod tests {
     fn pref_io_missing_file_and_empty_write() {
         let dir = std::env::temp_dir().join(format!("bsctl-ws-pref-ut-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let path = dir.join("preferred");
+        let path = dir.join("prefs");
         assert!(load_prefs_from(&path).is_empty()); // no file = no prefs
         let prefs = BTreeMap::from([(9, "DP-2".to_string())]);
         save_prefs_to(&path, &prefs); // creates the dir
         assert_eq!(load_prefs_from(&path), prefs);
-        // forget --all writes the EMPTY file; the file stays
+        // prefs rm --all writes the EMPTY file; the file stays
         save_prefs_to(&path, &BTreeMap::new());
         assert_eq!(fs::read_to_string(&path).unwrap(), "");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn pref_file_is_the_order_files_sibling() {
+    fn prefs_file_is_the_map_files_sibling() {
         // Can't mutate the env safely in tests; just check the name contract.
-        assert_eq!(pref_file().parent(), order_file().parent());
-        assert!(pref_file().ends_with("battlestation-workspaces/preferred"));
+        assert_eq!(prefs_file().parent(), map_file().parent());
+        assert!(prefs_file().ends_with("battlestation-workspaces/prefs"));
+        assert!(map_file().ends_with("battlestation-workspaces/map"));
+    }
+
+    #[test]
+    fn human_name_hides_the_default_number() {
+        assert_eq!(human_name("work", 5), Some("work".to_string()));
+        assert_eq!(human_name("5", 5), None); // Hyprland's unnamed default
+        assert_eq!(human_name("null", 3), None); // name_of's null rendering
+        assert_eq!(human_name("", 9), None);
+        assert_eq!(human_name("7", 5), Some("7".to_string())); // a REAL name "7"
     }
 }

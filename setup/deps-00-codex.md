@@ -8,7 +8,7 @@ replaces it in place. Install per the upstream instructions
 (<https://developers.openai.com/codex/cli>), then `codex login`.
 
 Config is the stowed `~/.codex/config.toml` (`stow/home/codex`), which
-carries the battlestation-ws status hooks (`bsctl hook --kind codex …` — the
+carries the agent-session status hooks (`bsctl agents set --kind codex …` — the
 protocol contract is in `ctl/src/lib.rs`). Two out-of-band steps:
 
 - **Trust the hooks (one-time).** Codex refuses non-managed command hooks
