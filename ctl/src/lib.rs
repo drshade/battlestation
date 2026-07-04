@@ -375,8 +375,10 @@
 //! but its annotations degrade to null without a compositor to ask;
 //! `asks` is file truth ([] when the queue is empty, never null),
 //! `agents` is file+proc truth, and `human` is file truth (state
-//! "unknown" before hypridle's first report, `idle_secs` null unless
-//! idle) — none of the three ever null.
+//! "unknown" before hypridle's first report; `idle_secs` is 0 while
+//! active — the direct answer, never null-as-no-data — the accumulated
+//! duration while idle, and null only while unknown) — none of the
+//! three ever null.
 //!
 //! # Streaming (`--stream`)
 //!

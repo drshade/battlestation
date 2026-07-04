@@ -270,9 +270,11 @@ pub fn render_text(world: &Value) -> String {
             .is_some_and(|s| s != "unknown")
     {
         let state = proto::field(h, "state");
+        // Duration only while idle: active is always 0 by contract, and
+        // "active 0s" would read as a countdown.
         let line = match h.get("idle_secs").and_then(Value::as_i64) {
-            Some(s) => format!("{state} {}", asks::age(s as f64, 0.0)),
-            None => state,
+            Some(s) if state == "idle" => format!("{state} {}", asks::age(s as f64, 0.0)),
+            _ => state,
         };
         sections.push(format!("human\n  {line}"));
     }

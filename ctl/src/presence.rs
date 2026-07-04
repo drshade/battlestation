@@ -31,19 +31,26 @@ pub fn read() -> Option<Value> {
 /// `since`: hypridle's on-timeout can fire again without an intervening
 /// resume (a re-arm after a brief wake the listener never saw as input),
 /// and the idle duration must accumulate across those fires, not reset.
-pub fn updated(prev: Option<&Value>, state: &str, now: f64) -> Value {
+/// `already` backdates `since` on a fresh transition — hypridle's
+/// on-timeout fires only AFTER its threshold, so at that moment the human
+/// has already been idle that long; the listener passes its own timeout
+/// back so the duration never undercounts (and only on the transition:
+/// a repeated fire keeps the accumulated since untouched).
+pub fn updated(prev: Option<&Value>, state: &str, already: f64, now: f64) -> Value {
     let since = prev
         .filter(|p| p.get("state").and_then(Value::as_str) == Some(state))
         .and_then(|p| p.get("since").and_then(Value::as_f64))
-        .unwrap_or(now);
+        .unwrap_or(now - already);
     json!({"state": state, "since": since})
 }
 
-/// Seconds idle, only meaningful while idle: None when active/unknown.
+/// Seconds idle: 0 while ACTIVE (the direct answer an agent wants — "not
+/// idle at all", never null-as-no-data), the accumulated duration while
+/// idle, None only when there has been no report at all (unknown).
 fn idle_secs(rec: Option<&Value>, now: f64) -> Option<i64> {
     let r = rec?;
     if r.get("state").and_then(Value::as_str) != Some("idle") {
-        return None;
+        return Some(0);
     }
     let since = r.get("since").and_then(Value::as_f64)?;
     Some((now - since).max(0.0) as i64)
@@ -69,20 +76,30 @@ pub fn get_json(rec: Option<&Value>, now: f64) -> Value {
 }
 
 /// The one-line text: `active` / `idle 43m` / `unknown`. Reuses the asks
-/// age humanizer (seconds -> largest whole unit) for the idle duration.
+/// age humanizer (seconds -> largest whole unit) for the idle duration;
+/// active shows no duration (it is always 0).
 pub fn brief(rec: Option<&Value>, now: f64) -> String {
     let state = rec
         .and_then(|r| r.get("state").and_then(Value::as_str))
         .unwrap_or("unknown");
     match idle_secs(rec, now) {
-        Some(s) => format!("{state} {}", asks::age(s as f64, 0.0)),
-        None => state.to_string(),
+        Some(s) if state == "idle" => format!("{state} {}", asks::age(s as f64, 0.0)),
+        _ => state.to_string(),
     }
 }
 
-/// Whole minutes idle, for the MCP ask-timeout note: None unless idle.
+/// Whole minutes idle, for the MCP ask-timeout note: None unless actually
+/// idle (an active human needs no mention).
 pub fn idle_minutes() -> Option<i64> {
-    idle_secs(read().as_ref(), sys::now_f64()).map(|s| s / 60)
+    let rec = read();
+    if rec
+        .as_ref()
+        .and_then(|r| r.get("state").and_then(Value::as_str))
+        != Some("idle")
+    {
+        return None;
+    }
+    idle_secs(rec.as_ref(), sys::now_f64()).map(|s| s / 60)
 }
 
 // ---- verbs ---------------------------------------------------------------------
@@ -91,7 +108,7 @@ pub fn idle_minutes() -> Option<i64> {
 /// human never runs this by hand in normal operation). Read-modify-write
 /// under the asks dir's write lock (the same `.lock`; both critical
 /// sections are tiny) so a racing set can't lose the no-bump rule.
-pub fn set(state: &str) -> i32 {
+pub fn set(state: &str, already: u64) -> i32 {
     let dir = asks::asks_dir();
     if let Err(e) = fs::create_dir_all(&dir) {
         eprintln!("bsctl presence set: {}: {e}", dir.display());
@@ -100,7 +117,7 @@ pub fn set(state: &str) -> i32 {
     let lock = fs::File::create(dir.join(".lock"))
         .ok()
         .filter(|l| sys::flock_exclusive(l, false));
-    let rec = updated(read().as_ref(), state, sys::now_f64());
+    let rec = updated(read().as_ref(), state, already as f64, sys::now_f64());
     let out = match sys::atomic_write_json(&dir, "presence.json", &rec) {
         Ok(()) => 0,
         Err(e) => {
@@ -130,17 +147,30 @@ mod tests {
 
     #[test]
     fn same_state_keeps_since_transition_bumps_it() {
-        let first = updated(None, "idle", 100.0);
+        let first = updated(None, "idle", 0.0, 100.0);
         assert_eq!(first, json!({"state": "idle", "since": 100.0}));
         // a repeated on-timeout fire must accumulate, not reset
-        let again = updated(Some(&first), "idle", 250.0);
+        let again = updated(Some(&first), "idle", 0.0, 250.0);
         assert_eq!(again["since"], 100.0);
         // a real transition takes the new timestamp
-        let active = updated(Some(&again), "active", 300.0);
+        let active = updated(Some(&again), "active", 0.0, 300.0);
         assert_eq!(active, json!({"state": "active", "since": 300.0}));
         // corrupt prev (no since) degrades to now, never panics
-        let healed = updated(Some(&json!({"state": "idle"})), "idle", 400.0);
+        let healed = updated(Some(&json!({"state": "idle"})), "idle", 0.0, 400.0);
         assert_eq!(healed["since"], 400.0);
+    }
+
+    #[test]
+    fn already_backdates_transitions_only() {
+        // hypridle fires on-timeout AFTER 120s of idleness: since backdates
+        let first = updated(None, "idle", 120.0, 500.0);
+        assert_eq!(first["since"], 380.0);
+        // a repeated fire keeps the ACCUMULATED since, ignoring `already`
+        let again = updated(Some(&first), "idle", 120.0, 900.0);
+        assert_eq!(again["since"], 380.0);
+        // resume reports have no threshold: already 0 -> since = now
+        let active = updated(Some(&again), "active", 0.0, 950.0);
+        assert_eq!(active["since"], 950.0);
     }
 
     #[test]
@@ -154,13 +184,14 @@ mod tests {
             get_json(Some(&idle), 160.0),
             json!({"state": "idle", "idle_secs": 60, "since": 100.0})
         );
-        // active: idle_secs is null, not 0 — the duration is meaningless
+        // active: idle_secs is 0 — the direct answer ("not idle at all"),
+        // never null-as-no-data
         let active = json!({"state": "active", "since": 100.0});
         assert_eq!(
             human_json(Some(&active), 160.0),
-            json!({"state": "active", "idle_secs": Value::Null})
+            json!({"state": "active", "idle_secs": 0})
         );
-        // no report: unknown, everything else null
+        // no report: unknown, and only THEN is the duration truly unknown
         assert_eq!(
             human_json(None, 1.0),
             json!({"state": "unknown", "idle_secs": Value::Null})

@@ -483,28 +483,36 @@ fn presence_set_get_roundtrip_and_no_bump() {
     assert_eq!(v["since"], Value::Null);
     assert_eq!(v["idle_secs"], Value::Null);
 
-    // idle: since lands, idle_secs counts from it
-    assert_eq!(env.run(&["presence", "set", "idle"]).0, 0);
+    // idle with the listener's threshold: since backdates by --already, so
+    // idle_secs never undercounts the quiet time before the fire
+    assert_eq!(
+        env.run(&["presence", "set", "idle", "--already", "120"]).0,
+        0
+    );
     let (_, out, _) = env.run(&["presence", "get", "--format", "json"]);
     let first: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(first["state"], "idle");
     let since = first["since"].as_f64().unwrap();
-    assert!(first["idle_secs"].as_i64().unwrap() >= 0);
+    assert!(first["idle_secs"].as_i64().unwrap() >= 120);
 
     // the SAME state again must not bump since (idle accumulates across
-    // repeated on-timeout fires)
-    assert_eq!(env.run(&["presence", "set", "idle"]).0, 0);
+    // repeated on-timeout fires, --already ignored on re-fires)
+    assert_eq!(
+        env.run(&["presence", "set", "idle", "--already", "120"]).0,
+        0
+    );
     let (_, out, _) = env.run(&["presence", "get", "--format", "json"]);
     let again: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(again["since"].as_f64().unwrap(), since, "no-bump rule");
 
-    // a transition takes a fresh since and drops idle_secs to null
+    // a transition takes a fresh since; ACTIVE reads as 0 seconds idle —
+    // the direct answer, never null-as-no-data
     assert_eq!(env.run(&["presence", "set", "active"]).0, 0);
     let (_, out, _) = env.run(&["presence", "get", "--format", "json"]);
     let active: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(active["state"], "active");
     assert!(active["since"].as_f64().unwrap() >= since);
-    assert_eq!(active["idle_secs"], Value::Null);
+    assert_eq!(active["idle_secs"], 0);
     let (_, out, _) = env.run(&["presence", "get"]);
     assert_eq!(out.trim(), "active");
 

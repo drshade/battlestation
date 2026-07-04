@@ -722,6 +722,11 @@ enum PresenceCmd {
     Set {
         #[arg(value_enum)]
         state: PresenceState,
+        /// Seconds already spent in this state before the report fired
+        /// (hypridle's on-timeout fires AFTER its threshold — pass it back
+        /// so idle duration never undercounts)
+        #[arg(long, default_value_t = 0)]
+        already: u64,
     },
     /// The current presence (`unknown` before hypridle's first report)
     Get {
@@ -982,10 +987,13 @@ fn main() {
             },
         },
         Cmd::Presence { cmd } => match cmd {
-            PresenceCmd::Set { state } => bsctl::presence::set(match state {
-                PresenceState::Active => "active",
-                PresenceState::Idle => "idle",
-            }),
+            PresenceCmd::Set { state, already } => bsctl::presence::set(
+                match state {
+                    PresenceState::Active => "active",
+                    PresenceState::Idle => "idle",
+                },
+                already,
+            ),
             PresenceCmd::Get { format } => bsctl::presence::get(format == Format::Json),
         },
         Cmd::Status { format, stream } => {
