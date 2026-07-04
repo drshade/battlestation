@@ -1,10 +1,11 @@
-//! `bsctl usage` — Claude plan usage for the Noctalia widget, mirroring
-//! claude-usage.sh. The cache/lock protocol is specified in lib.rs ("Usage
-//! cache"); output-affecting behavior is script-identical, with one
-//! deliberate improvement: the OAuth token is handed to curl as a header on
-//! STDIN (`-H @-`) instead of in argv — the sh reference put the bearer
-//! token in curl's command line, where /proc/*/cmdline exposes it to every
-//! local process for the duration of the request.
+//! `bsctl agents usage` — plan usage per harness kind, and the `usage`
+//! section of the world. One provider exists today (claude, via the OAuth
+//! usage endpoint); adding another is one `PROVIDERS` entry. The
+//! cache/lock protocol is specified in lib.rs ("Plan usage"); one
+//! deliberate improvement over the sh reference this began as: the OAuth
+//! token is handed to curl as a header on STDIN (`-H @-`) instead of in
+//! argv — a command-line token is exposed to every local process via
+//! /proc/*/cmdline for the duration of the request.
 
 use std::env;
 use std::ffi::OsString;
@@ -21,49 +22,115 @@ use crate::sys;
 const TTL_SECS: u64 = 240;
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 
-pub fn run() -> i32 {
+/// One provider: how to read a harness kind's plan usage (None = nothing
+/// known).
+type Reading = fn() -> Option<Value>;
+
+/// The provider table: kind -> how to read its plan usage. A kind with no
+/// entry simply never appears in the output; adding a provider (codex, agy
+/// — the day they grow usage endpoints) is one entry here.
+const PROVIDERS: &[(&str, Reading)] = &[("claude", claude_reading)];
+
+/// The kind-indexed usage object: `{"claude": {sessionPct, ...}}`. Kinds
+/// with nothing known (no provider, no cache, no token) are absent — an
+/// empty object means "nothing known", never an error.
+pub fn snapshot(kind: Option<&str>) -> Value {
+    let mut out = serde_json::Map::new();
+    for (k, reading) in PROVIDERS {
+        if kind.is_none_or(|want| want == *k)
+            && let Some(v) = reading()
+        {
+            out.insert((*k).to_string(), v);
+        }
+    }
+    Value::Object(out)
+}
+
+/// `agents usage [--kind] [--format]`: the snapshot as one compact JSON
+/// line (`{}` when nothing is known — always valid JSON for consumers) or
+/// the house table (nothing at all when empty — no lonely headers).
+pub fn get(kind: Option<&str>, json_out: bool) -> i32 {
+    let u = snapshot(kind);
+    if json_out {
+        println!("{u}");
+    } else if u.as_object().is_some_and(|m| !m.is_empty()) {
+        println!("{}", crate::proto::render_table(&USAGE_HEADERS, &cells(&u)));
+    }
+    0
+}
+
+/// SESSION% / WEEK% are the five-hour and seven-day windows; each RESETS
+/// column belongs to the window on its left.
+pub const USAGE_HEADERS: [&str; 5] = ["KIND", "SESSION%", "RESETS", "WEEK%", "RESETS"];
+
+/// [`USAGE_HEADERS`]'s cells, one row per kind (the map's order — sorted by
+/// kind, deterministic).
+pub fn cells(usage: &Value) -> Vec<Vec<String>> {
+    usage
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(kind, r)| {
+                    vec![
+                        kind.clone(),
+                        crate::proto::field(r, "sessionPct"),
+                        crate::proto::field(r, "sessionResets"),
+                        crate::proto::field(r, "weeklyPct"),
+                        crate::proto::field(r, "weeklyResets"),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The claude provider: the cached reading, refreshed through the flock
+/// when stale. Every failure path serves whatever the cache holds — stale
+/// beats absent, the same reasoning that keeps the cache on a non-200 —
+/// and leaves the cache mtime old, so the next call retries the refresh.
+fn claude_reading() -> Option<Value> {
     let cache = cache_path();
 
     // Fast path: a recent reading already exists, so don't touch the network.
     if fresh(&cache) {
-        serve(&cache);
-        return 0;
+        return read_cached(&cache);
     }
 
-    // Serialize refreshes across the per-monitor pollers; a loser waits and
-    // serves the winner's result. (The sh reference assumes ~/.cache exists;
-    // creating it here just makes a fresh machine work.)
+    // Serialize refreshes across every poller and streamer — exactly one
+    // process pays the curl per TTL; a loser waits, then serves whatever
+    // the winner cached.
     if let Some(d) = cache.parent() {
         let _ = fs::create_dir_all(d);
     }
     let Ok(lock) = fs::File::create(with_suffix(&cache, ".lock")) else {
-        return 0;
+        return read_cached(&cache);
     };
     if !sys::flock_exclusive(&lock, true) {
         let _ = sys::flock_exclusive(&lock, false);
-        if fresh(&cache) {
-            serve(&cache);
-        }
-        return 0;
+        return read_cached(&cache);
     }
     // Won the lock — re-check in case the previous holder just refreshed.
     if fresh(&cache) {
-        serve(&cache);
-        return 0;
+        return read_cached(&cache);
     }
 
-    let Some(tok) = read_token() else { return 0 };
-    let Some(body) = fetch(&tok) else { return 0 };
-    let Some(out) = transform(&body) else {
-        return 0;
-    };
+    match read_token()
+        .and_then(|tok| fetch(&tok))
+        .and_then(|body| transform(&body))
+    {
+        Some(out) => {
+            // Atomic cache write; serve the reading even if caching fails.
+            let tmp = with_suffix(&cache, ".tmp");
+            let _ = fs::write(&tmp, format!("{out}\n")).and_then(|_| fs::rename(&tmp, &cache));
+            serde_json::from_str(&out).ok()
+        }
+        None => read_cached(&cache),
+    }
+}
 
-    // Atomic cache write; print the reading even if caching fails (script:
-    // `printf > tmp && mv`, then an unconditional printf).
-    let tmp = with_suffix(&cache, ".tmp");
-    let _ = fs::write(&tmp, format!("{out}\n")).and_then(|_| fs::rename(&tmp, &cache));
-    println!("{out}");
-    0
+/// The cached reading as a value; missing/unparseable -> nothing known.
+fn read_cached(cache: &Path) -> Option<Value> {
+    serde_json::from_str(&fs::read_to_string(cache).ok()?).ok()
 }
 
 /// `${XDG_CACHE_HOME:-$HOME/.cache}/claude-usage.json` (empty env = unset).
@@ -94,13 +161,6 @@ fn fresh(cache: &Path) -> bool {
     }
 }
 
-/// `cat "$cache"` — raw bytes (the cached line already ends in \n).
-fn serve(cache: &Path) {
-    if let Ok(b) = fs::read(cache) {
-        let _ = std::io::stdout().write_all(&b);
-    }
-}
-
 /// Token from `~/.claude/.credentials.json`; any failure (missing HOME or
 /// file, bad JSON, wrong shape, empty token) -> None -> silent exit 0.
 fn read_token() -> Option<String> {
@@ -120,8 +180,10 @@ pub fn token_from(credentials: &str) -> Option<String> {
 
 /// curl boundary (faked in tests with a stub on PATH). Returns the response
 /// BODY on a clean 200, None otherwise — curl errors, timeouts and non-200
-/// statuses all keep the cache and print nothing. The Authorization header
-/// travels on curl's stdin (`-H @-`), NEVER in argv (see module header).
+/// statuses all fall back to the stale cache. Bounded by `--max-time 6`:
+/// this call sits on the stream engine's tick path and must never hang a
+/// subscriber unbounded. The Authorization header travels on curl's stdin
+/// (`-H @-`), NEVER in argv (see module header).
 fn fetch(token: &str) -> Option<Vec<u8>> {
     let mut child = Command::new("curl")
         .args([

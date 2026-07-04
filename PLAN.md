@@ -13,7 +13,8 @@ multi-harness arcs: the commit log of 2026-07-03).
 world — text for humans, `--format json --stream` for subscribers),
 `ws focus`/`ws send` (all movement), `ws name`/`map`/`prefs`,
 `display get/set/reset`, `agents set` (the harness hook endpoint) /
-`agents get`, and the usage cache. Nothing watches state files but bsctl:
+`agents get`/`agents usage` (plan usage, kind-indexed, riding in `status`
+too). Nothing watches state files but bsctl:
 each bar instance of the **battlestation-workspaces** plugin spawns
 `bsctl status --format json --stream` (NDJSON, emit-on-change, ~50ms
 event-to-pixel) and renders lines; commands flow back through bsctl

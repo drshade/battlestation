@@ -77,6 +77,10 @@ impl TestEnv {
         c.env("XDG_RUNTIME_DIR", &self.run)
             .env("HOME", &self.home)
             .env("XDG_STATE_HOME", self.root.join("state"))
+            // Isolate the usage cache too: without this, the developer
+            // machine's real XDG_CACHE_HOME leaks real plan usage into the
+            // world (seen live the day usage joined the status schema).
+            .env("XDG_CACHE_HOME", self.root.join("cache"))
             .env("PATH", &self.path)
             .env_remove("CLAUDE_WS_DEBUG")
             // Socket discovery must scan THIS env's <run>/hypr, not resolve
@@ -743,6 +747,9 @@ fn stream_status_converges_and_matches_agents_get() {
     assert_eq!(first["workspaces"], Value::Null);
     assert_eq!(first["prefs"], json!([]));
     assert_eq!(first["agents"], json!([]));
+    // no credentials in this env: usage is {} (nothing known), never null —
+    // and read without touching the network (no token, no curl).
+    assert_eq!(first["usage"], json!({}));
 
     // A session file appearing (what a hook write looks like) must emit.
     env.write_state(

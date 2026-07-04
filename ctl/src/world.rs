@@ -1,5 +1,6 @@
 //! `bsctl status` — the full state of the world in one object: displays,
-//! the battlespace join, the preferences, and the live agent sessions. The
+//! the battlespace join, the preferences, the live agent sessions, and the
+//! per-kind plan usage. The
 //! text form is the at-a-glance human overview (the model's learning
 //! surface); the json form is the machine feed, and with `--stream` it is
 //! THE subscription the widget lives on (schema in lib.rs). Assembly is
@@ -11,11 +12,13 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::ws::{BsRow, bs_join, displays_from, human_name, live_ids, pref_rows, pref_rows_json};
-use crate::{agents, ipc, proto, sessions, sys, ws};
+use crate::{agents, ipc, proto, sessions, sys, usage, ws};
 
 /// The world, queried live. Session scan first (it sweeps), compositor
 /// snapshots second; the map and prefs files are read lock-free (their
-/// writers rename atomically).
+/// writers rename atomically). Usage rides the shared flocked cache, so
+/// every streamer and poller combined pays at most one fetch per TTL —
+/// and the stream's tick is what picks a TTL expiry up.
 pub fn snapshot() -> Value {
     let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
     let wsj = ipc::json("workspaces");
@@ -26,6 +29,7 @@ pub fn snapshot() -> Value {
         mons.as_ref(),
         &std::fs::read_to_string(ws::map_file()).unwrap_or_default(),
         &ws::load_prefs(),
+        usage::snapshot(None),
     )
 }
 
@@ -41,6 +45,7 @@ pub fn assemble(
     mons: Option<&Value>,
     map_content: &str,
     prefs: &BTreeMap<i64, String>,
+    usage: Value,
 ) -> Value {
     let comp = match (wsj, mons) {
         (Some(w), Some(m)) => Some((w, m)),
@@ -70,6 +75,9 @@ pub fn assemble(
         "workspaces": workspaces,
         "prefs": prefs_v,
         "agents": Value::Array(agents::agent_rows(recs, None, None)),
+        // Cache truth like prefs is file truth: {} when nothing is known,
+        // never null — an unknown usage is not a lost compositor.
+        "usage": usage,
     })
 }
 
@@ -205,6 +213,15 @@ pub fn render_text(world: &Value) -> String {
         ));
     }
 
+    if let Some(u) = world.get("usage")
+        && u.as_object().is_some_and(|m| !m.is_empty())
+    {
+        sections.push(section(
+            "usage",
+            &proto::render_table(&usage::USAGE_HEADERS, &usage::cells(u)),
+        ));
+    }
+
     let waiting: Vec<Vec<String>> = world
         .get("prefs")
         .and_then(Value::as_array)
@@ -231,6 +248,11 @@ pub fn render_text(world: &Value) -> String {
 mod tests {
     use super::*;
 
+    fn fixture_usage() -> Value {
+        json!({"claude": {"sessionPct": 34, "sessionResets": "2026-07-03T10:00:00Z",
+                          "weeklyPct": 62, "weeklyResets": "2026-07-07T00:00:00Z"}})
+    }
+
     fn fixtures() -> (Vec<Value>, Value, Value, BTreeMap<i64, String>) {
         let recs = vec![json!({
             "sid": "s-1", "ws": 3, "status": "thinking", "kind": "claude",
@@ -256,7 +278,7 @@ mod tests {
     #[test]
     fn assemble_joins_all_sections() {
         let (recs, wsj, mons, prefs) = fixtures();
-        let w = assemble(recs, Some(&wsj), Some(&mons), "", &prefs);
+        let w = assemble(recs, Some(&wsj), Some(&mons), "", &prefs, fixture_usage());
         // displays numbered leftmost-first: eDP-1 at x=0 is display 1
         assert_eq!(w["displays"][0]["name"], "eDP-1");
         assert_eq!(w["displays"][0]["id"], 1);
@@ -282,12 +304,14 @@ mod tests {
         // agents ride the published schema
         assert_eq!(w["agents"][0]["session"], "s-1");
         assert_eq!(w["agents"][0]["subagents"][0]["id"], "a1");
+        // usage is passed through kind-indexed; {} would mean nothing known
+        assert_eq!(w["usage"]["claude"]["sessionPct"], 34);
     }
 
     #[test]
     fn assemble_nulls_compositor_sections_when_a_query_fails() {
         let (recs, wsj, _, prefs) = fixtures();
-        let w = assemble(recs, Some(&wsj), None, "", &prefs);
+        let w = assemble(recs, Some(&wsj), None, "", &prefs, json!({}));
         assert_eq!(w["displays"], Value::Null, "not [] — that would be a lie");
         assert_eq!(w["workspaces"], Value::Null);
         // prefs stay (file truth) with unknowable annotations nulled
@@ -296,6 +320,8 @@ mod tests {
         assert_eq!(w["prefs"][0]["live"], Value::Null);
         // agents are file+proc truth, never nulled
         assert_eq!(w["agents"][0]["session"], "s-1");
+        // usage is cache truth: {} (nothing known), never null
+        assert_eq!(w["usage"], json!({}));
     }
 
     #[test]
@@ -303,7 +329,7 @@ mod tests {
         // The status feed and `agents get` must never drift: same input,
         // same rows.
         let (recs, wsj, mons, prefs) = fixtures();
-        let w = assemble(recs.clone(), Some(&wsj), Some(&mons), "", &prefs);
+        let w = assemble(recs.clone(), Some(&wsj), Some(&mons), "", &prefs, json!({}));
         assert_eq!(
             w["agents"],
             Value::Array(agents::agent_rows(recs, None, None))
@@ -313,7 +339,7 @@ mod tests {
     #[test]
     fn text_render_reads_like_the_model() {
         let (recs, wsj, mons, prefs) = fixtures();
-        let w = assemble(recs, Some(&wsj), Some(&mons), "", &prefs);
+        let w = assemble(recs, Some(&wsj), Some(&mons), "", &prefs, fixture_usage());
         assert_eq!(
             render_text(&w),
             "displays\n\
@@ -330,13 +356,17 @@ mod tests {
              \x20 KIND    STATUS    WS  SUBAGENTS  TITLE           SESSION\n\
              \x20 claude  thinking  3   1          Fix the widget  s-1\n\
              \n\
+             usage\n\
+             \x20 KIND    SESSION%  RESETS                WEEK%  RESETS\n\
+             \x20 claude  34        2026-07-03T10:00:00Z  62     2026-07-07T00:00:00Z\n\
+             \n\
              prefs waiting for absent displays\n\
              \x20 WS  DISPLAY\n\
              \x20 9   DP-2\n"
         );
         // degraded: honest per-section notes, agents still tabled
         let (recs, ..) = fixtures();
-        let w = assemble(recs, None, None, "", &BTreeMap::new());
+        let w = assemble(recs, None, None, "", &BTreeMap::new(), json!({}));
         let t = render_text(&w);
         assert!(t.starts_with(
             "displays\n\

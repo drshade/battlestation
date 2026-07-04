@@ -1,6 +1,6 @@
-//! End-to-end tests for `bsctl usage` with a fake curl (captures argv and
-//! stdin, serves a canned `body\n<code>` response) and fake credentials —
-//! the network never enters the picture.
+//! End-to-end tests for `bsctl agents usage` with a fake curl (captures
+//! argv and stdin, serves a canned `body\n<code>` response) and fake
+//! credentials — the network never enters the picture.
 
 use std::fs;
 use std::path::PathBuf;
@@ -74,9 +74,16 @@ impl TestEnv {
         }
     }
 
+    /// `agents usage --format json` — the default form the tests exercise.
     fn cmd(&self) -> Command {
+        let mut c = self.cmd_args(&["agents", "usage", "--format", "json"]);
+        c.stdout(std::process::Stdio::piped());
+        c
+    }
+
+    fn cmd_args(&self, args: &[&str]) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_bsctl"));
-        c.arg("usage")
+        c.args(args)
             .env("XDG_CACHE_HOME", &self.cache_dir)
             .env("HOME", &self.home)
             .env("PATH", &self.path);
@@ -85,6 +92,10 @@ impl TestEnv {
 
     fn run(&self) -> std::process::Output {
         self.cmd().output().unwrap()
+    }
+
+    fn run_args(&self, args: &[&str]) -> std::process::Output {
+        self.cmd_args(args).output().unwrap()
     }
 
     fn cache(&self) -> PathBuf {
@@ -128,13 +139,18 @@ fn usage_body() -> String {
     .to_string()
 }
 
-fn expected_json() -> Value {
+fn expected_reading() -> Value {
     json!({
         "sessionPct": 34,
         "sessionResets": "2026-07-03T10:00:00Z",
         "weeklyPct": 62,
         "weeklyResets": "2026-07-07T00:00:00Z",
     })
+}
+
+/// The published shape: readings indexed by harness kind.
+fn expected_json() -> Value {
+    json!({ "claude": expected_reading() })
 }
 
 // ---- cache behavior ----------------------------------------------------------
@@ -145,7 +161,8 @@ fn fresh_cache_is_served_without_touching_the_network() {
     env.write_cache("{\"sessionPct\":11}\n", Duration::from_secs(10));
     let out = env.run();
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(out.stdout, b"{\"sessionPct\":11}\n");
+    let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(printed, json!({"claude": {"sessionPct": 11}}));
     assert_eq!(env.curl_calls(), 0, "fresh cache must skip curl entirely");
 }
 
@@ -158,8 +175,10 @@ fn expired_cache_refreshes_prints_and_rewrites_atomically() {
     assert_eq!(out.status.code(), Some(0));
     let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(printed, expected_json());
-    // cache now holds exactly what was printed
-    assert_eq!(fs::read(env.cache()).unwrap(), out.stdout);
+    // the cache holds the bare reading (the kind indexing is output shape,
+    // not cache shape)
+    let cached: Value = serde_json::from_slice(&fs::read(env.cache()).unwrap()).unwrap();
+    assert_eq!(cached, expected_reading());
     assert_eq!(env.curl_calls(), 1);
 }
 
@@ -175,13 +194,16 @@ fn no_cache_at_all_fetches_and_creates_it() {
 }
 
 #[test]
-fn non_200_prints_nothing_and_keeps_the_stale_cache() {
+fn non_200_serves_the_stale_cache_and_keeps_it() {
+    // Stale beats absent: a rate-limited refresh serves the last good
+    // value (and leaves the cache mtime old, so the next call retries).
     let env = TestEnv::new("non-200");
     env.write_cache("{\"sessionPct\":11}\n", Duration::from_secs(300));
     env.respond(r#"{"error": "rate limited"}"#, "429");
     let out = env.run();
     assert_eq!(out.status.code(), Some(0));
-    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(printed, json!({"claude": {"sessionPct": 11}}));
     assert_eq!(
         fs::read(env.cache()).unwrap(),
         b"{\"sessionPct\":11}\n",
@@ -190,14 +212,15 @@ fn non_200_prints_nothing_and_keeps_the_stale_cache() {
 }
 
 #[test]
-fn malformed_200_body_prints_nothing_and_keeps_the_cache() {
+fn malformed_200_body_serves_the_stale_cache() {
     let env = TestEnv::new("malformed");
     env.write_cache("{\"sessionPct\":11}\n", Duration::from_secs(300));
     for body in ["not json at all", r#"{"five_hour": 3, "seven_day": {}}"#] {
         env.respond(body, "200");
         let out = env.run();
         assert_eq!(out.status.code(), Some(0));
-        assert!(out.stdout.is_empty() && out.stderr.is_empty());
+        let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(printed, json!({"claude": {"sessionPct": 11}}));
         assert_eq!(fs::read(env.cache()).unwrap(), b"{\"sessionPct\":11}\n");
     }
 }
@@ -211,7 +234,8 @@ fn missing_credentials_exit_0_silently_without_curl() {
     env.respond(&usage_body(), "200");
     let out = env.run();
     assert_eq!(out.status.code(), Some(0));
-    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    assert_eq!(out.stdout, b"{}\n", "nothing known is {{}} — valid JSON");
+    assert!(out.stderr.is_empty());
     assert_eq!(env.curl_calls(), 0);
     assert!(!env.cache().exists());
 }
@@ -260,4 +284,30 @@ fn concurrent_pollers_share_one_fetch() {
     assert_eq!(oa.stdout, ob.stdout, "both pollers see the same reading");
     let printed: Value = serde_json::from_slice(&oa.stdout).unwrap();
     assert_eq!(printed, expected_json());
+}
+
+// ---- kind filter & text form ---------------------------------------------------
+
+#[test]
+fn kind_filter_and_text_table() {
+    let env = TestEnv::new("kind-text");
+    env.write_cache(
+        "{\"sessionPct\":34,\"sessionResets\":\"2026-07-03T10:00:00Z\",\"weeklyPct\":62,\"weeklyResets\":\"2026-07-07T00:00:00Z\"}\n",
+        Duration::from_secs(10),
+    );
+    // --kind claude passes; an unknown kind filters to nothing known
+    let out = env.run_args(&["agents", "usage", "--kind", "claude", "--format", "json"]);
+    let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(printed, expected_json());
+    let out = env.run_args(&["agents", "usage", "--kind", "codex", "--format", "json"]);
+    assert_eq!(out.stdout, b"{}\n");
+    // text: the house table; empty result prints nothing (no lonely header)
+    let out = env.run_args(&["agents", "usage"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "KIND    SESSION%  RESETS                WEEK%  RESETS\n\
+         claude  34        2026-07-03T10:00:00Z  62     2026-07-07T00:00:00Z\n"
+    );
+    let out = env.run_args(&["agents", "usage", "--kind", "codex"]);
+    assert!(out.stdout.is_empty());
 }

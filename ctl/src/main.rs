@@ -39,7 +39,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AgentsCmd,
     },
-    /// The full state of the world: displays, battlespaces, prefs, agents
+    /// The full state of the world: displays, battlespaces, prefs, agents, usage
     Status {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
@@ -47,8 +47,6 @@ enum Cmd {
         #[arg(long)]
         stream: bool,
     },
-    /// Print Claude plan usage as one JSON line (cached, ttl 240s)
-    Usage,
     /// Generate shell completions on stdout
     Completions { shell: clap_complete::Shell },
 }
@@ -527,6 +525,14 @@ enum AgentsCmd {
         #[arg(long)]
         stream: bool,
     },
+    /// Plan usage per harness kind (cached; one provider today: claude)
+    Usage {
+        /// Only this harness kind
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+    },
 }
 
 fn main() {
@@ -635,6 +641,9 @@ fn main() {
                     )
                 }
             }),
+            AgentsCmd::Usage { kind, format } => {
+                bsctl::usage::get(kind.as_deref(), format == Format::Json)
+            }
         },
         Cmd::Status { format, stream } => {
             stream_requires_json(stream, format).unwrap_or_else(|| {
@@ -649,7 +658,6 @@ fn main() {
                 }
             })
         }
-        Cmd::Usage => bsctl::usage::run(),
         Cmd::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "bsctl", &mut std::io::stdout());
             0

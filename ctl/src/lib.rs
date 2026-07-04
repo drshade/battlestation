@@ -198,7 +198,8 @@
 //! `{"displays": [{id, name, x, y, focused, activeWs, specialShowing}],
 //!   "workspaces": [{ws, bs, name, display, windows, active, pref}],
 //!   "prefs": [{ws, display, present, live}],
-//!   "agents": [ ...exactly `agents get`'s rows... ]}`
+//!   "agents": [ ...exactly `agents get`'s rows... ],
+//!   "usage": { ...exactly `agents usage`'s object... }}`
 //!
 //! `workspaces` is the battlespace join in battlespace order; `name` is
 //! null while a workspace is unnamed (Hyprland names every workspace its
@@ -359,22 +360,30 @@
 //! observed state) and strayed workspaces are settled home
 //! (`ws::restore_strays`).
 //!
-//! # Usage cache (`bsctl usage`)
+//! # Plan usage (`bsctl agents usage`)
 //!
-//! Fetches Claude Code plan usage from the OAuth usage endpoint (the same
-//! data as `/usage`) and emits one compact JSON line for the widget:
-//! `{"sessionPct": <int>, "sessionResets": "...", "weeklyPct": <int>,
-//! "weeklyResets": "..."}`.
+//! Plan usage per harness kind, indexed for the day codex/agy grow usage
+//! endpoints: `{"<kind>": {"sessionPct": <int>, "sessionResets": "...",
+//! "weeklyPct": <int>, "weeklyResets": "..."}}` — kinds with nothing known
+//! are simply absent, so `{}` means "nothing known", never an error (text
+//! renders the house table, or nothing at all when empty). One provider
+//! exists today (claude, the OAuth usage endpoint — the same data as
+//! `/usage`); adding one is a single entry in usage.rs's provider table.
+//! `--kind` filters to one kind.
 //!
-//! The reading is cached at `${XDG_CACHE_HOME:-$HOME/.cache}/
-//! claude-usage.json` (ttl 240s) so the per-monitor pollers share a single
-//! API call; refreshes are serialized with flock(2) on `<cache>.lock` —
-//! losers block, then serve whatever the winner cached. On anything but a
-//! clean 200 with a well-formed body, nothing is printed and the cache is
-//! kept, so a rate-limited (429) or expired-token (401) request never
-//! clobbers a good value; the widget just keeps its current numbers. The
+//! The claude reading is cached at `${XDG_CACHE_HOME:-$HOME/.cache}/
+//! claude-usage.json` (ttl 240s; the cache stores the bare reading — kind
+//! indexing is output shape). Refreshes are serialized with flock(2) on
+//! `<cache>.lock`, so every poller and streamer combined pays at most one
+//! fetch per TTL — losers block, then serve whatever the winner cached.
+//! Every failed refresh (non-200, malformed body, missing token) serves
+//! the STALE cache instead of nothing — stale beats absent, and the
+//! untouched mtime means the next call retries — so a rate-limited (429)
+//! or expired-token (401) request never clobbers or blanks a good value.
+//! The fetch is bounded (`curl --max-time 6`): it sits on the stream
+//! engine's tick path and must never hang a subscriber unbounded. The
 //! OAuth token comes from `~/.claude/.credentials.json`
-//! (`.claudeAiOauth.accessToken`; missing/unreadable -> silent exit 0) and
+//! (`.claudeAiOauth.accessToken`; missing/unreadable -> nothing known) and
 //! is passed to curl on stdin, never in argv.
 //!
 //! # Hyprland IPC (`ipc.rs`)

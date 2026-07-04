@@ -1,5 +1,6 @@
 // Claude plan-usage indicator: the Anthropic sunburst + usage %, with a hover
-// tooltip. Polls bsctl usage on its own (cached, ~5 min).
+// tooltip. Polls `bsctl agents usage` on its own (cached, ~5 min); the output
+// is indexed by harness kind and this indicator reads the claude entry.
 import QtQuick
 import Quickshell.Io
 import qs.Commons
@@ -35,11 +36,13 @@ Item {
   }
   Process {
     id: usageProc
-    command: ["sh", "-c", "$HOME/.local/bin/bsctl usage"]
+    command: ["sh", "-c", "$HOME/.local/bin/bsctl agents usage --format json"]
     stdout: StdioCollector {
       onStreamFinished: {
         try {
-          const u = JSON.parse(text);
+          const u = JSON.parse(text).claude;
+          if (!u)
+            return; // nothing known: keep the current numbers
           usage.sessionPct = u.sessionPct;
           usage.sessionResets = u.sessionResets;
           usage.weeklyPct = u.weeklyPct;

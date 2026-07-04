@@ -46,6 +46,7 @@ fn top_level_usage_errors_exit_2() {
         &["bogus"],
         &["poll"],                                        // retired: agents get took over
         &["watch"],                                       // retired: --stream took over
+        &["usage"],                                       // retired: agents usage took over
         &["agents"],                                      // set|get required
         &["ws"],                                          // subcommand required
         &["ws", "focus"],                                 // a selector is required
@@ -68,9 +69,16 @@ fn help_lists_all_subcommands() {
     let out = bsctl(&["--help"]);
     assert_eq!(out.status.code(), Some(0));
     let help = String::from_utf8_lossy(&out.stdout);
-    for sub in ["ws", "display", "agents", "status", "usage", "completions"] {
+    for sub in ["ws", "display", "agents", "status", "completions"] {
         assert!(help.contains(sub), "--help must mention {sub}: {help}");
     }
+    // plan usage lives under agents now (the top-level verb is retired, but
+    // clap's "Usage:" header keeps the word in --help, so assert there):
+    let agents_help = bsctl(&["agents", "--help"]);
+    assert!(
+        String::from_utf8_lossy(&agents_help.stdout).contains("usage"),
+        "agents --help must list the usage verb"
+    );
     // the retired verbs must be GONE, not hidden
     for gone in ["poll", "watch"] {
         assert!(

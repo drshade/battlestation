@@ -61,8 +61,8 @@ symlinked into place with **GNU Stow**.
   (`bsctl agents set` behind every harness's hooks, the
   `bsctl status --stream` feed behind the widget), the workspace verbs
   (`bsctl ws` — focus/send/name/map/prefs, driven by keybinds and the
-  widget), display management (`bsctl display`) and the usage cache
-  (`bsctl usage`). Protocol contracts are specified in `ctl/src/lib.rs`;
+  widget), display management (`bsctl display`) and per-harness plan usage
+  (`bsctl agents usage`). Protocol contracts are specified in `ctl/src/lib.rs`;
   bsctl is the only thing that reads or writes its state files — everything
   else queries bsctl (one-shot or `--stream`). Plain system glue stays shell — and anything
   that must work **when the system is broken** (`restart_crashed_lock.sh`,
