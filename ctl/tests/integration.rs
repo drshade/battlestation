@@ -99,12 +99,12 @@ impl TestEnv {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(payload.as_bytes())
-            .unwrap();
+        // A hook that never reads stdin (the kindless no-op) may exit
+        // before this write lands; EPIPE is that contract working, not a
+        // test failure.
+        if let Err(e) = child.stdin.take().unwrap().write_all(payload.as_bytes()) {
+            assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "{e}");
+        }
         child.wait().unwrap().code().unwrap()
     }
 

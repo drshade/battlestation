@@ -129,11 +129,22 @@ enum WsCmd {
         #[arg(long)]
         follow: bool,
     },
-    /// Swap ALL workspaces between this display and display N
-    Swapdisplays {
-        #[arg(value_parser = clap::value_parser!(u32).range(1..))]
-        n: u32,
+    /// List workspace->display preferences
+    Prefs,
+    /// Set a workspace's preferred display (default: its current one)
+    #[command(allow_negative_numbers = true)]
+    Prefer { id: i64, output: Option<String> },
+    /// Drop one workspace's preference (or --all of them)
+    #[command(allow_negative_numbers = true)]
+    Forget {
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        id: Option<i64>,
+        /// Forget every preference
+        #[arg(long)]
+        all: bool,
     },
+    /// Move workspaces to their preferred displays
+    Reconcile,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -170,7 +181,11 @@ fn main() {
             WsCmd::Order => bsctl::ws::order(),
             WsCmd::Display { n } => bsctl::ws::display(n as usize),
             WsCmd::Movetodisplay { n, follow } => bsctl::ws::movetodisplay(n as usize, follow),
-            WsCmd::Swapdisplays { n } => bsctl::ws::swapdisplays(n as usize),
+            WsCmd::Prefs => bsctl::ws::prefs(),
+            WsCmd::Prefer { id, output } => bsctl::ws::prefer(id, output.as_deref()),
+            // clap enforces id XOR --all, so a None id IS --all.
+            WsCmd::Forget { id, all: _ } => bsctl::ws::forget(id),
+            WsCmd::Reconcile => bsctl::ws::reconcile(),
         },
         Cmd::Usage => bsctl::usage::run(),
         Cmd::Display { cmd } => match cmd {

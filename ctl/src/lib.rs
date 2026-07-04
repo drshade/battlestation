@@ -119,7 +119,10 @@
 //! monitorremoved(v2), openwindow, closewindow, movewindow(v2),
 //! activespecial(v2), configreloaded; everything else — notably the noisy
 //! windowtitle*/activewindow*, which nothing rendered depends on — is
-//! ignored. A socket2 disconnect (compositor restart) rides the transient
+//! ignored. A `monitoraddedv2` additionally applies the arriving output's
+//! workspace->display preferences — the one place watch dispatches instead
+//! of mirroring (see "Workspace->display preference"). A
+//! socket2 disconnect (compositor restart) rides the transient
 //! error path: log to stderr once, sleep 1s, re-init (lock included) and
 //! reconnect. If socket2 can't connect at all (no Hyprland), watch runs
 //! DEGRADED — agent state only, compositor null. `bsctl poll` remains a
@@ -136,7 +139,8 @@
 //! "reordering" is purely a display-layer remap: real ids stay put, and a
 //! persisted preference list maps position <-> real id. The
 //! battlestation-workspaces bar plugin renders the same order (pills are
-//! labelled by position) and writes the same file when a pill is dragged.
+//! labelled by position) and drives `bsctl ws set` when a pill is dragged —
+//! bsctl is the file's only writer.
 //!
 //! The order file, `${XDG_STATE_HOME:-$HOME/.local/state}/
 //! battlestation-workspaces/order`, is just real ids in preferred order,
@@ -155,22 +159,61 @@
 //! Renaming never renumbers: `rename <id> [name]` only sets the display name
 //! (empty name resets it to the id's number).
 //!
-//! ## Display numbering (`display` / `movetodisplay` / `swapdisplays`)
+//! ## Display numbering (`display` / `movetodisplay`)
 //!
 //! Display N = the Nth ENABLED output sorted by (x, y) position, 1-based —
 //! leftmost is display 1. Like workspace positions, the number is a pure
 //! display-layer remap (output names stay the compositor's; ties break by
-//! name). The Lua dispatcher forms — `hl.dsp.focus({ monitor })`,
-//! `hl.dsp.workspace.move({ workspace, monitor })`,
-//! `hl.dsp.workspace.swap_monitors({ monitor1, monitor2 })` — were
-//! discovered by live probing (Hyprland 0.55.4; the legacy `focusmonitor`/
-//! `moveworkspacetomonitor`/`swapactiveworkspaces` names are rejected by the
-//! Lua parser) and are pinned byte-for-byte in tests. `movetodisplay` pins
+//! name). The Lua dispatcher forms — `hl.dsp.focus({ monitor })` and
+//! `hl.dsp.workspace.move({ workspace, monitor })` — were discovered by
+//! live probing (Hyprland 0.55.4; the legacy `focusmonitor`/
+//! `moveworkspacetomonitor` names are rejected by the Lua parser) and are
+//! pinned byte-for-byte in tests. `movetodisplay` pins
 //! focus explicitly after the move (follow -> the moved workspace, stay ->
 //! back to the source display) rather than trusting the move's
 //! version-dependent inherent focus. Workspace ids are untouched by monitor
 //! moves, so the order file needs no migration when workspaces change
 //! displays.
+//!
+//! ## Workspace->display preference (the `ws` preference verbs / watch)
+//!
+//! Hyprland evacuates a disappearing display's workspaces to the survivors
+//! and never moves them back on replug — so each workspace can have a
+//! preferred display, and an arriving display collects its workspaces.
+//! `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/
+//! preferred` is the order file's sibling with the same persistence
+//! rationale: a preference is user INTENT, and intent outlives boots
+//! (workspace ids are stable habits under global numbering). Plain text,
+//! one `<id> <output>` pair per line, sorted by id, trailing newline;
+//! missing/empty file = no preferences; unparseable lines are skipped
+//! (one corrupt line loses one preference, never the file); writes are
+//! atomic (temp+rename).
+//!
+//! SPARSE BY DESIGN: most workspaces have no preference and are entirely
+//! Hyprland's business — a new workspace is born unmanaged and stays so
+//! until the user explicitly homes it, and a reconcile only ever touches
+//! the homed few. Preferences are stamped at INTENT time, never at
+//! teardown time (when a display disappears there is nothing to record
+//! and no race to lose — Hyprland's evacuation is left alone), and the
+//! only writers are the two homing verbs: `ws prefer <id> [<output>]` —
+//! explicit; a named output is accepted verbatim even when absent
+//! (pre-declaring a home is legitimate), unnamed stamps the live
+//! workspace's current display — and `ws movetodisplay`, because an
+//! explicit move IS the user homing that workspace (unconditional
+//! overwrite). Reorders (`ws set`, pill drags) and every bulk operation
+//! never stamp. `ws forget (<id> | --all)` deletes. Watch and Hyprland never stamp: evacuations
+//! and automatic restores are not intent — that asymmetry IS the model.
+//!
+//! APPLYING: `ws prefs` lists the preferences with reality annotations
+//! (output presence, workspace liveness); `ws reconcile` moves every live
+//! workspace that prefers a PRESENT output and sits elsewhere, via the
+//! bounded settle machinery (`ws::restore_strays`) — a display gaining
+//! workspaces then SHOWS one of its preferred ones (never a dead id —
+//! focusing a dead id would CREATE it), other displays keep their view,
+//! and the keyboard ends on the focused display. `bsctl watch` runs the
+//! same apply scoped to the arriving output on `monitoraddedv2` — watch's
+//! ONLY dispatch power; everywhere else it remains a passive mirror of
+//! compositor and agent state.
 //!
 //! # Usage cache (`bsctl usage`)
 //!

@@ -1,18 +1,23 @@
 //! `bsctl ws` — workspace display-order commands, mirroring ws.sh
-//! verb-for-verb, plus the display-level verbs (`display`, `movetodisplay`,
-//! `swapdisplays`). The order-file protocol, the display-position model and
-//! the display numbering are specified in lib.rs ("Workspace display
-//! order"); this module keeps the script's observable behavior exactly:
-//! same dispatch strings (Hyprland's Lua parser is picky — these are the
-//! known-good forms, the monitor ones discovered by live probing), same
-//! file bytes, same exit codes (usage errors 2 via clap;
+//! verb-for-verb, plus the display-level verbs (`display`, `movetodisplay`)
+//! and the workspace->display preference (sparse; written only by `prefer`
+//! and `movetodisplay`, listed/dropped/applied by
+//! `prefs`/`forget`/`reconcile`, and applied by `bsctl watch` when an
+//! output arrives). The order-file protocol, the
+//! display-position model, the
+//! display numbering and the preference protocol are specified in lib.rs
+//! ("Workspace display order"); this module keeps the script's observable
+//! behavior exactly: same dispatch strings (Hyprland's Lua parser is picky
+//! — these are the known-good forms, the monitor ones discovered by live
+//! probing), same file bytes, same exit codes (usage errors 2 via clap;
 //! position-off-the-end 1, the sh `[ -n "$id" ] && dispatch` leftover
 //! status).
 
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -114,46 +119,6 @@ pub fn move_workspace_cmd(id: i64, monitor: &str) -> String {
     )
 }
 
-/// The full dispatch sequence for swapping EVERY workspace between two
-/// displays (`swapdisplays <n>`). Not `swap_monitors`/`swapactiveworkspaces`
-/// — that Lua dispatcher exchanges only the two visible workspaces; the verb
-/// here exchanges the complete sets. Plan:
-/// 1. move all of TARGET's workspaces to the current display, then all of
-///    the current display's originals to target. One side briefly empties
-///    (Hyprland spawns a filler workspace there), but the filler is empty
-///    and loses focus at step 2, so the compositor garbage-collects it.
-/// 2. re-assert what each display SHOWS: focus the current display's old
-///    active (now living on target — target switches to it), then focus
-///    target's old active (now on current) — which also lands the keyboard
-///    back on the display the user started on, looking at the swapped-in
-///    workspace.
-///
-/// Pure: takes the two id lists + each side's old active, returns dispatch
-/// strings in order.
-pub fn swap_plan(
-    cur_mon: &str,
-    tgt_mon: &str,
-    cur_ids: &[i64],
-    tgt_ids: &[i64],
-    cur_active: Option<i64>,
-    tgt_active: Option<i64>,
-) -> Vec<String> {
-    let mut cmds = Vec::new();
-    for id in tgt_ids {
-        cmds.push(move_workspace_cmd(*id, cur_mon));
-    }
-    for id in cur_ids {
-        cmds.push(move_workspace_cmd(*id, tgt_mon));
-    }
-    if let Some(a) = cur_active {
-        cmds.push(focus_cmd(a)); // now on target: target displays it
-    }
-    if let Some(a) = tgt_active {
-        cmds.push(focus_cmd(a)); // now on current: current displays it, keyboard returns
-    }
-    cmds
-}
-
 /// One enabled output, in display order. Display numbering is a pure remap
 /// of `monitors` JSON: enabled outputs sorted by (x, y), 1-based — leftmost
 /// is display 1. Like workspace positions, the number is a display-layer
@@ -234,6 +199,188 @@ pub fn name_of(workspaces: &Value, id: i64) -> String {
         Some(Value::Null) | None => "null".to_string(),
         Some(v) => v.to_string(),
     }
+}
+
+// ---- workspace->display preference ------------------------------------------
+
+/// `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/preferred`
+/// — one `<id> <output>` pair per line, sorted by id, trailing newline. A
+/// sibling of the order file with the same persistence rationale: a
+/// preference is user INTENT, and intent outlives boots (workspace ids are
+/// stable habits under global numbering).
+pub fn pref_file() -> PathBuf {
+    order_file().with_file_name("preferred")
+}
+
+/// Preference-file parse. Lines that aren't exactly `<id> <output>` are
+/// skipped — a corrupt line loses one preference, never the file; a
+/// duplicated id keeps the last line (later = newer intent).
+pub fn parse_prefs(content: &str) -> BTreeMap<i64, String> {
+    let mut out = BTreeMap::new();
+    for line in content.lines() {
+        let mut f = line.split_whitespace();
+        if let (Some(id), Some(output), None) = (f.next(), f.next(), f.next())
+            && let Ok(id) = id.parse::<i64>()
+        {
+            out.insert(id, output.to_string());
+        }
+    }
+    out
+}
+
+/// The inverse of [`parse_prefs`]: one pair per line, sorted by id (the
+/// map's order); no preferences serialize to the empty file.
+pub fn serialize_prefs(prefs: &BTreeMap<i64, String>) -> String {
+    prefs
+        .iter()
+        .map(|(id, output)| format!("{id} {output}\n"))
+        .collect()
+}
+
+/// [`parse_prefs`] from a file; missing/unreadable reads as no preferences.
+pub fn load_prefs_from(path: &Path) -> BTreeMap<i64, String> {
+    parse_prefs(&fs::read_to_string(path).unwrap_or_default())
+}
+
+/// Atomic write (temp+rename in the same dir, the crate's pattern);
+/// best-effort like every preference write — failures are dropped.
+pub fn save_prefs_to(path: &Path, prefs: &BTreeMap<i64, String>) {
+    let Some(dir) = path.parent() else { return };
+    let _ = fs::create_dir_all(dir);
+    let tmp = dir.join(".preferred.tmp");
+    if fs::write(&tmp, serialize_prefs(prefs)).is_ok() {
+        let _ = fs::rename(&tmp, path);
+    }
+}
+
+/// [`load_prefs_from`] / [`save_prefs_to`] bound to [`pref_file`].
+pub fn load_prefs() -> BTreeMap<i64, String> {
+    load_prefs_from(&pref_file())
+}
+
+fn save_prefs(prefs: &BTreeMap<i64, String>) {
+    save_prefs_to(&pref_file(), prefs)
+}
+
+/// Stamp preferences — the write side of the model's one rule: a
+/// preference records EXPLICIT user intent, so the stamping call sites are
+/// exactly the two homing verbs (`prefer`, `movetodisplay`) and nothing
+/// else; reorders and bulk operations never stamp, and watch and Hyprland
+/// never stamp (evacuations and automatic restores are not intent).
+pub fn stamp(pairs: &[(i64, String)]) {
+    if pairs.is_empty() {
+        return;
+    }
+    let mut prefs = load_prefs();
+    for (id, output) in pairs {
+        prefs.insert(*id, output.clone());
+    }
+    save_prefs(&prefs);
+}
+
+/// Bounded settle-and-restore: re-read placement every 200ms (monitor
+/// re-application lands async), move each strayed workspace home
+/// ([`restore_plan`] against `before`), and stop after a clean pass. Then
+/// re-assert what each display SHOWS (its `before_actives` entry), ending on
+/// `focused_mon`'s active so the keyboard stays put. Best-effort by design —
+/// the caller's primary operation has already succeeded, so failures here
+/// never affect its exit code.
+pub fn restore_strays(
+    before: &[(i64, String)],
+    before_actives: &[(String, Option<i64>)],
+    focused_mon: &str,
+) {
+    let mut restored_any = false;
+    for _ in 0..5 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let Some(after) = ipc::json("workspaces").map(|w| monitor_map(&w)) else {
+            break;
+        };
+        let plan = restore_plan(before, &after);
+        if plan.is_empty() {
+            break;
+        }
+        restored_any = true;
+        for cmd in plan {
+            let _ = ipc::dispatch(&cmd);
+        }
+    }
+    if !restored_any {
+        return; // nothing strayed: don't churn focus for no reason
+    }
+    // Unfocused displays first, the focused monitor's own active last.
+    for (mon, active) in before_actives.iter().filter(|(m, _)| m != focused_mon) {
+        if let Some(id) = active {
+            let _ = ipc::dispatch(&focus_cmd(*id));
+        }
+        let _ = mon;
+    }
+    if let Some((_, Some(id))) = before_actives.iter().find(|(m, _)| m == focused_mon) {
+        let _ = ipc::dispatch(&focus_cmd(*id));
+    }
+}
+
+/// The apply side, shared by `ws reconcile` (every present output) and
+/// watch's monitoradded handling (`only` = the arriving output): move each
+/// live workspace that prefers a present output and sits elsewhere, via
+/// the bounded settle machinery ([`restore_strays`]). Returns the moves it
+/// planned (id -> output) for callers that report, or None when the
+/// compositor queries fail — best-effort; the preferences stay put for the
+/// next chance.
+pub fn apply_preferences(only: Option<&str>) -> Option<Vec<(i64, String)>> {
+    let (mons, ws) = (ipc::json("monitors")?, ipc::json("workspaces")?);
+    let ds = displays_from(&mons);
+    let live = live_ids(&ws);
+    // Live workspaces whose preferred output is present (and in scope) —
+    // restore_plan then moves only the subset that actually strayed.
+    let before: Vec<(i64, String)> = load_prefs()
+        .into_iter()
+        .filter(|(id, output)| {
+            live.contains(id)
+                && only.is_none_or(|o| o == output)
+                && ds.iter().any(|d| d.name == *output)
+        })
+        .collect();
+    let placements = monitor_map(&ws);
+    let moves: Vec<(i64, String)> = before
+        .iter()
+        .filter(|(id, output)| {
+            placements
+                .iter()
+                .any(|(pid, mon)| pid == id && mon != output)
+        })
+        .cloned()
+        .collect();
+    if moves.is_empty() {
+        return Some(moves); // nothing strayed: no dispatch, no focus churn
+    }
+    let focused_mon = ds
+        .iter()
+        .find(|d| d.focused)
+        .map(|d| d.name.clone())
+        .unwrap_or_default();
+    // What each display should SHOW afterwards: one gaining preferred
+    // workspaces shows one of them — its current active if that already
+    // prefers it, else the first preferring id (all live by construction,
+    // so the focus-a-dead-id-creates-it trap can't spring); every other
+    // display keeps its view, and the keyboard ends on the focused display.
+    let before_actives: Vec<(String, Option<i64>)> = ds
+        .iter()
+        .map(|d| {
+            let preferring: Vec<i64> = before
+                .iter()
+                .filter(|(_, o)| *o == d.name)
+                .map(|(id, _)| *id)
+                .collect();
+            let active = match d.active_ws {
+                Some(a) if preferring.is_empty() || preferring.contains(&a) => Some(a),
+                _ => preferring.first().copied().or(d.active_ws),
+            };
+            (d.name.clone(), active)
+        })
+        .collect();
+    restore_strays(&before, &before_actives, &focused_mon);
+    Some(moves)
 }
 
 // ---- commands ---------------------------------------------------------------
@@ -323,6 +470,10 @@ pub fn movetodisplay(n: usize, follow: bool) -> i32 {
     if code != 0 {
         return code;
     }
+    // The move landed: stamp the preference — an explicit move is the user
+    // re-deciding this workspace's home (and the stamp must not depend on
+    // the focus pin below succeeding).
+    stamp(&[(ws_id, target.name.clone())]);
     // Pin focus explicitly rather than trusting the move's inherent focus
     // behavior (version-dependent): follow lands on the moved workspace,
     // stay re-focuses the source display — both no-op when already true.
@@ -331,26 +482,6 @@ pub fn movetodisplay(n: usize, follow: bool) -> i32 {
     } else {
         ipc::dispatch(&focus_monitor_cmd(&ds[cur].name))
     }
-}
-
-/// Non-special workspace ids currently on `mon` (workspaces JSON rows carry
-/// the monitor NAME in `.monitor`).
-pub fn ids_on_monitor(workspaces: &Value, mon: &str) -> Vec<i64> {
-    workspaces
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter(|w| {
-                    !w.get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .starts_with("special:")
-                })
-                .filter(|w| w.get("monitor").and_then(Value::as_str) == Some(mon))
-                .filter_map(|w| w.get("id").and_then(Value::as_i64))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// id -> monitor for every non-special workspace, sorted by id — the
@@ -392,48 +523,6 @@ pub fn restore_plan(before: &[(i64, String)], after: &[(i64, String)]) -> Vec<St
             (want != mon).then(|| move_workspace_cmd(*id, want))
         })
         .collect()
-}
-
-/// `swapdisplays <n>`: exchange EVERY workspace between the focused display
-/// and display n (see [`swap_plan`] for the sequence). Swapping a display
-/// with itself is a no-op.
-pub fn swapdisplays(n: usize) -> i32 {
-    let mons = match monitors_json() {
-        Ok(v) => v,
-        Err(c) => return c,
-    };
-    let ds = displays_from(&mons);
-    let Some(target) = ds.get(n - 1) else {
-        return no_such_display("swapdisplays", n, &ds);
-    };
-    let cur = match focused_index("swapdisplays", &ds) {
-        Ok(i) => i,
-        Err(c) => return c,
-    };
-    if cur == n - 1 {
-        return 0; // swapping with ourselves
-    }
-    let ws = match workspaces_json() {
-        Ok(v) => v,
-        Err(c) => return c,
-    };
-    let cur_ids = ids_on_monitor(&ws, &ds[cur].name);
-    let tgt_ids = ids_on_monitor(&ws, &target.name);
-    for cmd in swap_plan(
-        &ds[cur].name,
-        &target.name,
-        &cur_ids,
-        &tgt_ids,
-        ds[cur].active_ws,
-        target.active_ws,
-    ) {
-        let code = ipc::dispatch(&cmd);
-        if code != 0 {
-            eprintln!("bsctl ws swapdisplays: dispatch failed mid-swap: {cmd}");
-            return code;
-        }
-    }
-    0
 }
 
 pub fn goto(pos: usize) -> i32 {
@@ -545,6 +634,101 @@ pub fn order() -> i32 {
         println!("{} -> ws {} ({})", i + 1, id, name_of(&ws, *id));
     }
     0
+}
+
+/// `prefs`: list the workspace->display preferences with reality
+/// annotations — the output's presence among the enabled outputs, and
+/// whether the workspace still exists. Empty preferences print nothing
+/// (like `ws get`), without touching the compositor.
+pub fn prefs() -> i32 {
+    let prefs = load_prefs();
+    if prefs.is_empty() {
+        return 0;
+    }
+    let mons = match monitors_json() {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    let ws = match workspaces_json() {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    let ds = displays_from(&mons);
+    let live = live_ids(&ws);
+    for (id, output) in prefs {
+        let mut notes = vec![if ds.iter().any(|d| d.name == output) {
+            "present"
+        } else {
+            "absent"
+        }];
+        if !live.contains(&id) {
+            notes.push("ws gone");
+        }
+        println!("ws {id} -> {output} ({})", notes.join(", "));
+    }
+    0
+}
+
+/// `prefer <id> [<output>]`: set one preference explicitly. A named output
+/// is accepted verbatim even when absent — pre-declaring a home for a dock
+/// display is legitimate; with no output the workspace's CURRENT display
+/// is stamped, so the id must be live.
+pub fn prefer(id: i64, output: Option<&str>) -> i32 {
+    let output = match output {
+        Some(o) => o.to_string(),
+        None => {
+            let ws = match workspaces_json() {
+                Ok(v) => v,
+                Err(c) => return c,
+            };
+            match monitor_map(&ws).into_iter().find(|(wid, _)| *wid == id) {
+                Some((_, mon)) => mon,
+                None => {
+                    eprintln!(
+                        "bsctl ws prefer: workspace {id} is not live (name an output to pre-declare one)"
+                    );
+                    return 1;
+                }
+            }
+        }
+    };
+    stamp(&[(id, output)]);
+    0
+}
+
+/// `forget <id>` / `forget --all` (clap enforces exactly one, so None here
+/// MEANS --all): drop preferences. Forgetting an unknown id is a quiet
+/// success — idempotent; `--all` writes the empty file (atomically, like
+/// every preference write) rather than deleting it.
+pub fn forget(id: Option<i64>) -> i32 {
+    let Some(id) = id else {
+        save_prefs(&BTreeMap::new());
+        return 0;
+    };
+    let mut prefs = load_prefs();
+    if prefs.remove(&id).is_some() {
+        save_prefs(&prefs);
+    }
+    0
+}
+
+/// `reconcile`: apply the preferences — move every live workspace that
+/// prefers a present output and sits elsewhere, printing each move. The
+/// manual counterpart of watch's monitoradded apply, for when watch wasn't
+/// running at replug time.
+pub fn reconcile() -> i32 {
+    match apply_preferences(None) {
+        None => {
+            eprintln!("bsctl ws reconcile: compositor query failed (socket and hyprctl)");
+            1
+        }
+        Some(moves) => {
+            for (id, output) in moves {
+                println!("ws {id} -> {output}");
+            }
+            0
+        }
+    }
 }
 
 #[cfg(test)]
@@ -695,20 +879,6 @@ mod tests {
     }
 
     #[test]
-    fn ids_on_monitor_filters_by_name_and_special() {
-        let ws = json!([
-            {"id": 1, "name": "one", "monitor": "eDP-1"},
-            {"id": 3, "name": "three", "monitor": "DP-1"},
-            {"id": -99, "name": "special:magic", "monitor": "DP-1"},
-            {"id": 5, "name": "five", "monitor": "DP-1"},
-        ]);
-        assert_eq!(ids_on_monitor(&ws, "DP-1"), vec![3, 5]);
-        assert_eq!(ids_on_monitor(&ws, "eDP-1"), vec![1]);
-        assert_eq!(ids_on_monitor(&ws, "HDMI-A-1"), Vec::<i64>::new());
-        assert_eq!(ids_on_monitor(&json!("junk"), "DP-1"), Vec::<i64>::new());
-    }
-
-    #[test]
     fn monitor_map_and_restore_plan() {
         let mk = |pairs: &[(i64, &str)]| -> Vec<(i64, String)> {
             pairs.iter().map(|(i, m)| (*i, m.to_string())).collect()
@@ -731,33 +901,43 @@ mod tests {
     }
 
     #[test]
-    fn swap_plan_moves_both_sets_then_reasserts_view() {
-        // current eDP-1 {2,5} showing 5; target DP-1 {1,3} showing 3.
-        let cmds = swap_plan("eDP-1", "DP-1", &[2, 5], &[1, 3], Some(5), Some(3));
+    fn pref_file_roundtrip_and_junk_tolerance() {
+        let mut prefs = BTreeMap::new();
+        prefs.insert(9, "DP-2".to_string());
+        prefs.insert(11, "DP-2".to_string());
+        prefs.insert(-3, "eDP-1".to_string());
+        let text = serialize_prefs(&prefs);
+        assert_eq!(text, "-3 eDP-1\n9 DP-2\n11 DP-2\n"); // sorted by id
+        assert_eq!(parse_prefs(&text), prefs);
+        // junk lines are skipped, never fatal; a duplicated id keeps the
+        // LAST line (later = newer intent)
         assert_eq!(
-            cmds,
-            vec![
-                // target's set comes over first (current never empties)...
-                r#"hl.dsp.workspace.move({ workspace = 1, monitor = "eDP-1" })"#.to_string(),
-                r#"hl.dsp.workspace.move({ workspace = 3, monitor = "eDP-1" })"#.to_string(),
-                // ...then current's originals go out (target's filler ws will
-                // be empty + unfocused after the final focuses -> GC'd)
-                r#"hl.dsp.workspace.move({ workspace = 2, monitor = "DP-1" })"#.to_string(),
-                r#"hl.dsp.workspace.move({ workspace = 5, monitor = "DP-1" })"#.to_string(),
-                // re-assert views: old-current-active shows on target,
-                // old-target-active shows on current (keyboard lands here)
-                "hl.dsp.focus({ workspace = 5 })".to_string(),
-                "hl.dsp.focus({ workspace = 3 })".to_string(),
-            ]
+            parse_prefs("9 DP-2\nnot a pref\n9 eDP-1\n12\n13 DP-1 extra\n\n"),
+            BTreeMap::from([(9, "eDP-1".to_string())])
         );
-        // empty sides / missing actives degrade cleanly
-        assert_eq!(
-            swap_plan("A", "B", &[], &[7], None, Some(7)),
-            vec![
-                r#"hl.dsp.workspace.move({ workspace = 7, monitor = "A" })"#.to_string(),
-                "hl.dsp.focus({ workspace = 7 })".to_string(),
-            ]
-        );
-        assert!(swap_plan("A", "B", &[], &[], None, None).is_empty());
+        assert!(parse_prefs("").is_empty());
+        assert!(serialize_prefs(&BTreeMap::new()).is_empty());
+    }
+
+    #[test]
+    fn pref_io_missing_file_and_empty_write() {
+        let dir = std::env::temp_dir().join(format!("bsctl-ws-pref-ut-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("preferred");
+        assert!(load_prefs_from(&path).is_empty()); // no file = no prefs
+        let prefs = BTreeMap::from([(9, "DP-2".to_string())]);
+        save_prefs_to(&path, &prefs); // creates the dir
+        assert_eq!(load_prefs_from(&path), prefs);
+        // forget --all writes the EMPTY file; the file stays
+        save_prefs_to(&path, &BTreeMap::new());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pref_file_is_the_order_files_sibling() {
+        // Can't mutate the env safely in tests; just check the name contract.
+        assert_eq!(pref_file().parent(), order_file().parent());
+        assert!(pref_file().ends_with("battlestation-workspaces/preferred"));
     }
 }

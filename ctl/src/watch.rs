@@ -5,7 +5,14 @@
 //! Hyprland's `.socket2.sock` event stream (the compositor section, built
 //! fresh per recompute from `j/workspaces` + `j/monitors`). This module only
 //! owns *when* to recompute and the single-writer/failover discipline
-//! (contract + output schema in lib.rs).
+//! (contract + output schema in lib.rs) — with ONE deliberate exception to
+//! the passive-mirror role: on `monitoraddedv2` the arriving output's
+//! workspace->display preferences are applied
+//! ([`crate::ws::apply_preferences`], contract in lib.rs), moving the
+//! workspaces that prefer it back onto it. That apply is the only dispatch
+//! watch ever performs. Removals need nothing from watch — preferences are
+//! stamped at intent time by the `bsctl ws` verbs, never at teardown time,
+//! so there is no race against Hyprland's own evacuation.
 //!
 //! Never crash-loops: any transient error (state dir vanishing, inotify fd
 //! error, socket2 disconnect on compositor restart) is logged to stderr
@@ -27,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::{ipc, poll, sys};
+use crate::{ipc, poll, sys, ws};
 
 /// The consolidated widget state file. Dot-prefixed on purpose: `poll`'s
 /// dotfile skip and `clear`'s `<sid>.*` sweep can never touch it.
@@ -103,6 +110,7 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
             continue;
         };
         let mut triggered = false;
+        let mut plug = Drained::default();
         if ino_ready {
             triggered |= ino.drain()?;
         }
@@ -110,7 +118,8 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
             // A socket error here (EOF = compositor restart/exit) propagates
             // to the re-init path, which reconnects — or degrades if the
             // compositor is really gone.
-            triggered |= sock.as_mut().unwrap().drain()?;
+            plug.merge(sock.as_mut().unwrap().drain()?);
+            triggered |= plug.triggered;
         }
         if !triggered {
             // Dotfile/debug.log churn or irrelevant compositor events only
@@ -133,11 +142,20 @@ fn session(dir: &Path, proj: &Path) -> io::Result<Infallible> {
                 ino.drain()?;
             }
             if s {
-                sock.as_mut().unwrap().drain()?;
+                plug.merge(sock.as_mut().unwrap().drain()?);
             }
             rounds += 1;
         }
         recompute(dir, proj, compositor_state, &mut prev)?;
+        // Apply the arriving outputs' preferences AFTER the recompute so
+        // the widget shows the world before the moves land, then again as
+        // they do (the apply's own move events wake the loop). This is the
+        // ONLY dispatch watch ever performs — everywhere else it is a
+        // passive mirror (scope rule in lib.rs). Best-effort: a failed
+        // apply leaves the preferences in place for `ws reconcile`.
+        for mon in &plug.added {
+            let _ = ws::apply_preferences(Some(mon));
+        }
         deadline = Instant::now() + TICK;
     }
 }
@@ -352,6 +370,39 @@ pub fn event_triggers(line: &str) -> bool {
     RELEVANT.contains(&name)
 }
 
+/// The arriving output's name from a `monitoraddedv2>>id,name,description`
+/// line — the only plug event watch acts on (a removal needs nothing:
+/// preferences are stamped at intent time, and Hyprland's evacuation is
+/// left alone). V2 only, because Hyprland emits the legacy
+/// `monitoradded>>name` alongside and classifying both would apply the
+/// preferences twice. Only the description can contain commas, so the
+/// payload splits into at most 3 fields and the name is the second; a
+/// malformed payload (missing or empty name) is ignored.
+pub fn added_monitor(line: &str) -> Option<String> {
+    let payload = line.strip_prefix("monitoraddedv2>>")?;
+    let mut fields = payload.splitn(3, ',');
+    let _id = fields.next()?;
+    let name = fields.next()?;
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// What one socket drain produced: whether any complete line warrants a
+/// recompute, plus the outputs that arrived ([`added_monitor`], in arrival
+/// order). The session loop merges drains across the coalesce window so a
+/// burst's arrivals are applied exactly once, after coalescing.
+#[derive(Default)]
+pub struct Drained {
+    pub triggered: bool,
+    pub added: Vec<String>,
+}
+
+impl Drained {
+    fn merge(&mut self, other: Drained) {
+        self.triggered |= other.triggered;
+        self.added.extend(other.added);
+    }
+}
+
 /// poll(2) on the inotify fd plus (optionally) the event socket:
 /// Ok(None) = timeout hit, Ok(Some((inotify_ready, socket_ready)))
 /// otherwise. EINTR retries (conservatively with the full timeout —
@@ -417,10 +468,11 @@ impl EventSock {
     }
 
     /// Read everything available (call only after poll said readable);
-    /// Ok(true) when any COMPLETE line is a relevant event. EOF is an error
+    /// `triggered` when any COMPLETE line is a relevant event, plus the
+    /// arriving outputs among them ([`added_monitor`]). EOF is an error
     /// on purpose — a closed event stream means the compositor went away,
     /// and the caller's re-init is the reconnect path.
-    fn drain(&mut self) -> io::Result<bool> {
+    fn drain(&mut self) -> io::Result<Drained> {
         let mut buf = [0u8; 4096];
         loop {
             match self.stream.read(&mut buf) {
@@ -431,12 +483,16 @@ impl EventSock {
                 Err(e) => return Err(e),
             }
         }
-        let mut triggered = false;
+        let mut d = Drained::default();
         while let Some(nl) = self.pending.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = self.pending.drain(..=nl).collect();
-            triggered |= event_triggers(&String::from_utf8_lossy(&line[..nl]));
+            let line = String::from_utf8_lossy(&line[..nl]);
+            d.triggered |= event_triggers(&line);
+            if let Some(name) = added_monitor(&line) {
+                d.added.push(name);
+            }
         }
-        Ok(triggered)
+        Ok(d)
     }
 }
 
@@ -614,6 +670,35 @@ mod tests {
         assert_eq!(v["compositor"], comp);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn added_monitor_parses_v2_only() {
+        // v2 lines yield the name; the description may contain commas.
+        assert_eq!(
+            added_monitor("monitoraddedv2>>1,DP-2,Dell Inc. U2720Q"),
+            Some("DP-2".to_string())
+        );
+        assert_eq!(
+            added_monitor("monitoraddedv2>>1,DP-2,Dell Inc, U2720Q, rev A"),
+            Some("DP-2".to_string())
+        );
+        // missing description still parses (splitn tolerates 2 fields)
+        assert_eq!(
+            added_monitor("monitoraddedv2>>1,eDP-1"),
+            Some("eDP-1".to_string())
+        );
+        // the legacy line is DELIBERATELY ignored: Hyprland sends it
+        // alongside v2 and classifying both would apply preferences twice —
+        // and removals need nothing from watch at all.
+        assert_eq!(added_monitor("monitoradded>>DP-2"), None);
+        assert_eq!(added_monitor("monitorremovedv2>>1,DP-2,desc"), None);
+        // malformed payloads and unrelated/junk lines are ignored
+        assert_eq!(added_monitor("monitoraddedv2>>"), None);
+        assert_eq!(added_monitor("monitoraddedv2>>1,"), None);
+        assert_eq!(added_monitor("workspacev2>>3,name"), None);
+        assert_eq!(added_monitor("not an event line"), None);
+        assert_eq!(added_monitor(""), None);
     }
 
     #[test]
