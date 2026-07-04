@@ -11,8 +11,9 @@ sudo pacman -S hyprlock hypridle
 
 Config is stowed (`hypr/.config/hypr/{hyprlock,hypridle}.conf`) and hypridle is
 launched from `autostart.lua`; nothing else to enable. hypridle answers logind's
-Lock / PrepareForSleep signals, so it needs no timeout `listener` blocks — idle
-behaviour is unchanged.
+Lock / PrepareForSleep signals; its one timeout `listener` only reports
+presence to `bsctl presence` (for the agent desk — contract in
+`ctl/src/lib.rs`) and changes no idle behaviour.
 
 Two `settings.json` values route everything to hyprlock and must stay in
 lockstep: `general.lockOnSuspend` is `false` (Noctalia doesn't lock on sleep),

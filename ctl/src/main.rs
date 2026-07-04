@@ -44,6 +44,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AsksCmd,
     },
+    /// Human presence: hypridle's idle listener reports, agents read
+    Presence {
+        #[command(subcommand)]
+        cmd: PresenceCmd,
+    },
     /// The full state of the world: displays, battlespaces, prefs, agents, usage
     Status {
         #[arg(long, value_enum, default_value = "text")]
@@ -703,6 +708,28 @@ enum AsksOrderCmd {
     Get,
 }
 
+// ---- presence --------------------------------------------------------------------
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PresenceState {
+    Active,
+    Idle,
+}
+
+#[derive(Subcommand)]
+enum PresenceCmd {
+    /// Record a presence transition (hypridle's listener is the caller)
+    Set {
+        #[arg(value_enum)]
+        state: PresenceState,
+    },
+    /// The current presence (`unknown` before hypridle's first report)
+    Get {
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+    },
+}
+
 // ---- agents ----------------------------------------------------------------------
 
 #[derive(Subcommand)]
@@ -953,6 +980,13 @@ fn main() {
                 AsksOrderCmd::Set { ids } => bsctl::asks::order_set(&ids),
                 AsksOrderCmd::Get => bsctl::asks::order_get(),
             },
+        },
+        Cmd::Presence { cmd } => match cmd {
+            PresenceCmd::Set { state } => bsctl::presence::set(match state {
+                PresenceState::Active => "active",
+                PresenceState::Idle => "idle",
+            }),
+            PresenceCmd::Get { format } => bsctl::presence::get(format == Format::Json),
         },
         Cmd::Status { format, stream } => {
             if stream {

@@ -468,3 +468,69 @@ fn stream_refuses_id_detail() {
     assert_eq!(code, 2, "streaming a single record is a usage error");
     assert!(err.contains("--id"), "{err}");
 }
+
+// ---- presence (lives in the asks dir; see the presence contract) ------------
+
+#[test]
+fn presence_set_get_roundtrip_and_no_bump() {
+    let env = TestEnv::new("presence");
+    // before any report: unknown, exit 0 (the desk before hypridle fires)
+    let (code, out, _) = env.run(&["presence", "get"]);
+    assert_eq!((code, out.trim()), (0, "unknown"));
+    let (_, out, _) = env.run(&["presence", "get", "--format", "json"]);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["state"], "unknown");
+    assert_eq!(v["since"], Value::Null);
+    assert_eq!(v["idle_secs"], Value::Null);
+
+    // idle: since lands, idle_secs counts from it
+    assert_eq!(env.run(&["presence", "set", "idle"]).0, 0);
+    let (_, out, _) = env.run(&["presence", "get", "--format", "json"]);
+    let first: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(first["state"], "idle");
+    let since = first["since"].as_f64().unwrap();
+    assert!(first["idle_secs"].as_i64().unwrap() >= 0);
+
+    // the SAME state again must not bump since (idle accumulates across
+    // repeated on-timeout fires)
+    assert_eq!(env.run(&["presence", "set", "idle"]).0, 0);
+    let (_, out, _) = env.run(&["presence", "get", "--format", "json"]);
+    let again: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(again["since"].as_f64().unwrap(), since, "no-bump rule");
+
+    // a transition takes a fresh since and drops idle_secs to null
+    assert_eq!(env.run(&["presence", "set", "active"]).0, 0);
+    let (_, out, _) = env.run(&["presence", "get", "--format", "json"]);
+    let active: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(active["state"], "active");
+    assert!(active["since"].as_f64().unwrap() >= since);
+    assert_eq!(active["idle_secs"], Value::Null);
+    let (_, out, _) = env.run(&["presence", "get"]);
+    assert_eq!(out.trim(), "active");
+
+    // clap refuses junk states loudly (this is not the silent hook surface)
+    assert_eq!(env.run(&["presence", "set", "asleep"]).0, 2);
+}
+
+#[test]
+fn status_and_stream_carry_presence() {
+    let env = TestEnv::new("presence-world");
+    // unknown before the first report — and NO text section for it
+    let (_, out, _) = env.run(&["status", "--format", "json"]);
+    let w: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(w["human"]["state"], "unknown");
+    let (_, text, _) = env.run(&["status"]);
+    assert!(!text.contains("human"), "{text}");
+
+    // a presence flip from another process wakes the status stream (the
+    // report lives in the watched asks dir — no new machinery)
+    let s = Streamer::spawn(&env, &["status", "--format", "json", "--stream"]);
+    assert_eq!(s.next("initial world")["human"]["state"], "unknown");
+    assert_eq!(env.run(&["presence", "set", "idle"]).0, 0);
+    let v = s.converge("idle in the stream", |v| v["human"]["state"] == "idle");
+    assert!(v["human"]["idle_secs"].as_i64().unwrap() >= 0);
+
+    // and the text overview now shows the one-line human section
+    let (_, text, _) = env.run(&["status"]);
+    assert!(text.contains("human\n  idle"), "{text}");
+}

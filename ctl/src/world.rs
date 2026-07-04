@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::ws::{BsRow, bs_join, displays_from, human_name, live_ids, pref_rows, pref_rows_json};
-use crate::{agents, asks, ipc, proto, sessions, sys, usage, ws};
+use crate::{agents, asks, ipc, presence, proto, sessions, sys, usage, ws};
 
 /// The world, queried live. Session scan first (it sweeps), compositor
 /// snapshots second; the map, prefs and asks files are read lock-free
@@ -31,6 +31,7 @@ pub fn snapshot() -> Value {
         &ws::load_prefs(),
         usage::snapshot(None),
         asks::rows_json(None),
+        presence::human_json(presence::read().as_ref(), sys::now_f64()),
     )
 }
 
@@ -40,6 +41,7 @@ pub fn snapshot() -> Value {
 /// (the same contract the old widget file had). The prefs section is file
 /// truth and always present, but its reality annotations (`present`,
 /// `live`) degrade to null without a compositor to ask.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble(
     recs: Vec<Value>,
     wsj: Option<&Value>,
@@ -48,6 +50,7 @@ pub fn assemble(
     prefs: &BTreeMap<i64, String>,
     usage: Value,
     asks: Vec<Value>,
+    human: Value,
 ) -> Value {
     let comp = match (wsj, mons) {
         (Some(w), Some(m)) => Some((w, m)),
@@ -83,6 +86,9 @@ pub fn assemble(
         // Cache truth like prefs is file truth: {} when nothing is known,
         // never null — an unknown usage is not a lost compositor.
         "usage": usage,
+        // File truth again: state "unknown" before hypridle's first report,
+        // never null (an unwritten file is not a lost compositor).
+        "human": human,
     })
 }
 
@@ -255,6 +261,22 @@ pub fn render_text(world: &Value) -> String {
         ));
     }
 
+    // One line, last — the human knows whether they're at the desk; this
+    // section exists to show what the AGENTS are being told. Omitted while
+    // unknown (before hypridle's first report there is nothing to show).
+    if let Some(h) = world.get("human")
+        && h.get("state")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s != "unknown")
+    {
+        let state = proto::field(h, "state");
+        let line = match h.get("idle_secs").and_then(Value::as_i64) {
+            Some(s) => format!("{state} {}", asks::age(s as f64, 0.0)),
+            None => state,
+        };
+        sections.push(format!("human\n  {line}"));
+    }
+
     let mut out = sections.join("\n\n");
     out.push('\n');
     out
@@ -304,6 +326,10 @@ mod tests {
         })]
     }
 
+    fn fixture_human_unknown() -> Value {
+        json!({"state": "unknown", "idle_secs": Value::Null})
+    }
+
     #[test]
     fn assemble_joins_all_sections() {
         let (recs, wsj, mons, prefs) = fixtures();
@@ -315,7 +341,11 @@ mod tests {
             &prefs,
             fixture_usage(),
             fixture_asks(),
+            json!({"state": "idle", "idle_secs": 300}),
         );
+        // human rides the schema verbatim (file truth, shaped by presence)
+        assert_eq!(w["human"]["state"], "idle");
+        assert_eq!(w["human"]["idle_secs"], 300);
         // asks lead the schema: file truth, [] when empty, never null
         assert_eq!(w["asks"][0]["id"], 1);
         assert_eq!(w["asks"][0]["urgency"], "high");
@@ -351,7 +381,18 @@ mod tests {
     #[test]
     fn assemble_nulls_compositor_sections_when_a_query_fails() {
         let (recs, wsj, _, prefs) = fixtures();
-        let w = assemble(recs, Some(&wsj), None, "", &prefs, json!({}), vec![]);
+        let w = assemble(
+            recs,
+            Some(&wsj),
+            None,
+            "",
+            &prefs,
+            json!({}),
+            vec![],
+            fixture_human_unknown(),
+        );
+        // human is file truth: "unknown" is honest absence, never null
+        assert_eq!(w["human"]["state"], "unknown");
         assert_eq!(
             w["asks"],
             json!([]),
@@ -382,6 +423,7 @@ mod tests {
             &prefs,
             json!({}),
             vec![],
+            fixture_human_unknown(),
         );
         assert_eq!(
             w["agents"],
@@ -400,6 +442,7 @@ mod tests {
             &prefs,
             fixture_usage(),
             fixture_asks(),
+            json!({"state": "idle", "idle_secs": 300}),
         );
         assert_eq!(
             render_text(&w),
@@ -427,12 +470,26 @@ mod tests {
              \n\
              prefs waiting for absent displays\n\
              \x20 WS  DISPLAY\n\
-             \x20 9   DP-2\n"
+             \x20 9   DP-2\n\
+             \n\
+             human\n\
+             \x20 idle 5m\n"
         );
-        // degraded: honest per-section notes, agents still tabled
+        // degraded: honest per-section notes, agents still tabled, and an
+        // unknown presence renders NO human section (nothing to show)
         let (recs, ..) = fixtures();
-        let w = assemble(recs, None, None, "", &BTreeMap::new(), json!({}), vec![]);
+        let w = assemble(
+            recs,
+            None,
+            None,
+            "",
+            &BTreeMap::new(),
+            json!({}),
+            vec![],
+            fixture_human_unknown(),
+        );
         let t = render_text(&w);
+        assert!(!t.contains("human"));
         assert!(t.starts_with(
             "displays\n\
              \x20 (compositor unreachable)\n\

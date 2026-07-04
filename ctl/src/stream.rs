@@ -190,9 +190,9 @@ fn session(
     let asks_dir = asks::asks_dir();
     fs::create_dir_all(&asks_dir)?;
     // One inotify fd, three watches: the runtime agent-state dir, the
-    // persistent map/prefs dir, and the asks dir. One trigger filter serves
-    // all of them — each dir's protocol files are exactly its non-dot
-    // entries.
+    // persistent map/prefs dir, and the asks dir (whose non-dot entries
+    // include the presence report). One trigger filter serves all of them
+    // — each dir's protocol files are exactly its non-dot entries.
     let ino = Inotify::new(&[&dir, &files_dir, &asks_dir])?;
     // Compositor events; None = degraded mode (no Hyprland), files-only.
     let mut sock = EventSock::connect();
@@ -302,9 +302,10 @@ fn emit(prev: &mut Option<String>, cur: &str, framing: Framing) -> io::Result<()
 /// Should an event on this dir entry trigger a re-evaluation? Non-dot,
 /// non-debug.log names are exactly the protocol files (session files and
 /// markers in the runtime dir; `map` and `prefs` in the persistent dir;
-/// `asks.json` and `order` in the asks dir) — dotfiles are writers'
-/// in-flight temp files and locks, and debug.log is diagnostics. An empty
-/// name is an event about a watched dir itself, not an entry.
+/// `asks.json`, `order` and `presence.json` in the asks dir) — dotfiles
+/// are writers' in-flight temp files and locks, and debug.log is
+/// diagnostics. An empty name is an event about a watched dir itself, not
+/// an entry.
 pub fn name_triggers(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && name != "debug.log"
 }
@@ -606,9 +607,10 @@ mod tests {
         // persistent dir: the map and prefs files trigger
         assert!(name_triggers("map"));
         assert!(name_triggers("prefs"));
-        // asks dir: the store and its order file trigger
+        // asks dir: the store, its order file and the presence report
         assert!(name_triggers("asks.json"));
         assert!(name_triggers("order"));
+        assert!(name_triggers("presence.json"));
         // dotfiles are temp writes and locks; debug.log is diagnostics
         assert!(!name_triggers(".sid.tmp")); // hook temp
         assert!(!name_triggers(".map.tmp")); // map temp

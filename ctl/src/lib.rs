@@ -242,6 +242,34 @@
 //! (probed 1.0.16) — its ceiling is whatever the binary defaults to, and
 //! long agy waits may die client-side (the ask survives).
 //!
+//! # Presence (`bsctl presence`)
+//!
+//! Is the human at the desk? hypridle is the machine's idle authority: the
+//! stowed listener (hypridle.conf, timeout 120s) runs `presence set idle`
+//! when the desk goes quiet and `presence set active` on resume — the
+//! human never runs `set` by hand in normal operation; bsctl only records
+//! the report. The file is `${XDG_RUNTIME_DIR:-/tmp}/battlestation-asks/
+//! presence.json` — the ASKS dir on purpose: presence is
+//! attention-adjacent state, the stream engine already watches that dir
+//! (the non-dot name rides the existing trigger filter, so a presence flip
+//! wakes every subscriber), and nothing there reads by pattern. One object
+//! `{"state": "active"|"idle", "since": <float secs>}`, atomic write;
+//! setting the SAME state twice never bumps `since` — hypridle's
+//! on-timeout can re-fire without a resume between, and the idle duration
+//! must accumulate across fires, not reset. Runtime lifetime: presence
+//! dies with the boot, like the sessions it contextualizes.
+//!
+//! Before hypridle's first transition after a boot or restart the file is
+//! absent and presence reads `unknown` — hypridle has no startup hook to
+//! prime it, and an honest unknown beats a guessed active. Readers:
+//! `presence get` (text `active` / `idle 43m` / `unknown`; json adds
+//! `since` + `idle_secs`), the world's `human` section, and the MCP `ask`
+//! timeout text, which tells a waiting agent how long the human has been
+//! idle (a minute or more) so it can weigh continuing other work against
+//! a longer wait. Recovery boundary: hypridle's lock/sleep duties never
+//! depend on bsctl — a missing/broken binary just fails the report
+//! commands harmlessly.
+//!
 //! # The battlespace map (`bsctl ws map`)
 //!
 //! Navigate/move by BATTLESPACE instead of Hyprland's immutable workspace
@@ -334,7 +362,8 @@
 //!   "workspaces": [{ws, bs, name, display, windows, active, pref}],
 //!   "prefs": [{ws, display, present, live}],
 //!   "agents": [ ...exactly `agents get`'s rows... ],
-//!   "usage": { ...exactly `agents usage`'s object... }}`
+//!   "usage": { ...exactly `agents usage`'s object... },
+//!   "human": {state, idle_secs}}`
 //!
 //! `workspaces` is the battlespace join in battlespace order; `name` is
 //! null while a workspace is unnamed (Hyprland names every workspace its
@@ -344,8 +373,10 @@
 //! would read as a true empty world — so a consumer keeps its last state
 //! across a compositor restart. `prefs` is file truth and always present,
 //! but its annotations degrade to null without a compositor to ask;
-//! `asks` is file truth ([] when the queue is empty, never null) and
-//! `agents` is file+proc truth — neither nulls.
+//! `asks` is file truth ([] when the queue is empty, never null),
+//! `agents` is file+proc truth, and `human` is file truth (state
+//! "unknown" before hypridle's first report, `idle_secs` null unless
+//! idle) — none of the three ever null.
 //!
 //! # Streaming (`--stream`)
 //!
@@ -576,6 +607,7 @@ pub mod asks;
 pub mod display;
 pub mod ipc;
 pub mod mcp;
+pub mod presence;
 pub mod proto;
 pub mod scale;
 pub mod sessions;

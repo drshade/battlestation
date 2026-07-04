@@ -392,6 +392,39 @@ fn cancellation_mid_block_is_honored_and_the_ask_survives() {
 }
 
 #[test]
+fn wait_expiry_mentions_idle_presence() {
+    let env = TestEnv::new("idle-timeout");
+    // Fabricate a 5-and-a-bit-minute idle report where presence lives (the
+    // asks dir): the timeout text must tell the waiting agent about it.
+    let asks_dir = env.run.join("battlestation-asks");
+    fs::create_dir_all(&asks_dir).unwrap();
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+        - 330.0;
+    fs::write(
+        asks_dir.join("presence.json"),
+        json!({"state": "idle", "since": since}).to_string(),
+    )
+    .unwrap();
+    let mut c = env.server(0);
+    let (text, is_err) = c.call("ask", json!({"title": "Anyone home?", "wait_secs": 1}));
+    assert!(!is_err);
+    assert!(text.contains("remains open"), "{text}");
+    assert!(text.contains("idle 5m"), "{text}");
+    // an ACTIVE report earns no mention — no signal beats noise
+    fs::write(
+        asks_dir.join("presence.json"),
+        json!({"state": "active", "since": since}).to_string(),
+    )
+    .unwrap();
+    let (text, _) = c.call("ask", json!({"title": "Again?", "wait_secs": 1}));
+    assert!(text.contains("remains open"), "{text}");
+    assert!(!text.contains("idle"), "{text}");
+}
+
+#[test]
 fn get_ask_collects_a_late_answer() {
     let env = TestEnv::new("late-answer");
     let mut c = env.server(0);

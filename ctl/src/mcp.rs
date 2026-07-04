@@ -165,7 +165,8 @@ pub fn tools_json() -> Value {
             "name": "world",
             "description": "The desktop's full state as JSON: the asks queue, displays, workspaces \
                             (battlespace order), workspace->display preferences, every agent session's \
-                            status, and plan usage. Read-only.",
+                            status, plan usage, and human presence (state + seconds idle — how long \
+                            since the human last touched the desk). Read-only.",
             "inputSchema": {"type": "object", "properties": {}},
         },
     ])
@@ -209,11 +210,23 @@ pub fn dismissed_text(id: i64) -> String {
          do not re-post the same question."
     )
 }
-pub fn open_text(id: i64) -> String {
-    format!(
+/// The wait-expired text. `idle_min` is the human's idle time when known
+/// (presence::idle_minutes at EXPIRY, not at post — the state may have
+/// changed during the wait): a minute or more earns a mention, so a
+/// waiting agent can weigh continuing other work against a longer wait;
+/// active/unknown/under-a-minute say nothing (no signal beats noise).
+pub fn open_text(id: i64, idle_min: Option<i64>) -> String {
+    let base = format!(
         "No answer yet — ask #{id} remains open in the queue and the human sees it. Continue \
          other work if you can, check back later with get_ask, or end your turn."
-    )
+    );
+    match idle_min {
+        Some(m) if m >= 1 => format!(
+            "{base} The human has been idle {m}m — consider continuing other work or a longer \
+             wait."
+        ),
+        _ => base,
+    }
 }
 /// wait_secs = 0: deliberately distinct from the timeout text — the agent
 /// chose not to wait, so there is no "no answer yet" to report.
@@ -424,7 +437,7 @@ fn block_on_answer(
         }
         let now = std::time::Instant::now();
         if now >= deadline {
-            return BlockOutcome::Text(open_text(id));
+            return BlockOutcome::Text(open_text(id, crate::presence::idle_minutes()));
         }
         if let Some(tok) = progress_token
             && now.duration_since(last_progress) >= Duration::from_secs(10)
@@ -811,6 +824,17 @@ mod tests {
         assert_eq!(effective_wait(Some(3600), 90), 3600); // hours are legitimate
         assert_eq!(effective_wait(Some(999_999), 90), WAIT_CAP_SECS); // clamped
         assert_eq!(effective_wait(None, 0), 0); // server may default to no block
+    }
+
+    #[test]
+    fn open_text_mentions_idle_presence_when_meaningful() {
+        // active/unknown/under-a-minute: the base text, nothing appended
+        assert!(!open_text(3, None).contains("idle"));
+        assert!(!open_text(3, Some(0)).contains("idle"));
+        // a minute or more: the idle note rides the timeout report
+        let t = open_text(3, Some(43));
+        assert!(t.contains("remains open"));
+        assert!(t.contains("idle 43m"), "{t}");
     }
 
     #[test]
