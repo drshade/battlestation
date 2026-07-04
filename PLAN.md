@@ -26,7 +26,52 @@ hooks config).
 
 ## Open
 
-1. **Next harness: opencode.** The recipe is proven twice (Codex, then
+1. **The asks queue (design settled 2026-07-04; MVP is human-first).**
+   Agents post attention requests — questions, review asks, FYIs — into
+   one shared queue; the human triages from one surface instead of
+   window-hopping. The chief-of-staff agent (see IDEAS.md north star) is
+   deliberately deferred: build the optimal human view first, plug the
+   agent into the same store later.
+
+   Settled design points:
+   - **Store is truth, RPCs are ephemeral.** Asks live in a flocked
+     runtime-dir store (own dir, so the session-file sweep and the stream
+     engine's trigger filter stay untangled), states
+     open → answered → dismissed, ids short and monotonic. Blocking MCP
+     calls are only a bounded fast path (store-first, progress-pinged,
+     timeout returns "ask #N still open") — an in-flight RPC is state in
+     the wrong place over hour-scale waits; per-harness client timeouts
+     and turn fragility make hours-long holds wrong. Late answers land in
+     the store; delivery channels (jump-and-type now; headless resume
+     later) are a separate, per-harness concern.
+   - **Two ownership namespaces, never one ordering field.** Agents own
+     their ask's urgency (low/medium/high, updatable — escalation = "my
+     urgency rose") and estimate of HUMAN minutes needed. The human owns
+     the order: FIFO by default, reordered only by the user (panel drag /
+     `asks order set` — the map/prefs pattern). Agents never reorder.
+   - **Posting is mandatory, not judged.** An agent needing feedback MUST
+     post — proceeding without feedback is the failure mode, and queue
+     depth is never a reason to self-censor. Enforced by the only prompt
+     surface every session carries: the MCP tool descriptions, plus a
+     norm line in each harness's stowed global instructions.
+   - **Human quick-tags:** a freeform note per ask ("working on it",
+     "need to think") — one click in the panel, visible to all agents via
+     the stream; the human half of the coordination conversation.
+   - Domain noun: `asks` (over "tasks" — collides with agents' own todo
+     lists).
+
+   Stages, each shippable: (1) `bsctl asks` domain — post/get/answer/
+   dismiss/note/update, order file, stream + status section, tables;
+   (2) `bsctl mcp` — ask (bounded-block), notify, list/get/update-own,
+   read-only world queries; session identity via the ancestor-pid walk
+   (the hook machinery) + `--kind` like the hooks; wire all three
+   harnesses + norm lines; (3) the queue panel — badge on the bar widget,
+   toggle-from-anywhere, drag reorder, quick-reply, tags, urgency/
+   estimate/age columns, jump to the asking session's exact window
+   (pid → client → focuswindow); (4, later) chief of staff in a special
+   workspace, resume-based answer delivery, presence-gated escalation.
+
+2. **Next harness: opencode.** The recipe is proven twice (Codex, then
    Antigravity — which surfaced one real integration cost each: Codex's
    trust gate, agy's conversationId payloads): investigate the harness's
    hook/notify surface, wire its config to `bsctl agents set --kind <k>
