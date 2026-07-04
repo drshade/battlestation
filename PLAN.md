@@ -60,16 +60,18 @@ hooks config).
    - Domain noun: `asks` (over "tasks" — collides with agents' own todo
      lists).
 
-   Stages, each shippable: (1) `bsctl asks` domain — post/get/answer/
-   dismiss/note/update, order file, stream + status section, tables;
-   (2) `bsctl mcp` — ask (bounded-block), notify, list/get/update-own,
-   read-only world queries; session identity via the ancestor-pid walk
-   (the hook machinery) + `--kind` like the hooks; wire all three
-   harnesses + norm lines; (3) the queue panel — badge on the bar widget,
-   toggle-from-anywhere, drag reorder, quick-reply, tags, urgency/
-   estimate/age columns, jump to the asking session's exact window
-   (pid → client → focuswindow); (4, later) chief of staff in a special
-   workspace, resume-based answer delivery, presence-gated escalation.
+   Stages 1–3 SHIPPED 2026-07-04 (commits 5e52f2e, 46e19d9, ddd7c1e):
+   the `bsctl asks` domain, `bsctl mcp` wired into all three harnesses
+   (Codex + agy stowed; Claude Code needs the one-time `claude mcp add`
+   in setup/deps-00-claude-code.md — user-scope MCP lives in untrackable
+   ~/.claude.json), and the queue panel (badge + HYPER+A; reorder ships
+   as per-row arrows — variable-height rows resisted the pills' drag
+   machinery; the order-set protocol is gesture-agnostic, so drag can
+   land later without changes beneath it). Remaining:
+   (4) chief of staff in a special workspace, resume-based answer
+   delivery for agents that ended their turn, presence-gated escalation
+   (toast → phone), and jump-to-exact-window (pid → client →
+   focuswindow) — jump currently lands on the workspace.
 
 2. **Next harness: opencode.** The recipe is proven twice (Codex, then
    Antigravity — which surfaced one real integration cost each: Codex's
