@@ -22,14 +22,29 @@ registry in `Cfg.qml` — adding a harness = one registry entry + one asset dir
 
 ## Open
 
-1. **Multi-monitor workspace model, the deeper half.** Done: display-level
-   verbs + F-row keybinds, per-display pill filtering with global numbering,
-   full-set `swapdisplays <n>`. Still open from the captured requirements:
-   per-monitor display orders / cross-monitor position semantics (the order
-   file is still one global list; `goto` numbers the global resolved order),
-   and taming spontaneous ws 11+ creation (workspace rules pinning ids to
-   monitors). Accepted wart: slide-animation direction and the 4-finger
-   gesture follow raw id order and can disagree with pill order after drags.
+1. **Multi-monitor: workspace-assignment memory (design settled 2026-07-04).**
+   The original "deeper half" mostly dissolved: position addressing already
+   reaches spawned ws 11+, HYPER+Fn moves workspaces between displays, and
+   per-monitor NUMBERING was considered and rejected — global positions stay
+   (a workspace's number never changes when it migrates; SUPER+N is a
+   teleport, not a local switch). User disclaimer: hasn't lived with global
+   numbering long; may revisit. What remains is the real daily gap:
+   **workspace→monitor assignment lives nowhere**, so undock/lid-close
+   evacuates display 2's workspaces and REPLUG never restores them.
+
+   Plan (one contained job): `bsctl watch` already sees every
+   moveworkspace/monitorremoved/monitoradded on socket2 and holds the live
+   assignment map — persist it. On `monitorremoved`, snapshot which ids
+   lived there; on `monitoradded` of a known monitor, dispatch them back
+   (reuse ws::restore_plan — the scale-guard machinery, verbatim). Plus a
+   manual `bsctl ws reconcile` verb. Deliberate design point: this gives
+   watch dispatch powers for the first time (today it is a passive mirror) —
+   scope them to exactly this trigger and document in lib.rs's contract.
+   Snapshot-on-removal (not continuous persistence) keeps transient
+   evacuations (the scale-bug class) out of the memory. Order file
+   untouched; no schema change. Accepted wart stands: slide-animation
+   direction / 4-finger gesture follow raw id order and can disagree with
+   pill order after drags.
 
 2. **Next harness: opencode.** The recipe is proven twice (Codex, then
    Antigravity — which surfaced one real integration cost each: Codex's
