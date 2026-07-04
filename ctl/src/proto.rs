@@ -241,9 +241,88 @@ pub fn session_record(ws: i64, status: &str, title: &str, pid: i64, kind: &str) 
     json!({"ws": ws, "status": status, "kind": kind, "title": title, "pid": pid})
 }
 
+/// The house table for every human text view: UPPERCASE header row, columns
+/// left-aligned to max(header, cells) by CHAR count (EDID strings and
+/// workspace names are not ASCII-only), two-space gutters, no trailing
+/// whitespace (the last cell pads nothing; shorter cells are padded then the
+/// line is trimmed, so an empty last cell can't leave a gutter behind). No
+/// rows renders just the header — callers own the no-lonely-header rule
+/// (empty collections print nothing at all).
+pub fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.chars().count()).collect();
+    for r in rows {
+        for (w, cell) in widths.iter_mut().zip(r.iter()) {
+            *w = (*w).max(cell.chars().count());
+        }
+    }
+    let render_row = |cells: &[&str]| -> String {
+        let mut line = String::new();
+        for (i, c) in cells.iter().enumerate() {
+            if i > 0 {
+                line.push_str("  ");
+            }
+            line.push_str(c);
+            if i + 1 < widths.len() {
+                line.extend(std::iter::repeat_n(' ', widths[i] - c.chars().count()));
+            }
+        }
+        line.trim_end().to_string()
+    };
+    let mut out = render_row(headers);
+    for r in rows {
+        let cells: Vec<&str> = r.iter().map(String::as_str).collect();
+        out.push('\n');
+        out.push_str(&render_row(&cells));
+    }
+    out
+}
+
+/// "yes" / "" — the table dialect for flags that only matter when set
+/// (ACTIVE, FOCUSED, SPECIAL); binary facts use explicit yes/no instead.
+pub fn yes(b: bool) -> String {
+    if b { "yes".to_string() } else { String::new() }
+}
+
+/// "yes" / "no" — for facts where both states are informative (PRESENT,
+/// LIVE).
+pub fn yes_no(b: bool) -> String {
+    (if b { "yes" } else { "no" }).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_aligns_and_never_trails_whitespace() {
+        let rows = vec![
+            vec!["1".to_string(), "eDP-1".to_string(), String::new()],
+            vec!["2".to_string(), "x".to_string(), "yes".to_string()],
+        ];
+        // header wider than cells (COL), cell wider than header (eDP-1 vs B)
+        assert_eq!(
+            render_table(&["COL", "B", "FOCUSED"], &rows),
+            "COL  B      FOCUSED\n\
+             1    eDP-1\n\
+             2    x      yes"
+        );
+        for line in render_table(&["COL", "B", "FOCUSED"], &rows).lines() {
+            assert_eq!(line, line.trim_end(), "no trailing whitespace");
+        }
+        // char-count widths, not byte widths (… is 3 bytes, 1 char)
+        let rows = vec![vec!["a…b".to_string(), "y".to_string()]];
+        assert_eq!(render_table(&["A", "B"], &rows), "A    B\na…b  y");
+        // no rows: just the header (callers own the no-lonely-header rule)
+        assert_eq!(render_table(&["A", "B"], &[]), "A  B");
+    }
+
+    #[test]
+    fn yes_dialects() {
+        assert_eq!(yes(true), "yes");
+        assert_eq!(yes(false), "");
+        assert_eq!(yes_no(true), "yes");
+        assert_eq!(yes_no(false), "no");
+    }
 
     #[test]
     fn marker_name_splits_on_first_dot() {

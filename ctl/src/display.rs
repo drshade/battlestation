@@ -15,8 +15,8 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
-use crate::ipc;
 use crate::ws::{self, DisplaySel, lua_escape};
+use crate::{ipc, proto};
 
 // ---- pure logic (proto.rs-style: deterministic, unit-tested) ---------------
 
@@ -108,16 +108,16 @@ pub fn format_table(outs: &[Output], ids: &[(String, usize)]) -> String {
         "POSITION",
         "DESCRIPTION",
     ];
-    let rows: Vec<[String; 8]> = outs
+    let rows: Vec<Vec<String>> = outs
         .iter()
         .map(|o| {
-            [
+            vec![
                 ids.iter()
                     .find(|(n, _)| *n == o.name)
                     .map(|(_, i)| i.to_string())
                     .unwrap_or_else(|| "-".to_string()),
                 o.name.clone(),
-                (if o.enabled { "yes" } else { "no" }).to_string(),
+                proto::yes_no(o.enabled),
                 (if o.dpms { "on" } else { "off" }).to_string(),
                 o.mode.clone(),
                 o.scale.clone(),
@@ -126,34 +126,7 @@ pub fn format_table(outs: &[Output], ids: &[(String, usize)]) -> String {
             ]
         })
         .collect();
-    let mut widths: [usize; 8] = HDR.map(str::len);
-    for r in &rows {
-        for (w, cell) in widths.iter_mut().zip(r.iter()) {
-            *w = (*w).max(cell.chars().count());
-        }
-    }
-    let render = |cells: [&str; 8]| -> String {
-        let mut line = String::new();
-        for (i, c) in cells.iter().enumerate() {
-            if i > 0 {
-                line.push_str("  ");
-            }
-            line.push_str(c);
-            if i < 7 {
-                // last column unpadded
-                line.extend(std::iter::repeat_n(' ', widths[i] - c.chars().count()));
-            }
-        }
-        line.trim_end().to_string()
-    };
-    let mut out = render(HDR);
-    for r in &rows {
-        out.push('\n');
-        out.push_str(&render([
-            &r[0], &r[1], &r[2], &r[3], &r[4], &r[5], &r[6], &r[7],
-        ]));
-    }
-    out
+    proto::render_table(&HDR, &rows)
 }
 
 /// Consistency warnings, each carrying its remedy. `lid_closed` is None on

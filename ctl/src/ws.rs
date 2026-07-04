@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::{ipc, sys};
+use crate::{ipc, proto, sys};
 
 /// `${XDG_STATE_HOME:-$HOME/.local/state}/battlestation-workspaces/map`
 /// (an empty env var counts as unset, like the sh `:-` default).
@@ -760,21 +760,28 @@ pub fn human_name(row_name: &str, ws: i64) -> Option<String> {
         .then(|| row_name.to_string())
 }
 
-/// `ws name get [filter]` — one line per matched workspace:
-/// `bs <n>  ws <id>  "<name>"` (or `(unnamed)` while the name is still the
-/// id's number).
+/// `ws name get [filter]` — BS/WS/NAME table over the matched workspaces
+/// (NAME empty while a workspace still wears its default number). Empty
+/// matches print nothing, not a lonely header.
 pub fn name_get(filter: &RowFilter) -> i32 {
     let rows = match bs_rows("name get", filter) {
         Ok(r) => r,
         Err(c) => return c,
     };
-    for r in rows {
-        let name = match human_name(&r.name, r.ws) {
-            Some(n) => format!("\"{n}\""),
-            None => "(unnamed)".to_string(),
-        };
-        println!("bs {}  ws {}  {}", r.bs, r.ws, name);
+    if rows.is_empty() {
+        return 0;
     }
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            vec![
+                r.bs.to_string(),
+                r.ws.to_string(),
+                human_name(&r.name, r.ws).unwrap_or_default(),
+            ]
+        })
+        .collect();
+    println!("{}", proto::render_table(&["BS", "WS", "NAME"], &cells));
     0
 }
 
@@ -818,27 +825,32 @@ pub fn map_get(filter: &RowFilter, json_out: bool) -> i32 {
         println!("{}", Value::Array(map_rows_json(&rows)));
         return 0;
     }
-    for r in rows {
-        let name = match human_name(&r.name, r.ws) {
-            Some(n) => format!(" \"{n}\""),
-            None => String::new(),
-        };
-        println!(
-            "bs {}  ws {}{}  on {}  {} window{}{}",
-            r.bs,
-            r.ws,
-            name,
-            if r.display.is_empty() {
-                "?"
-            } else {
-                &r.display
-            },
-            r.windows,
-            if r.windows == 1 { "" } else { "s" },
-            if r.active { "  [active]" } else { "" },
-        );
+    if rows.is_empty() {
+        return 0;
     }
+    println!("{}", proto::render_table(&MAP_HEADERS, &map_cells(&rows)));
     0
+}
+
+/// The map table's shape, shared with `status`'s workspaces section (which
+/// appends a PREF column) so the two views can't drift.
+pub const MAP_HEADERS: [&str; 6] = ["BS", "WS", "NAME", "DISPLAY", "WINDOWS", "ACTIVE"];
+
+/// [`MAP_HEADERS`]'s cells for one set of join rows (NAME empty while
+/// unnamed, ACTIVE the yes/empty dialect).
+pub fn map_cells(rows: &[BsRow]) -> Vec<Vec<String>> {
+    rows.iter()
+        .map(|r| {
+            vec![
+                r.bs.to_string(),
+                r.ws.to_string(),
+                human_name(&r.name, r.ws).unwrap_or_default(),
+                r.display.clone(),
+                r.windows.to_string(),
+                proto::yes(r.active),
+            ]
+        })
+        .collect()
 }
 
 /// The map rows as their published JSON shape — shared by `map get
@@ -971,13 +983,24 @@ pub fn prefs_get(sel: Option<&WsSel>, json_out: bool) -> i32 {
         println!("{}", Value::Array(pref_rows_json(&rows)));
         return 0;
     }
-    for (id, output, present, alive) in rows {
-        let mut notes = vec![if present { "present" } else { "absent" }];
-        if !alive {
-            notes.push("ws gone");
-        }
-        println!("ws {id} -> {output} ({})", notes.join(", "));
+    if rows.is_empty() {
+        return 0;
     }
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|(id, output, present, alive)| {
+            vec![
+                id.to_string(),
+                output.clone(),
+                proto::yes_no(*present),
+                proto::yes_no(*alive),
+            ]
+        })
+        .collect();
+    println!(
+        "{}",
+        proto::render_table(&["WS", "DISPLAY", "PRESENT", "LIVE"], &cells)
+    );
     0
 }
 

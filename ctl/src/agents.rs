@@ -347,7 +347,8 @@ pub fn get_json(kind: Option<&str>, session: Option<&str>) -> String {
 
 /// `agents get [--kind K] [--session-id S] [--format json]` — the readable
 /// query over the session state, sweeping exactly like the scan it wraps
-/// (dead pids, orphan/stale markers); text is one line per session.
+/// (dead pids, orphan/stale markers). Empty results print nothing, not a
+/// lonely header.
 pub fn get(kind: Option<&str>, session: Option<&str>, json_out: bool) -> i32 {
     let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
     let rows = agent_rows(recs, kind, session);
@@ -355,28 +356,44 @@ pub fn get(kind: Option<&str>, session: Option<&str>, json_out: bool) -> i32 {
         println!("{}", Value::Array(rows));
         return 0;
     }
-    for r in rows {
-        let subs = r["subagents"].as_array().map_or(0, Vec::len);
-        let title = proto::field(&r, "title");
-        println!(
-            "{}  {}  {}  ws {}{}{}",
-            proto::field(&r, "session"),
-            proto::field(&r, "kind"),
-            proto::field(&r, "status"),
-            r.get("ws").and_then(Value::as_i64).unwrap_or(-1),
-            if title.is_empty() {
-                String::new()
-            } else {
-                format!("  \"{title}\"")
-            },
-            match subs {
-                0 => String::new(),
-                1 => "  (1 subagent)".to_string(),
-                n => format!("  ({n} subagents)"),
-            },
-        );
+    if rows.is_empty() {
+        return 0;
     }
+    println!(
+        "{}",
+        proto::render_table(&AGENT_HEADERS, &agent_cells(&rows))
+    );
     0
+}
+
+/// The agents table's shape, shared with `status`'s agents section. The
+/// identifying-but-long SESSION uuid sits last so the columns eyes actually
+/// scan (kind/status/where/title) come first.
+pub const AGENT_HEADERS: [&str; 6] = ["KIND", "STATUS", "WS", "SUBAGENTS", "TITLE", "SESSION"];
+
+/// [`AGENT_HEADERS`]'s cells for one set of published rows (SUBAGENTS empty
+/// at zero — most sessions run none).
+pub fn agent_cells(rows: &[Value]) -> Vec<Vec<String>> {
+    rows.iter()
+        .map(|r| {
+            let subs = r["subagents"].as_array().map_or(0, Vec::len);
+            vec![
+                proto::field(r, "kind"),
+                proto::field(r, "status"),
+                r.get("ws")
+                    .and_then(Value::as_i64)
+                    .map(|w| w.to_string())
+                    .unwrap_or_default(),
+                if subs == 0 {
+                    String::new()
+                } else {
+                    subs.to_string()
+                },
+                proto::field(r, "title"),
+                proto::field(r, "session"),
+            ]
+        })
+        .collect()
 }
 
 #[cfg(test)]

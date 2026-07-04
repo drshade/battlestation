@@ -403,16 +403,18 @@ fn map_get_prints_the_resolved_join() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "bs 1  ws 3  on eDP-1  1 window\n\
-         bs 2  ws 1  on eDP-1  0 windows\n\
-         bs 3  ws 2  on eDP-1  2 windows  [active]\n\
-         bs 4  ws 5 \"work\"  on DP-1  3 windows  [active]\n"
+        "BS  WS  NAME  DISPLAY  WINDOWS  ACTIVE\n\
+         1   3         eDP-1    1\n\
+         2   1         eDP-1    0\n\
+         3   2         eDP-1    2        yes\n\
+         4   5   work  DP-1     3        yes\n"
     );
     // filtered to one display
     let out = env.ws(&["map", "get", "--display-name", "DP-1"]);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "bs 4  ws 5 \"work\"  on DP-1  3 windows  [active]\n"
+        "BS  WS  NAME  DISPLAY  WINDOWS  ACTIVE\n\
+         4   5   work  DP-1     3        yes\n"
     );
 }
 
@@ -507,15 +509,17 @@ fn name_get_lists_bs_ws_and_names() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "bs 1  ws 1  (unnamed)\n\
-         bs 2  ws 2  (unnamed)\n\
-         bs 3  ws 3  (unnamed)\n\
-         bs 4  ws 5  \"work\"\n"
+        "BS  WS  NAME\n\
+         1   1\n\
+         2   2\n\
+         3   3\n\
+         4   5   work\n"
     );
     let out = env.ws(&["name", "get", "--ws-id", "5"]);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "bs 4  ws 5  \"work\"\n"
+        "BS  WS  NAME\n\
+         4   5   work\n"
     );
 }
 
@@ -567,12 +571,15 @@ fn prefs_get_annotates_and_filters() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "ws 5 -> DP-1 (present)\nws 9 -> DP-2 (absent, ws gone)\n"
+        "WS  DISPLAY  PRESENT  LIVE\n\
+         5   DP-1     yes      yes\n\
+         9   DP-2     no       no\n"
     );
     let out = env.ws(&["prefs", "get", "--ws-id", "5"]);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "ws 5 -> DP-1 (present)\n"
+        "WS  DISPLAY  PRESENT  LIVE\n\
+         5   DP-1     yes      yes\n"
     );
     // json form
     let out = env.ws(&["prefs", "get", "--format", "json"]);

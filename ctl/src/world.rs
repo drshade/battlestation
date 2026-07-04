@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::ws::{BsRow, bs_join, displays_from, human_name, live_ids, pref_rows, pref_rows_json};
-use crate::{agents, ipc, sessions, sys, ws};
+use crate::{agents, ipc, proto, sessions, sys, ws};
 
 /// The world, queried live. Session scan first (it sweeps), compositor
 /// snapshots second; the map and prefs files are read lock-free (their
@@ -125,109 +125,105 @@ fn workspaces_json(rows: &[BsRow], prefs: &BTreeMap<i64, String>) -> Vec<Value> 
         .collect()
 }
 
-/// The human overview. Sections render only when they have something to
-/// say; a null compositor renders as one honest line instead of an empty
-/// world.
+/// The human overview: one table per section (the house style), a blank
+/// line between sections. Empty sections are omitted (no lonely headers);
+/// a NULL compositor section renders its heading over an honest
+/// `(compositor unreachable)` note instead of an empty table.
 pub fn render_text(world: &Value) -> String {
-    let mut out = String::new();
+    let mut sections: Vec<String> = Vec::new();
+    let section = |heading: &str, table: &str| -> String {
+        let body: Vec<String> = table.lines().map(|l| format!("  {l}")).collect();
+        format!("{heading}\n{}", body.join("\n"))
+    };
+    let unreachable = |heading: &str| format!("{heading}\n  (compositor unreachable)");
+
+    let num = |v: &Value, k: &str| {
+        v.get(k)
+            .and_then(Value::as_i64)
+            .map(|n| n.to_string())
+            .unwrap_or_default()
+    };
+    let flag = |v: &Value, k: &str| proto::yes(v.get(k).and_then(Value::as_bool) == Some(true));
+
     match world.get("displays").and_then(Value::as_array) {
-        None => out.push_str("compositor unavailable (no display/workspace state)\n"),
-        Some(displays) => {
-            let ws_rows = world
-                .get("workspaces")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            for d in displays {
-                let name = d.get("name").and_then(Value::as_str).unwrap_or("?");
-                out.push_str(&format!(
-                    "display {}  {}{}\n",
-                    d.get("id").and_then(Value::as_i64).unwrap_or(0),
-                    name,
-                    if d.get("focused").and_then(Value::as_bool) == Some(true) {
-                        "  (focused)"
-                    } else {
-                        ""
-                    },
-                ));
-                for w in ws_rows
-                    .iter()
-                    .filter(|w| w.get("display").and_then(Value::as_str) == Some(name))
-                {
-                    let windows = w.get("windows").and_then(Value::as_i64).unwrap_or(0);
-                    out.push_str(&format!(
-                        "  bs {}  ws {}{}  {} window{}{}{}\n",
-                        w.get("bs").and_then(Value::as_i64).unwrap_or(0),
-                        w.get("ws").and_then(Value::as_i64).unwrap_or(0),
-                        w.get("name")
-                            .and_then(Value::as_str)
-                            .map(|n| format!(" \"{n}\""))
-                            .unwrap_or_default(),
-                        windows,
-                        if windows == 1 { "" } else { "s" },
-                        if w.get("active").and_then(Value::as_bool) == Some(true) {
-                            "  [active]"
-                        } else {
-                            ""
-                        },
-                        w.get("pref")
-                            .and_then(Value::as_str)
-                            .map(|p| format!("  [prefers {p}]"))
-                            .unwrap_or_default(),
-                    ));
-                }
-            }
-        }
-    }
-    let agents = world
-        .get("agents")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if !agents.is_empty() {
-        out.push_str("agents\n");
-        for a in &agents {
-            let subs = a
-                .get("subagents")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len);
-            out.push_str(&format!(
-                "  {}  {}  ws {}{}{}\n",
-                a.get("kind").and_then(Value::as_str).unwrap_or("?"),
-                a.get("status").and_then(Value::as_str).unwrap_or("?"),
-                a.get("ws").and_then(Value::as_i64).unwrap_or(-1),
-                a.get("title")
-                    .and_then(Value::as_str)
-                    .filter(|t| !t.is_empty())
-                    .map(|t| format!("  \"{t}\""))
-                    .unwrap_or_default(),
-                match subs {
-                    0 => String::new(),
-                    1 => "  (1 subagent)".to_string(),
-                    n => format!("  ({n} subagents)"),
-                },
+        None => sections.push(unreachable("displays")),
+        Some(ds) if ds.is_empty() => {}
+        Some(ds) => {
+            let cells: Vec<Vec<String>> = ds
+                .iter()
+                .map(|d| {
+                    vec![
+                        num(d, "id"),
+                        proto::field(d, "name"),
+                        flag(d, "focused"),
+                        num(d, "activeWs"),
+                        flag(d, "specialShowing"),
+                    ]
+                })
+                .collect();
+            sections.push(section(
+                "displays",
+                &proto::render_table(&["ID", "NAME", "FOCUSED", "ACTIVE-WS", "SPECIAL"], &cells),
             ));
         }
     }
-    let waiting: Vec<&Value> = world
+
+    match world.get("workspaces").and_then(Value::as_array) {
+        None => sections.push(unreachable("workspaces")),
+        Some(rows) if rows.is_empty() => {}
+        Some(rows) => {
+            // The map-get table plus a PREF column (empty when unset — most
+            // workspaces have no preference, by design).
+            let headers: Vec<&str> = ws::MAP_HEADERS.iter().copied().chain(["PREF"]).collect();
+            let cells: Vec<Vec<String>> = rows
+                .iter()
+                .map(|w| {
+                    vec![
+                        num(w, "bs"),
+                        num(w, "ws"),
+                        proto::field(w, "name"),
+                        proto::field(w, "display"),
+                        num(w, "windows"),
+                        flag(w, "active"),
+                        proto::field(w, "pref"),
+                    ]
+                })
+                .collect();
+            sections.push(section(
+                "workspaces",
+                &proto::render_table(&headers, &cells),
+            ));
+        }
+    }
+
+    if let Some(agents) = world.get("agents").and_then(Value::as_array)
+        && !agents.is_empty()
+    {
+        sections.push(section(
+            "agents",
+            &proto::render_table(&agents::AGENT_HEADERS, &agents::agent_cells(agents)),
+        ));
+    }
+
+    let waiting: Vec<Vec<String>> = world
         .get("prefs")
         .and_then(Value::as_array)
         .map(|a| {
             a.iter()
                 .filter(|p| p.get("present").and_then(Value::as_bool) == Some(false))
+                .map(|p| vec![num(p, "ws"), proto::field(p, "display")])
                 .collect()
         })
         .unwrap_or_default();
     if !waiting.is_empty() {
-        out.push_str("prefs waiting for absent displays\n");
-        for p in waiting {
-            out.push_str(&format!(
-                "  ws {} -> {}\n",
-                p.get("ws").and_then(Value::as_i64).unwrap_or(0),
-                p.get("display").and_then(Value::as_str).unwrap_or("?"),
-            ));
-        }
+        sections.push(section(
+            "prefs waiting for absent displays",
+            &proto::render_table(&["WS", "DISPLAY"], &waiting),
+        ));
     }
+
+    let mut out = sections.join("\n\n");
+    out.push('\n');
     out
 }
 
@@ -320,20 +316,36 @@ mod tests {
         let w = assemble(recs, Some(&wsj), Some(&mons), "", &prefs);
         assert_eq!(
             render_text(&w),
-            "display 1  eDP-1\n\
-             \x20 bs 2  ws 3  1 window  [active]  [prefers eDP-1]\n\
-             display 2  DP-1  (focused)\n\
-             \x20 bs 1  ws 1 \"corp\"  2 windows  [active]\n\
+            "displays\n\
+             \x20 ID  NAME   FOCUSED  ACTIVE-WS  SPECIAL\n\
+             \x20 1   eDP-1           3\n\
+             \x20 2   DP-1   yes      1\n\
+             \n\
+             workspaces\n\
+             \x20 BS  WS  NAME  DISPLAY  WINDOWS  ACTIVE  PREF\n\
+             \x20 1   1   corp  DP-1     2        yes\n\
+             \x20 2   3         eDP-1    1        yes     eDP-1\n\
+             \n\
              agents\n\
-             \x20 claude  thinking  ws 3  \"Fix the widget\"  (1 subagent)\n\
+             \x20 KIND    STATUS    WS  SUBAGENTS  TITLE           SESSION\n\
+             \x20 claude  thinking  3   1          Fix the widget  s-1\n\
+             \n\
              prefs waiting for absent displays\n\
-             \x20 ws 9 -> DP-2\n"
+             \x20 WS  DISPLAY\n\
+             \x20 9   DP-2\n"
         );
-        // degraded: one honest line, agents still shown
+        // degraded: honest per-section notes, agents still tabled
         let (recs, ..) = fixtures();
         let w = assemble(recs, None, None, "", &BTreeMap::new());
         let t = render_text(&w);
-        assert!(t.starts_with("compositor unavailable"));
+        assert!(t.starts_with(
+            "displays\n\
+             \x20 (compositor unreachable)\n\
+             \n\
+             workspaces\n\
+             \x20 (compositor unreachable)"
+        ));
+        assert!(t.contains("KIND"));
         assert!(t.contains("claude  thinking"));
     }
 }
