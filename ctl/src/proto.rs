@@ -234,11 +234,21 @@ pub fn marker_record(atype: &str, desc: &str) -> Value {
 }
 
 /// Session file content:
-/// `{"ws": <int>, "status": ..., "kind": ..., "title": ..., "pid": <int>}`.
-/// `kind` is the harness discriminator (`bsctl agents set --kind`,
-/// mandatory) — see the protocol contract in lib.rs.
-pub fn session_record(ws: i64, status: &str, title: &str, pid: i64, kind: &str) -> Value {
-    json!({"ws": ws, "status": status, "kind": kind, "title": title, "pid": pid})
+/// `{"ws": <int>, "win": <addr>|null, "status": ..., "kind": ..., "title":
+/// ..., "pid": <int>}`. `kind` is the harness discriminator (`bsctl agents
+/// set --kind`, mandatory); `win` is the terminal window's Hyprland address
+/// (null when the clients row carried none), refreshed like `ws` on every
+/// hook event so a moved terminal heals — see the protocol contract in
+/// lib.rs.
+pub fn session_record(
+    ws: i64,
+    win: Option<&str>,
+    status: &str,
+    title: &str,
+    pid: i64,
+    kind: &str,
+) -> Value {
+    json!({"ws": ws, "win": win, "status": status, "kind": kind, "title": title, "pid": pid})
 }
 
 /// The house table for every human text view: UPPERCASE header row, columns

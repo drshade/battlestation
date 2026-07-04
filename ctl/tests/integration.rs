@@ -43,13 +43,15 @@ impl TestEnv {
             fs::create_dir_all(d).unwrap();
         }
         // Fake hyprctl: one client per ancestor pid of the caller, all on
-        // ws 42. Any OTHER query fails (exit 1, no output) so watch's
-        // compositor queries take the degraded path (compositor: null)
-        // instead of parsing a clients-shaped answer as workspaces.
+        // ws 42, each with a pid-derived window address (0xaddr<pid>) so
+        // the win capture is assertable. Any OTHER query fails (exit 1, no
+        // output) so watch's compositor queries take the degraded path
+        // (compositor: null) instead of parsing a clients-shaped answer as
+        // workspaces.
         let stub = fakebin.join("hyprctl");
         fs::write(
             &stub,
-            "#!/bin/sh\n[ \"$1\" = clients ] || exit 1\npid=$PPID\nsep=''\nprintf '['\nwhile [ \"${pid:-0}\" -gt 1 ]; do\n  printf '%s{\"pid\": %s, \"workspace\": {\"id\": 42}}' \"$sep\" \"$pid\"\n  sep=,\n  pid=$(ps -o ppid= -p \"$pid\" 2>/dev/null | tr -d ' ')\ndone\nprintf ']'\n",
+            "#!/bin/sh\n[ \"$1\" = clients ] || exit 1\npid=$PPID\nsep=''\nprintf '['\nwhile [ \"${pid:-0}\" -gt 1 ]; do\n  printf '%s{\"pid\": %s, \"workspace\": {\"id\": 42}, \"address\": \"0xaddr%s\"}' \"$sep\" \"$pid\" \"$pid\"\n  sep=,\n  pid=$(ps -o ppid= -p \"$pid\" 2>/dev/null | tr -d ' ')\ndone\nprintf ']'\n",
         )
         .unwrap();
         let mut perm = fs::metadata(&stub).unwrap().permissions();
@@ -190,6 +192,14 @@ fn session_write_with_title_and_injected_ws() {
         Path::new(&format!("/proc/{pid}")).exists(),
         "pid must be a live ancestor"
     );
+    // The matched clients row's address is captured alongside ws — the stub
+    // derives it from the client pid, which is NOT the harness pid the
+    // record carries (the first matching ANCESTOR wins the clients pass).
+    let win = rec["win"].as_str().expect("win must be captured");
+    assert!(win.starts_with("0xaddr"), "stub-shaped address: {win}");
+    // And the published agents row exposes it under the same key.
+    let rows = env.agents_get(&["--session-id", "sess-1"]);
+    assert_eq!(rows[0]["win"], json!(win));
 }
 
 #[test]
@@ -632,13 +642,15 @@ fn write_session_unit_seam() {
         "waiting",
         "A title",
         7,
+        Some("0xseam"),
         1,
         "claude",
     )
     .unwrap();
     assert_eq!(
         env.read_json("seam"),
-        json!({"ws": 7, "status": "waiting", "kind": "claude", "title": "A title", "pid": 1})
+        json!({"ws": 7, "win": "0xseam", "status": "waiting", "kind": "claude",
+               "title": "A title", "pid": 1})
     );
     // and the scan picks it straight up (pid 1 alive)
     let out = bsctl::sessions::scan(

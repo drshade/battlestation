@@ -126,6 +126,34 @@ pub fn focus_monitor_cmd(name: &str) -> String {
     format!(r#"hl.dsp.focus({{ monitor = "{}" }})"#, lua_escape(name))
 }
 
+/// `hl.dsp.focus({ window = "address:0x..." })` — the Lua form of legacy
+/// `focuswindow` (verified live, Hyprland 0.55.4: a no-op refocus of the
+/// focused window's address replies ok; the BARE address without the
+/// `address:` prefix replies `warning: ... window not found`, so the prefix
+/// is semantic, not decoration).
+pub fn focus_window_cmd(addr: &str) -> String {
+    format!(
+        r#"hl.dsp.focus({{ window = "address:{}" }})"#,
+        lua_escape(addr)
+    )
+}
+
+/// The dispatch for focusing a SESSION's terminal, from its state record:
+/// the window address when the record has one (`win`), else its workspace —
+/// a stale address is healed by the next hook event, and the workspace
+/// fallback means focus-by-session never does less than the old
+/// jump-to-workspace. None = the record names neither (malformed).
+pub fn session_focus_cmd(rec: &Value) -> Option<String> {
+    if let Some(addr) = rec
+        .get("win")
+        .and_then(Value::as_str)
+        .filter(|a| !a.is_empty())
+    {
+        return Some(focus_window_cmd(addr));
+    }
+    rec.get("ws").and_then(Value::as_i64).map(focus_cmd)
+}
+
 /// `hl.dsp.workspace.move({ workspace = N, monitor = "NAME" })` — the Lua
 /// form of legacy `moveworkspacetomonitor` (verified live: a no-op move of a
 /// workspace to its own monitor replies ok; omitting `monitor` replies
@@ -555,6 +583,31 @@ pub fn focus(target: &Target) -> i32 {
                 Ok(i) => ipc::dispatch(&focus_monitor_cmd(&ds[i].name)),
                 Err(c) => c,
             }
+        }
+    }
+}
+
+/// `ws focus --session <sid>` — focus an agent session's terminal window
+/// (the asks panel's Jump). Resolves against the session state files (the
+/// agents protocol in lib.rs): the record's `win` address when present,
+/// its `ws` otherwise. An unknown session errors loudly — unlike a bs-id
+/// off the map's end this is a caller bug, not a keybind grazing the edge.
+/// The sid is a path component under the state dir; separators and
+/// dot-prefixes are rejected rather than resolved (session ids are UUIDs —
+/// anything path-shaped is hostile input, not a session).
+pub fn focus_session(sid: &str) -> i32 {
+    if sid.is_empty() || sid.contains(['/', '\\']) || sid.starts_with('.') {
+        eprintln!("bsctl ws focus: not a session id: {sid}");
+        return 1;
+    }
+    let rec = fs::read(sys::state_dir().join(sid))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    match rec.as_ref().and_then(session_focus_cmd) {
+        Some(cmd) => ipc::dispatch(&cmd),
+        None => {
+            eprintln!("bsctl ws focus: no session {sid} (agents get lists the live ones)");
+            1
         }
     }
 }
@@ -1243,6 +1296,38 @@ mod tests {
             focus_monitor_cmd(r#"we"ird"#),
             r#"hl.dsp.focus({ monitor = "we\"ird" })"#
         );
+        // window focus: the address: prefix is semantic — the bare address
+        // was probed live and rejected ("window not found")
+        assert_eq!(
+            focus_window_cmd("0x55891387bb70"),
+            r#"hl.dsp.focus({ window = "address:0x55891387bb70" })"#
+        );
+    }
+
+    #[test]
+    fn session_focus_prefers_window_falls_back_to_workspace() {
+        // win present -> the window dispatch
+        let rec = json!({"ws": 3, "win": "0xabc", "pid": 1});
+        assert_eq!(
+            session_focus_cmd(&rec).as_deref(),
+            Some(r#"hl.dsp.focus({ window = "address:0xabc" })"#)
+        );
+        // win null/empty/missing -> the workspace dispatch (pre-capture
+        // records and clients rows without an address)
+        for rec in [
+            json!({"ws": 3, "win": null}),
+            json!({"ws": 3, "win": ""}),
+            json!({"ws": 3}),
+        ] {
+            assert_eq!(
+                session_focus_cmd(&rec).as_deref(),
+                Some("hl.dsp.focus({ workspace = 3 })"),
+                "{rec}"
+            );
+        }
+        // neither -> None (malformed record)
+        assert_eq!(session_focus_cmd(&json!({"pid": 1})), None);
+        assert_eq!(session_focus_cmd(&json!("junk")), None);
     }
 
     #[test]

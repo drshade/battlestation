@@ -204,8 +204,10 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str, over: Option<&
     // Fall back to our immediate parent so the pid field is never omitted.
     let pid = harness_pid.unwrap_or_else(|| std::os::unix::process::parent_id() as i64);
 
-    // compositor boundary: no owning workspace -> exit silently, write nothing.
-    let Some(ws) = ipc::workspace_for_pids(&pids) else {
+    // compositor boundary: no owning workspace -> exit silently, write
+    // nothing. The window address rides the same clients row (best-effort —
+    // it upgrades focus-by-session from workspace to window).
+    let Some((ws, win)) = ipc::client_for_pids(&pids) else {
         return;
     };
 
@@ -223,7 +225,7 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str, over: Option<&
     let prompt_title =
         proto::title_from_prompt(&proto::field(&d, "cwd"), &proto::field(&d, "prompt"));
     let title = proto::derive_title(&transcript_title, &prompt_title, &existing_title(dir, &sid));
-    let _ = write_session(dir, &sid, verb, &title, ws, pid, kind);
+    let _ = write_session(dir, &sid, verb, &title, ws, win.as_deref(), pid, kind);
 }
 
 /// The sticky-title source: the session file's current title, "" when the
@@ -237,21 +239,24 @@ fn existing_title(dir: &Path, sid: &str) -> String {
 }
 
 /// The testable end of the session write path: everything hyprctl/proc
-/// derived arrives as plain values (`ws` from workspace_for_pids, `pid` from
-/// ancestor_chain), so tests can exercise the write without a compositor.
+/// derived arrives as plain values (`ws`/`win` from client_for_pids, `pid`
+/// from ancestor_chain), so tests can exercise the write without a
+/// compositor.
+#[allow(clippy::too_many_arguments)]
 pub fn write_session(
     dir: &Path,
     sid: &str,
     status: &str,
     title: &str,
     ws: i64,
+    win: Option<&str>,
     pid: i64,
     kind: &str,
 ) -> io::Result<()> {
     sys::atomic_write_json(
         dir,
         sid,
-        &proto::session_record(ws, status, title, pid, kind),
+        &proto::session_record(ws, win, status, title, pid, kind),
     )
 }
 
@@ -331,6 +336,7 @@ pub fn agent_rows(recs: Vec<Value>, kind: Option<&str>, session: Option<&str>) -
                 "kind": r.get("kind").cloned().unwrap_or(Value::Null),
                 "status": r.get("status").cloned().unwrap_or(Value::Null),
                 "ws": r.get("ws").cloned().unwrap_or(Value::Null),
+                "win": r.get("win").cloned().unwrap_or(Value::Null),
                 "title": r.get("title").cloned().unwrap_or(Value::Null),
                 "subagents": r.get("agents").cloned().unwrap_or_else(|| json!([])),
             })

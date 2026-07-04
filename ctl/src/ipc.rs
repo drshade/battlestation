@@ -188,19 +188,23 @@ fn ok_command(words: &[&str]) -> i32 {
 
 /// >>> compositor boundary for the hook — needs a live query. <<<
 ///
-/// Workspace id of the FIRST client whose pid is in `pids` (the hook
-/// caller's ancestor set). None on ANY failure — socket and hyprctl both
-/// unreachable, bad JSON, no matching client, or a matching client without a
-/// usable workspace id — and the hook then exits 0 without writing, exactly
-/// like the sh reference. Integration tests fake this with a stub hyprctl on
-/// PATH (their XDG_RUNTIME_DIR holds no socket, so the fallback path runs).
-pub fn workspace_for_pids(pids: &[i64]) -> Option<i64> {
-    workspace_of(&json("clients")?, pids)
+/// (workspace id, window address) of the FIRST client whose pid is in
+/// `pids` (the hook caller's ancestor set) — the session's terminal window.
+/// None on ANY failure — socket and hyprctl both unreachable, bad JSON, no
+/// matching client, or a matching client without a usable workspace id —
+/// and the hook then exits 0 without writing, exactly like the sh
+/// reference. The address is best-effort (None when the row lacks one): the
+/// workspace decides whether a session exists at all, the address only
+/// upgrades focus-by-session from workspace to window. Integration tests
+/// fake this with a stub hyprctl on PATH (their XDG_RUNTIME_DIR holds no
+/// socket, so the fallback path runs).
+pub fn client_for_pids(pids: &[i64]) -> Option<(i64, Option<String>)> {
+    client_of(&json("clients")?, pids)
 }
 
-/// The pure half of [`workspace_for_pids`], on an already-fetched clients
+/// The pure half of [`client_for_pids`], on an already-fetched clients
 /// array.
-pub fn workspace_of(clients: &Value, pids: &[i64]) -> Option<i64> {
+pub fn client_of(clients: &Value, pids: &[i64]) -> Option<(i64, Option<String>)> {
     let set: std::collections::HashSet<i64> = pids.iter().copied().collect();
     // First match decides; if ITS workspace.id is unusable the reference
     // python raises and prints nothing (no fallthrough to later clients).
@@ -209,11 +213,17 @@ pub fn workspace_of(clients: &Value, pids: &[i64]) -> Option<i64> {
             .and_then(Value::as_i64)
             .is_some_and(|p| set.contains(&p))
     })?;
-    match c.get("workspace")?.get("id")? {
+    let ws = match c.get("workspace")?.get("id")? {
         Value::Number(n) => n.as_i64(),
         Value::String(s) => s.trim().parse().ok(), // int("3") succeeds in the reference
         _ => None,
-    }
+    }?;
+    let win = c
+        .get("address")
+        .and_then(Value::as_str)
+        .filter(|a| !a.is_empty())
+        .map(str::to_string);
+    Some((ws, win))
 }
 
 #[cfg(test)]
@@ -241,28 +251,38 @@ mod tests {
     }
 
     #[test]
-    fn workspace_of_first_match_decides() {
+    fn client_of_first_match_decides() {
         let clients = json!([
-            {"pid": 10, "workspace": {"id": 3}},
-            {"pid": 20, "workspace": {"id": 7}},
+            {"pid": 10, "workspace": {"id": 3}, "address": "0xaaa"},
+            {"pid": 20, "workspace": {"id": 7}, "address": "0xbbb"},
         ]);
-        assert_eq!(workspace_of(&clients, &[20, 10]), Some(3)); // array order wins
-        assert_eq!(workspace_of(&clients, &[20]), Some(7));
-        assert_eq!(workspace_of(&clients, &[99]), None);
+        // array order wins, and the matched row's address rides along
+        assert_eq!(
+            client_of(&clients, &[20, 10]),
+            Some((3, Some("0xaaa".to_string())))
+        );
+        assert_eq!(
+            client_of(&clients, &[20]),
+            Some((7, Some("0xbbb".to_string())))
+        );
+        assert_eq!(client_of(&clients, &[99]), None);
     }
 
     #[test]
-    fn workspace_of_id_shapes() {
+    fn client_of_id_and_address_shapes() {
         // string ids parse (int("3") in the reference); junk on the FIRST
-        // match is None, with no fallthrough to later clients
+        // match is None, with no fallthrough to later clients. A missing or
+        // empty address is None — the workspace still resolves (the address
+        // is an upgrade, never a requirement).
         let clients = json!([
             {"pid": 1, "workspace": {"id": " 3 "}},
-            {"pid": 2, "workspace": {"id": true}},
-            {"pid": 3, "workspace": {"id": 5}},
+            {"pid": 2, "workspace": {"id": true}, "address": "0xccc"},
+            {"pid": 3, "workspace": {"id": 5}, "address": ""},
         ]);
-        assert_eq!(workspace_of(&clients, &[1]), Some(3));
-        assert_eq!(workspace_of(&clients, &[2, 3]), None);
-        assert_eq!(workspace_of(&json!("not an array"), &[1]), None);
-        assert_eq!(workspace_of(&json!([{"pid": 1}]), &[1]), None);
+        assert_eq!(client_of(&clients, &[1]), Some((3, None)));
+        assert_eq!(client_of(&clients, &[2, 3]), None);
+        assert_eq!(client_of(&clients, &[3]), Some((5, None)));
+        assert_eq!(client_of(&json!("not an array"), &[1]), None);
+        assert_eq!(client_of(&json!([{"pid": 1}]), &[1]), None);
     }
 }

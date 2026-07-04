@@ -36,10 +36,15 @@
 //! `${XDG_RUNTIME_DIR:-/tmp}/battlestation-ws/`:
 //!
 //! - `<session_id>` — one file per live session:
-//!   `{"ws": <int>, "status": "waiting"|"thinking"|"tooling",
-//!     "kind": "<harness>", "title": "<aiTitle>", "pid": <int>}`.
+//!   `{"ws": <int>, "win": "<addr>"|null, "status":
+//!     "waiting"|"thinking"|"tooling", "kind": "<harness>",
+//!     "title": "<aiTitle>", "pid": <int>}`.
 //!   `ws` is the Hyprland workspace id owning the session's terminal window
-//!   (found by walking /proc ancestors against `hyprctl clients -j`). `pid`
+//!   (found by walking /proc ancestors against `hyprctl clients -j`), and
+//!   `win` is that same clients row's window address (null when the row
+//!   carried none) — both refresh on every hook event, so a moved terminal
+//!   heals; `win` is what upgrades `ws focus --session` from
+//!   jump-to-workspace to jump-to-window. `pid`
 //!   is the harness process — the nearest ancestor whose comm matches the
 //!   kind (harness binaries are named after their kind: comm `claude` /
 //!   `codex`, both verified live; comm is the kernel's 15-char truncation,
@@ -104,7 +109,7 @@
 //! `agents get [--kind K] [--session-id S] [--format text|json]` is the
 //! readable query over the same state, sweeping like every scan (dead
 //! pids, orphan and stale markers). Its published schema — `[{session,
-//! kind, status, ws, title, subagents: [{id, type, description,
+//! kind, status, ws, win, title, subagents: [{id, type, description,
 //! started}]}]` — deliberately respells the on-disk `sid`/`agents` keys;
 //! the `status` world feed emits the identical rows (shared code, so the
 //! two surfaces can never drift).
@@ -387,8 +392,13 @@
 //!
 //! One selector grammar, mutation split: `focus` never mutates, `send`
 //! always does, `--focus` on send follows the moved thing. `focus
-//! (--bs-id|--bs-rel|--ws-id|--display-id|--display-name)` focuses the
-//! workspace (wherever it lives) or the display (its active workspace).
+//! (--bs-id|--bs-rel|--ws-id|--display-id|--display-name|--session)`
+//! focuses the workspace (wherever it lives), the display (its active
+//! workspace), or an agent session's terminal WINDOW — `--session` (focus
+//! only; selectors earn their spots) resolves the session record and
+//! dispatches its `win` address, falling back to its `ws` when the record
+//! predates the address capture; an unknown session errors loudly (a
+//! caller bug, not a keybind grazing the edge).
 //! `send window <same selectors> [--focus]` moves the active window — a
 //! display target means that display's ACTIVE workspace. `send workspace
 //! (--display-id|--display-name) [--focus]` moves the active workspace to

@@ -120,6 +120,58 @@ impl AnySel {
     }
 }
 
+/// `focus`'s selector: everything [`AnySel`] offers plus `--session` — the
+/// asks panel's Jump focuses the asking session's terminal window. Focus
+/// only: moving things by session has no use case yet, and selectors earn
+/// their spots. (A duplicated field set rather than a flattened AnySel:
+/// clap's exactly-one group must span all six flags, and groups don't
+/// compose across flatten boundaries.)
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct FocusSel {
+    /// Battlespace id: 1-based position in the map (what SUPER+N means)
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    bs_id: Option<u32>,
+    /// Step through battlespace order from the active workspace (+n/-n)
+    #[arg(long, allow_hyphen_values = true)]
+    bs_rel: Option<i64>,
+    /// Raw Hyprland workspace id (focusing a nonexistent id CREATES it)
+    #[arg(long, allow_hyphen_values = true)]
+    ws_id: Option<i64>,
+    /// Display number: 1-based, leftmost first
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    display_id: Option<u32>,
+    /// Output name (e.g. eDP-1)
+    #[arg(long)]
+    display_name: Option<String>,
+    /// Agent session id: focus that session's terminal window
+    #[arg(long)]
+    session: Option<String>,
+}
+
+impl FocusSel {
+    /// The session path wins when given; else the shared Target resolution.
+    fn dispatch(&self) -> i32 {
+        if let Some(sid) = &self.session {
+            return bsctl::ws::focus_session(sid);
+        }
+        let target = if let Some(n) = self.bs_id {
+            Target::Ws(WsSel::Bs(n as usize))
+        } else if let Some(d) = self.bs_rel {
+            Target::Ws(WsSel::BsRel(d))
+        } else if let Some(id) = self.ws_id {
+            Target::Ws(WsSel::Ws(id))
+        } else if let Some(n) = self.display_id {
+            Target::Display(DisplaySel::Id(n as usize))
+        } else {
+            Target::Display(DisplaySel::Name(
+                self.display_name.clone().unwrap_or_default(),
+            ))
+        };
+        bsctl::ws::focus(&target)
+    }
+}
+
 /// A workspace-only selector (bs-id or ws-id), exactly one required.
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -210,10 +262,10 @@ enum Format {
 
 #[derive(Subcommand)]
 enum WsCmd {
-    /// Focus a workspace or display (never mutates)
+    /// Focus a workspace, display, or agent session (never mutates)
     Focus {
         #[command(flatten)]
-        sel: AnySel,
+        sel: FocusSel,
     },
     /// Move the active window or workspace somewhere (--focus to follow)
     Send {
@@ -696,7 +748,7 @@ fn main() {
     let cli = Cli::parse();
     let code = match cli.cmd {
         Cmd::Ws { cmd } => match cmd {
-            WsCmd::Focus { sel } => bsctl::ws::focus(&sel.target()),
+            WsCmd::Focus { sel } => sel.dispatch(),
             WsCmd::Send { cmd } => match cmd {
                 SendCmd::Window { sel, focus } => bsctl::ws::send_window(&sel.target(), focus),
                 SendCmd::Workspace { sel, focus } => bsctl::ws::send_workspace(&sel.sel(), focus),

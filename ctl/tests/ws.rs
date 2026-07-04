@@ -166,6 +166,51 @@ fn focus_bs_id_off_the_end_dispatches_nothing_and_exits_1() {
 }
 
 #[test]
+fn focus_session_dispatches_window_or_workspace() {
+    let env = TestEnv::new("focus-session");
+    // Session state lives under XDG_RUNTIME_DIR/battlestation-ws (the
+    // agents protocol); focus --session reads the record directly.
+    let dir = env.root.join("run/battlestation-ws");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("sess-win"),
+        r#"{"ws": 5, "win": "0xfeed", "status": "waiting", "kind": "claude", "pid": 1}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("sess-nowin"),
+        r#"{"ws": 5, "win": null, "status": "waiting", "kind": "claude", "pid": 1}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        env.ws(&["focus", "--session", "sess-win"]).status.code(),
+        Some(0)
+    );
+    assert_eq!(
+        env.ws(&["focus", "--session", "sess-nowin"]).status.code(),
+        Some(0)
+    );
+    assert_eq!(
+        env.dispatches(),
+        vec![
+            r#"hl.dsp.focus({ window = "address:0xfeed" })"#,
+            "hl.dsp.focus({ workspace = 5 })",
+        ]
+    );
+    // Unknown session: loud error, no dispatch (a caller bug, not a
+    // keybind grazing the map's edge).
+    let out = env.ws(&["focus", "--session", "no-such"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!out.stderr.is_empty());
+    // Path-shaped sids are hostile input, refused before any file IO.
+    let out = env.ws(&["focus", "--session", "../escape"]);
+    assert_eq!(out.status.code(), Some(1));
+    // And the selector group stays exactly-one: session + ws-id is misuse.
+    let out = env.ws(&["focus", "--session", "s", "--ws-id", "3"]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn focus_ws_id_dispatches_without_resolving() {
     let env = TestEnv::new("focus-ws-id");
     // A raw ws-id needs no map and no live workspace — Hyprland creates it.

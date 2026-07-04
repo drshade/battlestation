@@ -1,7 +1,7 @@
 //! The session scan — one flat pass over the battlestation-ws state dir,
 //! yielding one record per live session:
 //!
-//! `{sid, ws, status, kind, title, agents: [{id, type, description, started}]}`
+//! `{sid, ws, win, status, kind, title, agents: [{id, type, description, started}]}`
 //!
 //! (The record keys are the historical on-disk spellings; the `agents get` /
 //! `status` surfaces remap them to the published `session`/`subagents`
@@ -126,6 +126,7 @@ pub fn scan(now: f64, dir: &Path, proj: &Path) -> Vec<Value> {
         out.push(json!({
             "sid": sid,
             "ws": rec.get("ws").cloned().unwrap_or(Value::Null),
+            "win": rec.get("win").cloned().unwrap_or(Value::Null),
             "status": proto::field(&rec, "status"),
             "kind": proto::field_or(&rec, "kind", "claude"),
             "title": proto::field(&rec, "title"),
