@@ -11,14 +11,21 @@
 //! contract, not copy. So does the initialize result's `instructions`
 //! field, for clients that surface it.
 //!
-//! While `ask` blocks awaiting an answer, stdin is not read — a ping or
-//! cancellation sent mid-block is answered late or never. Accepted: the
-//! block is bounded (--block-secs, default 90), progress notifications keep
-//! attentive clients patient, and the store-first design means a client
-//! that gives up and kills us loses nothing (the ask is already posted; the
-//! answer lands in the store and is collected via get_ask).
+//! The agent owns its wait: `ask` takes `wait_secs` (0 = fire-and-forget;
+//! omitted = the server's --block-secs default; capped at 24h). Because a
+//! wait may now run to hours, the block is PROTOCOL-RESPONSIVE: stdin is
+//! multiplexed with the store poll, so a liveness `ping` is ponged
+//! immediately, `notifications/cancelled` for the in-flight call stops the
+//! block (no response for a cancelled request, per spec — the ask STAYS
+//! open: the store is truth and cancellation is transport, not triage),
+//! any other request gets a busy error rather than silence, and stdin EOF
+//! is shutdown. Progress notifications (~10s) keep resettable client
+//! timeouts alive; the store-first design means a client that gives up and
+//! kills us anyway loses nothing (the answer lands in the store and is
+//! collected via get_ask).
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
+use std::os::fd::RawFd;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -76,9 +83,13 @@ pub fn tools_json() -> Value {
         {
             "name": "ask",
             "description": format!(
-                "Post a question to the human's attention queue and wait briefly for an answer. {NORM} \
-                 If no answer arrives within the wait window the ask stays open — continue other work \
-                 if you can, check back with get_ask, or end your turn; the human sees the queue."),
+                "Post a question to the human's attention queue and wait for an answer. {NORM} \
+                 YOU choose how long you are willing to wait via wait_secs: pass 0 when you have \
+                 other work to continue (collect the answer later with get_ask); let the default \
+                 ride for a quick back-and-forth; pass a long wait (minutes to hours) when you are \
+                 truly blocked and waiting IS the right use of your time. Consider list_asks first — \
+                 queue depth and the human's notes tell you how long an answer might take. If the \
+                 wait expires the ask stays open; the human sees the queue either way."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -88,6 +99,10 @@ pub fn tools_json() -> Value {
                                 "description": "The choices, if this is an A/B decision"},
                     "urgency": urgency,
                     "estimate_min": estimate,
+                    "wait_secs": {"type": "integer", "minimum": 0,
+                                  "description": "How long you are willing to wait for the answer, in seconds. \
+                                   0 = post and return immediately. Omitted = the server default (90). \
+                                   Values above 86400 (24h) are clamped."},
                 },
                 "required": ["title"],
             },
@@ -198,6 +213,63 @@ pub fn open_text(id: i64) -> String {
          other work if you can, check back later with get_ask, or end your turn."
     )
 }
+/// wait_secs = 0: deliberately distinct from the timeout text — the agent
+/// chose not to wait, so there is no "no answer yet" to report.
+pub fn posted_text(id: i64) -> String {
+    format!(
+        "Posted ask #{id} to the queue (not waiting, per wait_secs 0). Collect the answer later \
+         with get_ask."
+    )
+}
+
+/// The wait `ask` actually blocks for: the caller's explicit choice wins
+/// (clamped to a 24h sanity cap), the server default covers omission.
+pub const WAIT_CAP_SECS: u64 = 86_400;
+pub fn effective_wait(requested: Option<u64>, default_secs: u64) -> u64 {
+    requested.map_or(default_secs, |w| w.min(WAIT_CAP_SECS))
+}
+
+/// What a line arriving MID-BLOCK means. Pure classifier so the multiplex
+/// policy is testable without pipes.
+#[derive(Debug, PartialEq)]
+pub enum MidBlock {
+    /// Write this response line and keep blocking (ping pong, busy error,
+    /// parse error).
+    Reply(String),
+    /// Our in-flight request was cancelled: stop blocking and send NOTHING
+    /// for it (a cancelled request must not be answered, per spec). The ask
+    /// stays open in the store — cancellation is transport, not triage.
+    Cancelled,
+    /// Lifecycle chatter / responses / foreign cancellations: keep blocking.
+    Ignore,
+}
+
+pub fn classify_midblock(line: &str, ask_req_id: &Value, ask_id: i64) -> MidBlock {
+    let Ok(msg) = serde_json::from_str::<Value>(line) else {
+        return MidBlock::Reply(rpc_error(&Value::Null, -32700, "parse error"));
+    };
+    let id = msg.get("id");
+    let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
+    match (method, id) {
+        ("ping", Some(id)) => MidBlock::Reply(rpc_result(id, json!({}))),
+        ("notifications/cancelled", None)
+            if msg.pointer("/params/requestId") == Some(ask_req_id) =>
+        {
+            MidBlock::Cancelled
+        }
+        // Any other REQUEST would deadlock the client if we sat on it and
+        // corrupt ordering if we queued it — an explicit busy error names
+        // the way out (answer/dismiss the ask, or cancel this call).
+        (m, Some(id)) if !m.is_empty() => MidBlock::Reply(rpc_error(
+            id,
+            -32000,
+            &format!(
+                "busy in a blocking ask (ask #{ask_id} is open — answer or dismiss it, or cancel the in-flight call)"
+            ),
+        )),
+        _ => MidBlock::Ignore,
+    }
+}
 
 /// The session this server speaks for. Resolved from our own /proc ancestry
 /// (the harness process is our ancestor; its pid is in exactly one session
@@ -220,27 +292,137 @@ impl Identity {
     }
 }
 
-/// The blocking loop for `ask`: poll the store every 500ms until the
-/// deadline, emitting a progress notification roughly every 10s when the
-/// client supplied a progressToken. Returns the tool text.
+/// Raw line reader over fd 0 with a carry buffer — BufReader would hide
+/// pipelined bytes from poll(2) (buffered in userspace, invisible to the
+/// fd), and the block loop must see EVERY line the moment it lands. Used by
+/// both the main loop (infinite timeout) and the block loop (500ms slices).
+struct LineReader {
+    fd: RawFd,
+    buf: Vec<u8>,
+    eof: bool,
+}
+
+enum ReadOutcome {
+    Line(String),
+    Timeout,
+    Eof,
+}
+
+impl LineReader {
+    fn new() -> Self {
+        LineReader {
+            fd: 0,
+            buf: Vec::new(),
+            eof: false,
+        }
+    }
+
+    /// A complete buffered line, if any (without the newline).
+    fn pop_line(&mut self) -> Option<String> {
+        let nl = self.buf.iter().position(|&b| b == b'\n')?;
+        let line: Vec<u8> = self.buf.drain(..=nl).collect();
+        Some(String::from_utf8_lossy(&line[..nl]).into_owned())
+    }
+
+    /// One wait slice: buffered line first, else poll(2) up to `timeout_ms`
+    /// (negative = forever), one read(2), re-check. A partial line at slice
+    /// end reads as Timeout — the carry buffer holds it for the next slice.
+    fn wait_line(&mut self, timeout_ms: i32) -> ReadOutcome {
+        if let Some(l) = self.pop_line() {
+            return ReadOutcome::Line(l);
+        }
+        if self.eof {
+            return ReadOutcome::Eof;
+        }
+        let mut pfd = [libc::pollfd {
+            fd: self.fd,
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        loop {
+            let r = unsafe { libc::poll(pfd.as_mut_ptr(), 1, timeout_ms) };
+            if r == 0 {
+                return ReadOutcome::Timeout;
+            }
+            if r > 0 {
+                break; // POLLIN/POLLHUP both mean "read now" (HUP -> 0 = EOF)
+            }
+            if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                self.eof = true;
+                return ReadOutcome::Eof;
+            }
+        }
+        let mut chunk = [0u8; 4096];
+        let n = loop {
+            let n = unsafe { libc::read(self.fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+            if n >= 0 {
+                break n as usize;
+            }
+            if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                self.eof = true;
+                return ReadOutcome::Eof;
+            }
+        };
+        if n == 0 {
+            self.eof = true;
+            return ReadOutcome::Eof;
+        }
+        self.buf.extend_from_slice(&chunk[..n]);
+        match self.pop_line() {
+            Some(l) => ReadOutcome::Line(l),
+            None => ReadOutcome::Timeout, // partial line: carried forward
+        }
+    }
+
+    /// The main loop's read: block until a line or EOF.
+    fn next_line(&mut self) -> Option<String> {
+        loop {
+            match self.wait_line(-1) {
+                ReadOutcome::Line(l) => return Some(l),
+                ReadOutcome::Timeout => continue, // partial line landed
+                ReadOutcome::Eof => return None,
+            }
+        }
+    }
+}
+
+/// How a blocked `ask` ended.
+enum BlockOutcome {
+    /// Respond with this tool text (answered / dismissed / wait expired).
+    Text(String),
+    /// The call was cancelled: no response; the ask stays open.
+    Cancelled,
+    /// stdin died mid-block: shut the server down.
+    Eof,
+}
+
+/// The blocking loop for `ask`: multiplex the store poll (500ms slices)
+/// with stdin until the deadline. Store verdicts end the block; mid-block
+/// lines are classified by [`classify_midblock`] (pings ponged, our
+/// cancellation honored, other requests busy-erroed); a progress
+/// notification flows roughly every 10s when the client supplied a
+/// progressToken — on resettable client timeouts it is what keeps an
+/// hour-scale wait alive.
 fn block_on_answer(
     id: i64,
-    block_secs: u64,
+    wait_secs: u64,
+    req_id: &Value,
     progress_token: Option<&Value>,
+    reader: &mut LineReader,
     out: &mut impl Write,
-) -> String {
+) -> BlockOutcome {
     let started = std::time::Instant::now();
-    let deadline = started + Duration::from_secs(block_secs);
+    let deadline = started + Duration::from_secs(wait_secs);
     let mut last_progress = started;
     loop {
         match block_verdict(asks::record(id).as_ref()) {
-            Verdict::Answered(a) => return answered_text(id, &a),
-            Verdict::Dismissed => return dismissed_text(id),
+            Verdict::Answered(a) => return BlockOutcome::Text(answered_text(id, &a)),
+            Verdict::Dismissed => return BlockOutcome::Text(dismissed_text(id)),
             Verdict::Open => {}
         }
         let now = std::time::Instant::now();
         if now >= deadline {
-            return open_text(id);
+            return BlockOutcome::Text(open_text(id));
         }
         if let Some(tok) = progress_token
             && now.duration_since(last_progress) >= Duration::from_secs(10)
@@ -249,23 +431,54 @@ fn block_on_answer(
             let note = json!({"jsonrpc": "2.0", "method": "notifications/progress",
                 "params": {"progressToken": tok,
                            "progress": started.elapsed().as_secs(),
-                           "total": block_secs}});
+                           "total": wait_secs}});
             let _ = writeln!(out, "{note}");
             let _ = out.flush();
         }
-        std::thread::sleep(Duration::from_millis(500));
+        match reader.wait_line(500) {
+            ReadOutcome::Timeout => {}
+            ReadOutcome::Eof => return BlockOutcome::Eof,
+            ReadOutcome::Line(l) => match classify_midblock(&l, req_id, id) {
+                MidBlock::Ignore => {}
+                MidBlock::Cancelled => return BlockOutcome::Cancelled,
+                MidBlock::Reply(resp) => {
+                    if writeln!(out, "{resp}").is_err() || out.flush().is_err() {
+                        return BlockOutcome::Eof;
+                    }
+                }
+            },
+        }
     }
 }
 
-/// Handle one tools/call; returns the result payload.
+/// What one handled line tells the server loop to do.
+enum Flow {
+    /// Write this response line.
+    Respond(String),
+    /// Nothing to write (notifications, a cancelled call).
+    Silent,
+    /// stdin died mid-block: exit the loop cleanly.
+    Shutdown,
+}
+
+/// The per-connection state a tool call may need: identity resolution, the
+/// wait default, and the stdin reader the ask block multiplexes.
+struct Srv<'a> {
+    identity: &'a mut Identity,
+    default_wait: u64,
+    reader: &'a mut LineReader,
+}
+
+/// Handle one tools/call; returns the flow for the whole request (the ask
+/// path may end cancelled — no response — or discover EOF mid-block).
 fn call_tool(
     name: &str,
     args: &Value,
-    identity: &mut Identity,
-    block_secs: u64,
+    req_id: &Value,
+    srv: &mut Srv,
     progress_token: Option<&Value>,
     out: &mut impl Write,
-) -> Value {
+) -> Flow {
     let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("");
     let urgency = |d: &str| {
         let u = s("urgency");
@@ -276,12 +489,13 @@ fn call_tool(
         }
     };
     let estimate = args.get("estimate_min").and_then(Value::as_i64);
+    let done = |v: Value| Flow::Respond(rpc_result(req_id, v));
     match name {
         "ask" | "notify" => {
             if s("title").is_empty() {
-                return tool_text("title is required", true);
+                return done(tool_text("title is required", true));
             }
-            let (session, ws) = identity.get();
+            let (session, ws) = srv.identity.get();
             let ask_type = if name == "ask" {
                 "question"
             } else if s("type") == "review" {
@@ -306,70 +520,79 @@ fn call_tool(
                 &options,
                 &urgency("medium"),
                 estimate,
-                &identity.kind,
+                &srv.identity.kind,
                 &session,
                 ws,
             ) {
                 Ok(id) => id,
-                Err(e) => return tool_text(&format!("posting failed: {e}"), true),
+                Err(e) => return done(tool_text(&format!("posting failed: {e}"), true)),
             };
             if name == "notify" {
-                return tool_text(&format!("Posted ask #{id} to the queue."), false);
+                return done(tool_text(&format!("Posted ask #{id} to the queue."), false));
             }
-            tool_text(&block_on_answer(id, block_secs, progress_token, out), false)
+            let wait = effective_wait(
+                args.get("wait_secs").and_then(Value::as_u64),
+                srv.default_wait,
+            );
+            if wait == 0 {
+                return done(tool_text(&posted_text(id), false));
+            }
+            match block_on_answer(id, wait, req_id, progress_token, srv.reader, out) {
+                BlockOutcome::Text(t) => done(tool_text(&t, false)),
+                BlockOutcome::Cancelled => Flow::Silent,
+                BlockOutcome::Eof => Flow::Shutdown,
+            }
         }
-        "list_asks" => tool_text(&asks::get_json(None), false),
+        "list_asks" => done(tool_text(&asks::get_json(None), false)),
         "get_ask" => match args.get("id").and_then(Value::as_i64) {
             Some(id) => match asks::record(id) {
-                Some(r) => tool_text(&r.to_string(), false),
-                None => tool_text(&format!("no ask {id}"), true),
+                Some(r) => done(tool_text(&r.to_string(), false)),
+                None => done(tool_text(&format!("no ask {id}"), true)),
             },
-            None => tool_text("id is required", true),
+            None => done(tool_text("id is required", true)),
         },
         "update_ask" => {
             let Some(id) = args.get("id").and_then(Value::as_i64) else {
-                return tool_text("id is required", true);
+                return done(tool_text("id is required", true));
             };
-            let (session, _) = identity.get();
+            let (session, _) = srv.identity.get();
             let owner = asks::record(id)
                 .map(|r| crate::proto::field(&r, "session"))
                 .unwrap_or_default();
             if owner != session {
-                return tool_text(
+                return done(tool_text(
                     &format!(
                         "ask {id} was not posted by this session; only your own asks can be updated"
                     ),
                     true,
-                );
+                ));
             }
             let u = s("urgency");
             let u = (!u.is_empty()).then(|| urgency("medium"));
             if u.is_none() && estimate.is_none() {
-                return tool_text("nothing to update: pass urgency and/or estimate_min", true);
+                return done(tool_text(
+                    "nothing to update: pass urgency and/or estimate_min",
+                    true,
+                ));
             }
             // The CLI verb enforces the same open-only + field rules; reuse
             // it so the two surfaces cannot drift. Its stderr is invisible
             // here — the generic text is enough (the caller can get_ask).
             match asks::update(id, u.as_deref(), estimate) {
-                0 => tool_text(&format!("ask #{id} updated"), false),
-                _ => tool_text(&format!("ask {id} is not open"), true),
+                0 => done(tool_text(&format!("ask #{id} updated"), false)),
+                _ => done(tool_text(&format!("ask {id} is not open"), true)),
             }
         }
-        "world" => tool_text(&world::snapshot().to_string(), false),
-        other => tool_text(&format!("unknown tool {other}"), true),
+        "world" => done(tool_text(&world::snapshot().to_string(), false)),
+        other => done(tool_text(&format!("unknown tool {other}"), true)),
     }
 }
 
 /// One request line -> zero or one response lines (notifications produce
 /// none). `out` is threaded through for the ask fast path's progress.
-fn handle_line(
-    line: &str,
-    identity: &mut Identity,
-    block_secs: u64,
-    out: &mut impl Write,
-) -> Option<String> {
+fn handle_line(line: &str, srv: &mut Srv, out: &mut impl Write) -> Flow {
     let Ok(msg) = serde_json::from_str::<Value>(line) else {
-        return Some(rpc_error(&Value::Null, -32700, "parse error"));
+        return Flow::Respond(rpc_error(&Value::Null, -32700, "parse error"));
     };
     let id = msg.get("id").cloned();
     let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
@@ -377,13 +600,13 @@ fn handle_line(
     match (method, id) {
         // Responses to our notifications don't exist; a message with no
         // method is a client response — nothing of ours awaits one.
-        ("", _) => None,
+        ("", _) => Flow::Silent,
         ("initialize", Some(id)) => {
             let offered = params
                 .get("protocolVersion")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            Some(rpc_result(
+            Flow::Respond(rpc_result(
                 &id,
                 json!({
                     "protocolVersion": choose_version(offered),
@@ -395,8 +618,8 @@ fn handle_line(
                 }),
             ))
         }
-        ("ping", Some(id)) => Some(rpc_result(&id, json!({}))),
-        ("tools/list", Some(id)) => Some(rpc_result(&id, json!({"tools": tools_json()}))),
+        ("ping", Some(id)) => Flow::Respond(rpc_result(&id, json!({}))),
+        ("tools/list", Some(id)) => Flow::Respond(rpc_result(&id, json!({"tools": tools_json()}))),
         ("tools/call", Some(id)) => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params
@@ -404,34 +627,48 @@ fn handle_line(
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             let token = params.pointer("/_meta/progressToken").cloned();
-            let result = call_tool(name, &args, identity, block_secs, token.as_ref(), out);
-            Some(rpc_result(&id, result))
+            call_tool(name, &args, &id, srv, token.as_ref(), out)
         }
-        // Tolerated notifications: lifecycle chatter we need nothing from.
-        ("notifications/initialized", None) | ("notifications/cancelled", None) => None,
-        (_, Some(id)) => Some(rpc_error(&id, -32601, "method not found")),
-        (_, None) => None, // unknown notification: ignore by contract
+        // Tolerated notifications: lifecycle chatter we need nothing from
+        // OUTSIDE a block (a cancellation landing here names a request that
+        // already completed — nothing to cancel).
+        ("notifications/initialized", None) | ("notifications/cancelled", None) => Flow::Silent,
+        (_, Some(id)) => Flow::Respond(rpc_error(&id, -32601, "method not found")),
+        (_, None) => Flow::Silent, // unknown notification: ignore by contract
     }
 }
 
 /// The server loop: line in, response out, until stdin closes (the harness
-/// ending the session is the shutdown signal — exit 0).
-pub fn run(kind: &str, block_secs: u64) -> i32 {
+/// ending the session is the shutdown signal — exit 0). Reads through
+/// `LineReader` — the same carry buffer the block loop multiplexes — so
+/// pipelined requests are never stranded in a BufReader the block loop's
+/// poll(2) cannot see.
+pub fn run(kind: &str, default_wait: u64) -> i32 {
     let mut identity = Identity {
         kind: kind.to_string(),
         resolved: None,
     };
-    let stdin = io::stdin();
+    let mut reader = LineReader::new();
     let mut out = io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
+    // The reader is borrowed twice per iteration (next_line here, the block
+    // loop inside handle_line) — sequentially, never at once.
+    while let Some(line) = reader.next_line() {
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(resp) = handle_line(&line, &mut identity, block_secs, &mut out)
-            && (writeln!(out, "{resp}").is_err() || out.flush().is_err())
-        {
-            break; // client gone mid-write: done, not broken
+        let mut srv = Srv {
+            identity: &mut identity,
+            default_wait,
+            reader: &mut reader,
+        };
+        match handle_line(&line, &mut srv, &mut out) {
+            Flow::Silent => {}
+            Flow::Shutdown => break,
+            Flow::Respond(resp) => {
+                if writeln!(out, "{resp}").is_err() || out.flush().is_err() {
+                    break; // client gone mid-write: done, not broken
+                }
+            }
         }
     }
     0
@@ -496,6 +733,21 @@ mod tests {
         assert!(tools[0]["description"].as_str().unwrap().contains(NORM));
     }
 
+    /// handle_line sugar for tests: Respond -> Some(line), else None
+    /// (Shutdown never occurs on these inputs).
+    fn drive(line: &str, ident: &mut Identity, sink: &mut Vec<u8>) -> Option<String> {
+        let mut reader = LineReader::new();
+        let mut srv = Srv {
+            identity: ident,
+            default_wait: 0,
+            reader: &mut reader,
+        };
+        match handle_line(line, &mut srv, sink) {
+            Flow::Respond(r) => Some(r),
+            _ => None,
+        }
+    }
+
     #[test]
     fn protocol_shapes() {
         let mut ident = Identity {
@@ -504,9 +756,9 @@ mod tests {
         };
         let mut sink = Vec::new();
         // initialize echoes a known version and carries instructions
-        let resp = handle_line(
+        let resp = drive(
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
-            &mut ident, 0, &mut sink,
+            &mut ident, &mut sink,
         )
         .unwrap();
         let v: Value = serde_json::from_str(&resp).unwrap();
@@ -515,42 +767,95 @@ mod tests {
         assert!(!v["result"]["instructions"].as_str().unwrap().is_empty());
         // notifications produce nothing
         assert!(
-            handle_line(
+            drive(
                 r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
                 &mut ident,
-                0,
                 &mut sink
             )
             .is_none()
         );
         assert!(
-            handle_line(
+            drive(
                 r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}"#,
                 &mut ident,
-                0,
                 &mut sink
             )
             .is_none()
         );
         // ping pongs; unknown methods error; garbage is a parse error
-        let pong = handle_line(
+        let pong = drive(
             r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
             &mut ident,
-            0,
             &mut sink,
         )
         .unwrap();
         assert!(pong.contains(r#""result":{}"#));
-        let err = handle_line(
+        let err = drive(
             r#"{"jsonrpc":"2.0","id":3,"method":"resources/list"}"#,
             &mut ident,
-            0,
             &mut sink,
         )
         .unwrap();
         assert!(err.contains("-32601"));
-        let parse = handle_line("not json", &mut ident, 0, &mut sink).unwrap();
+        let parse = drive("not json", &mut ident, &mut sink).unwrap();
         assert!(parse.contains("-32700"));
         assert!(sink.is_empty(), "no progress without a blocked ask");
+    }
+
+    #[test]
+    fn wait_is_agent_owned_with_a_sane_cap() {
+        assert_eq!(effective_wait(None, 90), 90); // omitted -> server default
+        assert_eq!(effective_wait(Some(0), 90), 0); // fire-and-forget
+        assert_eq!(effective_wait(Some(3600), 90), 3600); // hours are legitimate
+        assert_eq!(effective_wait(Some(999_999), 90), WAIT_CAP_SECS); // clamped
+        assert_eq!(effective_wait(None, 0), 0); // server may default to no block
+    }
+
+    #[test]
+    fn midblock_classification() {
+        let req = json!(7);
+        // ping is ponged while blocked
+        match classify_midblock(r#"{"jsonrpc":"2.0","id":42,"method":"ping"}"#, &req, 3) {
+            MidBlock::Reply(r) => {
+                assert!(r.contains(r#""id":42"#) && r.contains(r#""result":{}"#))
+            }
+            other => panic!("{other:?}"),
+        }
+        // OUR cancellation stops the block; a foreign one is ignored
+        assert_eq!(
+            classify_midblock(
+                r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}"#,
+                &req,
+                3
+            ),
+            MidBlock::Cancelled
+        );
+        assert_eq!(
+            classify_midblock(
+                r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":8}}"#,
+                &req,
+                3
+            ),
+            MidBlock::Ignore
+        );
+        // another REQUEST gets a busy error naming the open ask
+        match classify_midblock(
+            r#"{"jsonrpc":"2.0","id":43,"method":"tools/list"}"#,
+            &req,
+            3,
+        ) {
+            MidBlock::Reply(r) => assert!(r.contains("-32000") && r.contains("ask #3"), "{r}"),
+            other => panic!("{other:?}"),
+        }
+        // garbage is answered as a parse error, not ignored
+        match classify_midblock("junk", &req, 3) {
+            MidBlock::Reply(r) => assert!(r.contains("-32700")),
+            other => panic!("{other:?}"),
+        }
+        // responses / other notifications are ignored
+        assert_eq!(
+            classify_midblock(r#"{"jsonrpc":"2.0","id":9,"result":{}}"#, &req, 3),
+            MidBlock::Ignore
+        );
     }
 }

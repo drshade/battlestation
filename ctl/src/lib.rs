@@ -177,22 +177,34 @@
 //! Unresolvable (headless, hooks not yet fired) degrades to posting with
 //! empty session/null ws and retries per call — never fails.
 //!
-//! TOOLS: `ask` (post a question, store-first, then a BOUNDED block — poll
-//! the store 500ms up to --block-secs, default 90, progress-notified ~10s
-//! when the client sent a progressToken; answered -> the answer text,
-//! dismissed -> "proceed on judgment, don't re-post", timeout -> "ask #N
-//! remains open" as a SUCCESS: the RPC is only a fast path and the store
-//! outlives it), `notify` (non-blocking review/FYI post), `list_asks` /
-//! `get_ask` (the queue and the late-answer collection), `update_ask`
-//! (urgency/estimate only, own asks only — the two-namespaces rule
-//! enforced at the tool boundary), `world` (the status object; the MVP
-//! deliberately exposes NO mutating world tools — that needs the consent
-//! design). The tool DESCRIPTIONS carry the mandatory-post norm — they are
-//! the one prompt surface every session of every harness receives — as does
-//! the initialize `instructions` field; their wording is contract, not
-//! copy. While `ask` blocks, stdin goes unread (pings answered late);
-//! accepted because the block is bounded and a client that kills us loses
-//! nothing. Stdin EOF is shutdown (exit 0).
+//! TOOLS: `ask` (post a question, store-first, then block awaiting the
+//! answer; answered -> the answer text, dismissed -> "proceed on judgment,
+//! don't re-post" — dismissal is also the human's release valve for a
+//! blocked agent — wait expiry -> "ask #N remains open" as a SUCCESS: the
+//! RPC is only a fast path and the store outlives it), `notify`
+//! (non-blocking review/FYI post), `list_asks` / `get_ask` (the queue and
+//! the late-answer collection), `update_ask` (urgency/estimate only, own
+//! asks only — the two-namespaces rule enforced at the tool boundary),
+//! `world` (the status object; the MVP deliberately exposes NO mutating
+//! world tools — that needs the consent design). The tool DESCRIPTIONS
+//! carry the mandatory-post norm — they are the one prompt surface every
+//! session of every harness receives — as does the initialize
+//! `instructions` field; their wording is contract, not copy.
+//!
+//! THE WAIT IS AGENT-OWNED: `ask` takes `wait_secs` — 0 = post and return
+//! immediately (collect via get_ask), omitted = the server's --block-secs
+//! default (90), explicit values clamped to 24h. Hour-scale waits are
+//! legitimate (a truly blocked agent waiting IS using its time well), so
+//! the block is PROTOCOL-RESPONSIVE: stdin is poll(2)-multiplexed with the
+//! 500ms store poll — a `ping` is ponged mid-block, `notifications/
+//! cancelled` for the in-flight call ends the block with NO response (per
+//! spec) while the ask STAYS open (the store is truth; cancellation is
+//! transport, not triage), any other request gets a -32000 busy error
+//! naming the open ask (silence would deadlock the client), and stdin EOF
+//! is shutdown (exit 0). Progress notifications flow ~10s when the client
+//! sent a progressToken — on resettable client timeouts they are what
+//! keeps a long wait alive. Waits beyond a client's own tool-timeout
+//! ceiling die client-side; the ask survives that too.
 //!
 //! WIRING (per harness, verified live 2026-07-04): Claude Code reads user-
 //! scope servers from `~/.claude.json` only (settings.json `mcpServers` is
@@ -204,7 +216,14 @@
 //! it; standard mcpServers shape), stowed alongside hooks.json. Codex and
 //! agy exec the command directly (no shell), so both wire through
 //! `/bin/sh -c 'exec "$HOME/..."'` for expansion; Claude stores the
-//! absolute path at add time.
+//! absolute path at add time. CLIENT TOOL-TIMEOUT CEILINGS, raised to 2h
+//! for the long waits: Claude Code via MCP_TOOL_TIMEOUT=7200000 (ms; env
+//! var name verified in the 2.1.201 binary) in the stowed settings.json
+//! `env` block (the claude-settings filter whitelists `env`); Codex via
+//! `tool_timeout_sec = 7200` (key verified in the 0.142.5 binary) on the
+//! server entry. Antigravity exposes no attributable MCP timeout knob
+//! (probed 1.0.16) — its ceiling is whatever the binary defaults to, and
+//! long agy waits may die client-side (the ask survives).
 //!
 //! # The battlespace map (`bsctl ws map`)
 //!

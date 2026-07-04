@@ -54,3 +54,6 @@ command = "$HOME/.local/bin/bsctl agents set --kind codex subagent-stop"
 [mcp_servers.battlestation]
 command = "/bin/sh"
 args = ["-c", 'exec "$HOME/.local/bin/bsctl" mcp --kind codex']
+# 2h (default 60s): the ask tool legitimately blocks for long waits —
+# the agent picks wait_secs; this is the client-side ceiling.
+tool_timeout_sec = 7200

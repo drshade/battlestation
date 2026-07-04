@@ -57,7 +57,8 @@ enum Cmd {
         /// The harness kind this server serves (resolves the session identity)
         #[arg(long)]
         kind: String,
-        /// Max seconds `ask` blocks awaiting an answer (0 = return immediately)
+        /// Seconds `ask` waits when the caller omits wait_secs (an explicit
+        /// wait_secs wins; 0 = default to fire-and-forget)
         #[arg(long, default_value_t = 90)]
         block_secs: u64,
     },

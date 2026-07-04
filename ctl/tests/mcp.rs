@@ -142,6 +142,27 @@ impl McpClient {
         writeln!(self.stdin, "{line}").unwrap();
     }
 
+    /// Fire a request WITHOUT waiting for its response (the mid-block
+    /// tests drive send and read separately). Returns the request id.
+    fn send_request(&mut self, method: &str, params: Value) -> i64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let line =
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string();
+        writeln!(self.stdin, "{line}").unwrap();
+        id
+    }
+
+    /// Read exactly one server line.
+    fn read_line(&mut self) -> Value {
+        let mut buf = String::new();
+        assert!(
+            self.stdout.read_line(&mut buf).unwrap() > 0,
+            "server closed unexpectedly"
+        );
+        serde_json::from_str(&buf).unwrap()
+    }
+
     /// tools/call sugar: returns (text, isError).
     fn call(&mut self, name: &str, args: Value) -> (String, bool) {
         let r = self.request("tools/call", json!({"name": name, "arguments": args}));
@@ -200,7 +221,8 @@ fn ask_posts_store_first_and_reports_open_on_no_block() {
                "options": ["red", "blue"], "urgency": "high", "estimate_min": 2}),
     );
     assert!(!is_err);
-    assert!(text.contains("ask #1 remains open"), "{text}");
+    // --block-secs 0 defaults omitted wait_secs to fire-and-forget
+    assert!(text.contains("Posted ask #1"), "{text}");
     // the store has it, with identity degraded to empty session
     let row: Value =
         serde_json::from_str(&env.asks(&["get", "--id", "1", "--format", "json"])).unwrap();
@@ -271,11 +293,81 @@ fn dismissal_mid_block_says_proceed_on_judgment() {
 }
 
 #[test]
+fn wait_secs_zero_overrides_the_server_default() {
+    // Server default is a 30s block — an explicit wait_secs 0 must win and
+    // return immediately with the collect-later text, not the timeout text.
+    let env = TestEnv::new("wait-zero");
+    let mut c = env.server(30);
+    let started = std::time::Instant::now();
+    let (text, is_err) = c.call("ask", json!({"title": "No rush", "wait_secs": 0}));
+    assert!(!is_err);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "must not block"
+    );
+    assert!(text.contains("Posted ask #1"), "{text}");
+    assert!(text.contains("not waiting"), "{text}");
+    assert!(text.contains("get_ask"), "{text}");
+    let row: Value =
+        serde_json::from_str(&env.asks(&["get", "--id", "1", "--format", "json"])).unwrap();
+    assert_eq!(row["state"], "open");
+}
+
+#[test]
+fn ping_mid_block_is_ponged_while_the_ask_stays_parked() {
+    let env = TestEnv::new("ping-block");
+    let mut c = env.server(0); // default fire-and-forget; wait_secs opts in
+    let ask_req = c.send_request(
+        "tools/call",
+        json!({"name": "ask", "arguments": {"title": "Long one", "wait_secs": 20}}),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(600)); // block established
+    let ping_req = c.send_request("ping", json!({}));
+    // The pong arrives FIRST — the ask call is still parked.
+    let pong = c.read_line();
+    assert_eq!(pong["id"].as_i64(), Some(ping_req));
+    assert_eq!(pong["result"], json!({}));
+    // Now answer from outside; the parked call returns with the answer.
+    env.asks(&["answer", "1", "proceed"]);
+    let resp = c.read_line();
+    assert_eq!(resp["id"].as_i64(), Some(ask_req));
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert_eq!(text, "The human answered ask #1: proceed");
+}
+
+#[test]
+fn cancellation_mid_block_is_honored_and_the_ask_survives() {
+    let env = TestEnv::new("cancel-block");
+    let mut c = env.server(0);
+    let ask_req = c.send_request(
+        "tools/call",
+        json!({"name": "ask", "arguments": {"title": "Never mind", "wait_secs": 20}}),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    c.notify("notifications/cancelled", json!({"requestId": ask_req}));
+    // The server is back in its main loop: a ping answers, and the FIRST
+    // line out is the pong — a cancelled request gets no response, ever.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    let ping_req = c.send_request("ping", json!({}));
+    let line = c.read_line();
+    assert_eq!(
+        line["id"].as_i64(),
+        Some(ping_req),
+        "nothing may be emitted for the cancelled ask call (got {line})"
+    );
+    // The ask outlives the cancelled transport: still open in the store.
+    let row: Value =
+        serde_json::from_str(&env.asks(&["get", "--id", "1", "--format", "json"])).unwrap();
+    assert_eq!(row["state"], "open");
+    let _ = ask_req;
+}
+
+#[test]
 fn get_ask_collects_a_late_answer() {
     let env = TestEnv::new("late-answer");
     let mut c = env.server(0);
     let (text, _) = c.call("ask", json!({"title": "Later question"}));
-    assert!(text.contains("remains open"));
+    assert!(text.contains("Posted ask #1"), "{text}");
     env.asks(&["answer", "1", "yes,", "ship", "it"]);
     let (text, is_err) = c.call("get_ask", json!({"id": 1}));
     assert!(!is_err);

@@ -7,7 +7,9 @@
 # deliberately-configured keys, sorted (jq -S) — default-deny, so a key
 # Claude Code invents tomorrow never churns the repo (a deny-list had to
 # learn each new key the hard way). The live file keeps everything; only
-# what git sees is projected.
+# what git sees is projected. `env` is kept for MCP_TOOL_TIMEOUT — the
+# deliberate 2h ceiling that lets `bsctl mcp`'s long ask waits survive
+# Claude Code's client-side tool timeout.
 #
 # This script is the single source of truth for the keep-list. Wired up via
 # .gitattributes (filter=claude-settings) + repo-local git config:
@@ -16,4 +18,4 @@
 # re-adds its runtime keys on next run.
 set -euo pipefail
 
-jq -S '{hooks, permissions, statusLine, enabledPlugins} | with_entries(select(.value != null))'
+jq -S '{hooks, permissions, statusLine, enabledPlugins, env} | with_entries(select(.value != null))'
