@@ -322,26 +322,33 @@ pub fn get_json(sel: Option<&DisplaySel>) -> Result<String, i32> {
 /// TABLE (and the json's monitors) to one output; the lid line and the
 /// warnings stay — they are the report's value and cost nothing.
 pub fn get(sel: Option<&DisplaySel>, json_out: bool) -> i32 {
-    if json_out {
-        return match get_json(sel) {
-            Ok(s) => {
-                println!("{s}");
-                0
-            }
-            Err(c) => c,
-        };
-    }
-    let mons = match monitors_all() {
-        Ok(v) => v,
-        Err(c) => return c,
+    let render = if json_out {
+        get_json(sel)
+    } else {
+        get_text(sel)
     };
+    match render {
+        Ok(s) => {
+            if json_out {
+                println!("{s}");
+            } else {
+                print!("{s}");
+            }
+            0
+        }
+        Err(c) => c,
+    }
+}
+
+/// One `display get` text result — table + lid line + warnings,
+/// newline-terminated. Shared by the one-shot form and its `--stream` text
+/// framing.
+pub fn get_text(sel: Option<&DisplaySel>) -> Result<String, i32> {
+    let mons = monitors_all()?;
     let outs = outputs_from(&mons);
     let ids = id_map(&mons);
     let only = match sel {
-        Some(sel) => match resolve_output("get", sel, &outs, &ids) {
-            Ok(o) => Some(o.name.clone()),
-            Err(c) => return c,
-        },
+        Some(sel) => Some(resolve_output("get", sel, &outs, &ids)?.name.clone()),
         None => None,
     };
     let lid = lid_closed();
@@ -350,14 +357,14 @@ pub fn get(sel: Option<&DisplaySel>, json_out: bool) -> i32 {
         None => outs,
         Some(name) => outs.into_iter().filter(|o| o.name == *name).collect(),
     };
-    println!("{}", format_table(&shown, &ids));
+    let mut s = format_table(&shown, &ids) + "\n";
     if let Some(closed) = lid {
-        println!("lid: {}", if closed { "closed" } else { "open" });
+        s += &format!("lid: {}\n", if closed { "closed" } else { "open" });
     }
     for w in &warns {
-        println!("{w}");
+        s += &format!("{w}\n");
     }
-    0
+    Ok(s)
 }
 
 /// `bsctl display set dpms <selector> (--on|--off)` — safe dpms targeting

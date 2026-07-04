@@ -43,7 +43,7 @@ enum Cmd {
     Status {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
-        /// Keep emitting the result whenever it changes (requires --format json)
+        /// Keep emitting the result whenever it changes (json: NDJSON; text: live view)
         #[arg(long)]
         stream: bool,
     },
@@ -51,15 +51,17 @@ enum Cmd {
     Completions { shell: clap_complete::Shell },
 }
 
-/// `--stream` speaks NDJSON: one result per line, machine-consumed. A text
-/// stream has no line-per-result framing, so v1 refuses it — the same exit
-/// 2 clap gives structurally impossible invocations.
-fn stream_requires_json(stream: bool, format: Format) -> Option<i32> {
-    if stream && format != Format::Json {
-        eprintln!("error: --stream requires --format json");
-        return Some(2);
+/// `--stream` is orthogonal to `--format`: json streams NDJSON, text
+/// streams frame for eyes (watch(1)-style clear-redraw on a tty, blank-line
+/// separated when piped). The tty check happens once, here — never per
+/// emission.
+fn framing(format: Format) -> bsctl::stream::Framing {
+    match format {
+        Format::Json => bsctl::stream::Framing::Ndjson,
+        Format::Text => bsctl::stream::Framing::Text {
+            tty: unsafe { libc::isatty(1) } == 1,
+        },
     }
-    None
 }
 
 // ---- selectors (clap-facing) --------------------------------------------------
@@ -270,7 +272,7 @@ enum MapCmd {
         filter: FilterSel,
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
-        /// Keep emitting the result whenever it changes (requires --format json)
+        /// Keep emitting the result whenever it changes (json: NDJSON; text: live view)
         #[arg(long)]
         stream: bool,
     },
@@ -292,7 +294,7 @@ enum PrefsCmd {
         filter: PrefsFilterSel,
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
-        /// Keep emitting the result whenever it changes (requires --format json)
+        /// Keep emitting the result whenever it changes (json: NDJSON; text: live view)
         #[arg(long)]
         stream: bool,
     },
@@ -372,7 +374,7 @@ enum DisplayCmd {
         filter: DisplayFilterSel,
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
-        /// Keep emitting the result whenever it changes (requires --format json)
+        /// Keep emitting the result whenever it changes (json: NDJSON; text: live view)
         #[arg(long)]
         stream: bool,
     },
@@ -521,7 +523,7 @@ enum AgentsCmd {
         session_id: Option<String>,
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
-        /// Keep emitting the result whenever it changes (requires --format json)
+        /// Keep emitting the result whenever it changes (json: NDJSON; text: live view)
         #[arg(long)]
         stream: bool,
     },
@@ -561,14 +563,24 @@ fn main() {
                     filter,
                     format,
                     stream,
-                } => stream_requires_json(stream, format).unwrap_or_else(|| {
+                } => {
                     let f = filter.filter();
                     if stream {
-                        bsctl::stream::run(move || bsctl::ws::map_json(&f))
+                        let json = format == Format::Json;
+                        bsctl::stream::run(
+                            move || {
+                                if json {
+                                    bsctl::ws::map_json(&f)
+                                } else {
+                                    bsctl::ws::map_text(&f)
+                                }
+                            },
+                            framing(format),
+                        )
                     } else {
                         bsctl::ws::map_get(&f, format == Format::Json)
                     }
-                }),
+                }
                 MapCmd::Set { ids } => bsctl::ws::map_set(&ids),
                 MapCmd::Reset => bsctl::ws::map_reset(),
             },
@@ -577,14 +589,24 @@ fn main() {
                     filter,
                     format,
                     stream,
-                } => stream_requires_json(stream, format).unwrap_or_else(|| {
+                } => {
                     let sel = filter.sel();
                     if stream {
-                        bsctl::stream::run(move || bsctl::ws::prefs_json(sel.as_ref()))
+                        let json = format == Format::Json;
+                        bsctl::stream::run(
+                            move || {
+                                if json {
+                                    bsctl::ws::prefs_json(sel.as_ref())
+                                } else {
+                                    bsctl::ws::prefs_text(sel.as_ref())
+                                }
+                            },
+                            framing(format),
+                        )
                     } else {
                         bsctl::ws::prefs_get(sel.as_ref(), format == Format::Json)
                     }
-                }),
+                }
                 PrefsCmd::Add { sel, display } => bsctl::ws::prefs_add(&sel.sel(), &display.sel()),
                 PrefsCmd::Rm { sel } => bsctl::ws::prefs_rm(sel.sel().as_ref()),
                 PrefsCmd::Reconcile => bsctl::ws::reconcile(),
@@ -595,14 +617,24 @@ fn main() {
                 filter,
                 format,
                 stream,
-            } => stream_requires_json(stream, format).unwrap_or_else(|| {
+            } => {
                 let sel = filter.sel();
                 if stream {
-                    bsctl::stream::run(move || bsctl::display::get_json(sel.as_ref()))
+                    let json = format == Format::Json;
+                    bsctl::stream::run(
+                        move || {
+                            if json {
+                                bsctl::display::get_json(sel.as_ref())
+                            } else {
+                                bsctl::display::get_text(sel.as_ref())
+                            }
+                        },
+                        framing(format),
+                    )
                 } else {
                     bsctl::display::get(sel.as_ref(), format == Format::Json)
                 }
-            }),
+            }
             DisplayCmd::Set { cmd } => match cmd {
                 DisplaySetCmd::Dpms { sel, state } => {
                     bsctl::display::set_dpms(&sel.sel(), state.on && !state.off)
@@ -625,14 +657,20 @@ fn main() {
                 session_id,
                 format,
                 stream,
-            } => stream_requires_json(stream, format).unwrap_or_else(|| {
+            } => {
                 if stream {
-                    bsctl::stream::run(move || {
-                        Ok(bsctl::agents::get_json(
-                            kind.as_deref(),
-                            session_id.as_deref(),
-                        ))
-                    })
+                    let json = format == Format::Json;
+                    bsctl::stream::run(
+                        move || {
+                            let (k, s) = (kind.as_deref(), session_id.as_deref());
+                            Ok(if json {
+                                bsctl::agents::get_json(k, s)
+                            } else {
+                                bsctl::agents::get_text(k, s)
+                            })
+                        },
+                        framing(format),
+                    )
                 } else {
                     bsctl::agents::get(
                         kind.as_deref(),
@@ -640,23 +678,32 @@ fn main() {
                         format == Format::Json,
                     )
                 }
-            }),
+            }
             AgentsCmd::Usage { kind, format } => {
                 bsctl::usage::get(kind.as_deref(), format == Format::Json)
             }
         },
         Cmd::Status { format, stream } => {
-            stream_requires_json(stream, format).unwrap_or_else(|| {
-                if stream {
-                    bsctl::stream::run(|| Ok(bsctl::world::snapshot().to_string()))
-                } else if format == Format::Json {
-                    println!("{}", bsctl::world::snapshot());
-                    0
-                } else {
-                    print!("{}", bsctl::world::render_text(&bsctl::world::snapshot()));
-                    0
-                }
-            })
+            if stream {
+                let json = format == Format::Json;
+                bsctl::stream::run(
+                    move || {
+                        let w = bsctl::world::snapshot();
+                        Ok(if json {
+                            w.to_string()
+                        } else {
+                            bsctl::world::render_text(&w)
+                        })
+                    },
+                    framing(format),
+                )
+            } else if format == Format::Json {
+                println!("{}", bsctl::world::snapshot());
+                0
+            } else {
+                print!("{}", bsctl::world::render_text(&bsctl::world::snapshot()));
+                0
+            }
         }
         Cmd::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "bsctl", &mut std::io::stdout());

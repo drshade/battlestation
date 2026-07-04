@@ -817,19 +817,33 @@ pub fn name_rm(filter: &RowFilter) -> i32 {
 /// join, one row per battlespace: bs-id, ws-id, name, display, windows,
 /// active. THE learning view of the model (bs 3 = "SUPER+3 goes here").
 pub fn map_get(filter: &RowFilter, json_out: bool) -> i32 {
-    let rows = match bs_rows("map get", filter) {
-        Ok(r) => r,
-        Err(c) => return c,
+    let render = if json_out {
+        map_json(filter)
+    } else {
+        map_text(filter)
     };
-    if json_out {
-        println!("{}", Value::Array(map_rows_json(&rows)));
-        return 0;
+    match render {
+        Ok(s) => {
+            if json_out {
+                println!("{s}");
+            } else {
+                print!("{s}");
+            }
+            0
+        }
+        Err(c) => c,
     }
+}
+
+/// One `map get` text result — the table (newline-terminated), or "" for
+/// no rows (no lonely headers). Shared by the one-shot form and its
+/// `--stream` text framing.
+pub fn map_text(filter: &RowFilter) -> Result<String, i32> {
+    let rows = bs_rows("map get", filter)?;
     if rows.is_empty() {
-        return 0;
+        return Ok(String::new());
     }
-    println!("{}", proto::render_table(&MAP_HEADERS, &map_cells(&rows)));
-    0
+    Ok(proto::render_table(&MAP_HEADERS, &map_cells(&rows)) + "\n")
 }
 
 /// The map table's shape, shared with `status`'s workspaces section (which
@@ -975,16 +989,31 @@ pub fn prefs_json(sel: Option<&WsSel>) -> Result<String, i32> {
 /// and whether the workspace still exists. Empty preferences print nothing
 /// (and query nothing).
 pub fn prefs_get(sel: Option<&WsSel>, json_out: bool) -> i32 {
-    let rows = match prefs_rows_live(sel) {
-        Ok(r) => r,
-        Err(c) => return c,
+    let render = if json_out {
+        prefs_json(sel)
+    } else {
+        prefs_text(sel)
     };
-    if json_out {
-        println!("{}", Value::Array(pref_rows_json(&rows)));
-        return 0;
+    match render {
+        Ok(s) => {
+            if json_out {
+                println!("{s}");
+            } else {
+                print!("{s}");
+            }
+            0
+        }
+        Err(c) => c,
     }
+}
+
+/// One `prefs get` text result — the table (newline-terminated), or "" for
+/// no preferences. Shared by the one-shot form and its `--stream` text
+/// framing.
+pub fn prefs_text(sel: Option<&WsSel>) -> Result<String, i32> {
+    let rows = prefs_rows_live(sel)?;
     if rows.is_empty() {
-        return 0;
+        return Ok(String::new());
     }
     let cells: Vec<Vec<String>> = rows
         .iter()
@@ -997,11 +1026,7 @@ pub fn prefs_get(sel: Option<&WsSel>, json_out: bool) -> i32 {
             ]
         })
         .collect();
-    println!(
-        "{}",
-        proto::render_table(&["WS", "DISPLAY", "PRESENT", "LIVE"], &cells)
-    );
-    0
+    Ok(proto::render_table(&["WS", "DISPLAY", "PRESENT", "LIVE"], &cells) + "\n")
 }
 
 /// `ws prefs add (--bs-id|--ws-id) (--display-id|--display-name)` — the

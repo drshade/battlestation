@@ -89,27 +89,6 @@ fn help_lists_all_subcommands() {
 }
 
 #[test]
-fn stream_requires_json_format() {
-    // NDJSON is the stream contract; a text stream has no framing, so v1
-    // refuses it with the same exit 2 clap gives impossible invocations.
-    for args in [
-        &["status", "--stream"][..], // default format is text
-        &["status", "--format", "text", "--stream"],
-        &["agents", "get", "--stream"],
-        &["ws", "map", "get", "--stream"],
-        &["ws", "prefs", "get", "--stream"],
-        &["display", "get", "--stream"],
-    ] {
-        let out = bsctl(args);
-        assert_eq!(out.status.code(), Some(2), "{args:?} must exit 2");
-        assert!(
-            String::from_utf8_lossy(&out.stderr).contains("--stream requires --format json"),
-            "{args:?} must explain the requirement"
-        );
-    }
-}
-
-#[test]
 fn help_renders_at_every_level() {
     for args in [
         &["ws", "--help"][..],

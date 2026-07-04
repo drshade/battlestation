@@ -1,7 +1,12 @@
 //! The streaming engine behind every `--stream` query: re-emit the query's
-//! full result to stdout (one line per emission) whenever it changes.
-//! Subscribers spawn `bsctl <query> --format json --stream` and read lines
-//! — nothing watches bsctl's state files but bsctl (contract in lib.rs).
+//! full result to stdout whenever it changes. `--stream` is orthogonal to
+//! `--format`: json emissions are NDJSON (one compact line each, for
+//! parsers — subscribers spawn `bsctl <query> --format json --stream` and
+//! read lines); text emissions are framed for eyes by [`Framing`] —
+//! watch(1)-style clear-and-redraw on a tty (a live dashboard), blank-line
+//! separated when piped. Nothing watches bsctl's state files but bsctl
+//! (contract in lib.rs).
+//!
 //! Three wake sources fold into one re-evaluation: inotify on the runtime
 //! agent-state dir AND on the persistent map/prefs dir, Hyprland's
 //! `.socket2.sock` event stream, and a slow tick (session pids dying and
@@ -92,17 +97,54 @@ pub fn changed(prev: &mut Option<String>, cur: &str) -> bool {
     true
 }
 
+/// How emissions are written. Detected once by the caller (tty via
+/// isatty(1) at startup), never per emission.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Framing {
+    /// One compact JSON line per emission — the machine dialect.
+    Ndjson,
+    /// The human dialect. On a tty: clear screen + cursor home before each
+    /// emission — the watch(1) live view. Piped: emissions separated by one
+    /// blank line (the first unseparated). An EMPTY text result (tables
+    /// print nothing when there is nothing) clears the tty to blank — the
+    /// world really emptied — and contributes a lone separator when piped;
+    /// both are honest, neither is special-cased.
+    Text { tty: bool },
+}
+
+/// The exact bytes one emission writes, pure: `first` = nothing has been
+/// emitted yet. Non-empty text is normalized to end in exactly one newline
+/// (renders arrive both bare and newline-terminated).
+pub fn frame(cur: &str, first: bool, framing: Framing) -> String {
+    match framing {
+        Framing::Ndjson => format!("{cur}\n"),
+        Framing::Text { tty } => {
+            let mut out = String::new();
+            if tty {
+                out.push_str("\x1b[2J\x1b[H");
+            } else if !first {
+                out.push('\n');
+            }
+            out.push_str(cur);
+            if !cur.is_empty() && !cur.ends_with('\n') {
+                out.push('\n');
+            }
+            out
+        }
+    }
+}
+
 /// Drive `query` forever: emit its result now, then whenever it changes.
 /// An `Err` from the FIRST evaluation aborts with that exit code (a bad
 /// selector must fail loudly at spawn time, not stream nothing); later
 /// `Err`s skip the emission (mid-stream flux resolves by the next event).
 /// Exits 0 when stdout closes — the subscriber is done, not broken.
-pub fn run(mut query: impl FnMut() -> Result<String, i32>) -> i32 {
+pub fn run(mut query: impl FnMut() -> Result<String, i32>, framing: Framing) -> i32 {
     let mut prev: Option<String> = None;
     match query() {
         Err(code) => return code,
         Ok(cur) => {
-            if emit(&mut prev, &cur).is_err() {
+            if emit(&mut prev, &cur, framing).is_err() {
                 return 0; // subscriber already gone
             }
         }
@@ -110,7 +152,7 @@ pub fn run(mut query: impl FnMut() -> Result<String, i32>) -> i32 {
     let mut applier = Applier::new();
     let mut last_err = String::new();
     loop {
-        match session(&mut query, &mut prev, &mut applier) {
+        match session(&mut query, &mut prev, &mut applier, framing) {
             Ok(()) => return 0, // stdout closed: clean finish
             Err(e) => {
                 // Log once per distinct failure, not once per retry — a
@@ -136,6 +178,7 @@ fn session(
     query: &mut impl FnMut() -> Result<String, i32>,
     prev: &mut Option<String>,
     applier: &mut Applier,
+    framing: Framing,
 ) -> io::Result<()> {
     let dir = sys::state_dir();
     fs::create_dir_all(&dir)?;
@@ -152,7 +195,7 @@ fn session(
     let mut sock = EventSock::connect();
     // Re-init entry: state may have moved while we were broken (dedupe
     // makes this free when it didn't).
-    let done = maybe_emit(query, prev)?;
+    let done = maybe_emit(query, prev, framing)?;
     if done {
         return Ok(());
     }
@@ -167,7 +210,7 @@ fn session(
         )?;
         let Some((ino_ready, sock_ready)) = ready else {
             // Slow tick (poll(2) timeout expired).
-            if maybe_emit(query, prev)? {
+            if maybe_emit(query, prev, framing)? {
                 return Ok(());
             }
             deadline = Instant::now() + TICK;
@@ -209,7 +252,7 @@ fn session(
             }
             rounds += 1;
         }
-        if maybe_emit(query, prev)? {
+        if maybe_emit(query, prev, framing)? {
             return Ok(());
         }
         // Apply the arriving outputs' preferences AFTER emitting, so the
@@ -229,24 +272,27 @@ fn session(
 fn maybe_emit(
     query: &mut impl FnMut() -> Result<String, i32>,
     prev: &mut Option<String>,
+    framing: Framing,
 ) -> io::Result<bool> {
     let Ok(cur) = query() else {
         return Ok(false);
     };
-    match emit(prev, &cur) {
+    match emit(prev, &cur, framing) {
         Ok(()) => Ok(false),
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(true),
         Err(e) => Err(e),
     }
 }
 
-/// Write one emission line + flush, deduped via [`changed`].
-fn emit(prev: &mut Option<String>, cur: &str) -> io::Result<()> {
+/// Write one emission + flush, deduped via [`changed`], framed per
+/// [`frame`].
+fn emit(prev: &mut Option<String>, cur: &str, framing: Framing) -> io::Result<()> {
+    let first = prev.is_none();
     if !changed(prev, cur) {
         return Ok(());
     }
     let mut out = io::stdout().lock();
-    writeln!(out, "{cur}")?;
+    write!(out, "{}", frame(cur, first, framing))?;
     out.flush()
 }
 
@@ -575,6 +621,27 @@ mod tests {
         assert!(changed(&mut prev, "b"), "a change emits");
         assert!(!changed(&mut prev, "b"));
         assert!(changed(&mut prev, "a"), "a change BACK emits too");
+    }
+
+    #[test]
+    fn framing_shapes_each_dialect() {
+        // NDJSON: one line per emission, first or not.
+        assert_eq!(frame("{}", true, Framing::Ndjson), "{}\n");
+        assert_eq!(frame("{}", false, Framing::Ndjson), "{}\n");
+        // Piped text: blank-line separated, first unseparated; bare and
+        // newline-terminated renders both normalize to one trailing newline.
+        let piped = Framing::Text { tty: false };
+        assert_eq!(frame("A  B", true, piped), "A  B\n");
+        assert_eq!(frame("A  B\n", false, piped), "\nA  B\n");
+        // tty text: clear + home precedes every emission, no separator.
+        let tty = Framing::Text { tty: true };
+        assert_eq!(frame("A  B\n", true, tty), "\x1b[2J\x1b[HA  B\n");
+        assert_eq!(frame("A  B", false, tty), "\x1b[2J\x1b[HA  B\n");
+        // Empty result: tty clears to blank (the world emptied); a pipe
+        // sees a lone separator. Neither grows a stray newline.
+        assert_eq!(frame("", false, tty), "\x1b[2J\x1b[H");
+        assert_eq!(frame("", true, piped), "");
+        assert_eq!(frame("", false, piped), "\n");
     }
 
     #[test]

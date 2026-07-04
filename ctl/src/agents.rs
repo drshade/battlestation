@@ -350,20 +350,24 @@ pub fn get_json(kind: Option<&str>, session: Option<&str>) -> String {
 /// (dead pids, orphan/stale markers). Empty results print nothing, not a
 /// lonely header.
 pub fn get(kind: Option<&str>, session: Option<&str>, json_out: bool) -> i32 {
+    if json_out {
+        println!("{}", get_json(kind, session));
+    } else {
+        print!("{}", get_text(kind, session));
+    }
+    0
+}
+
+/// One `agents get` text result — the table (newline-terminated), or ""
+/// for no sessions. Shared by the one-shot form and its `--stream` text
+/// framing; like [`get_json`], it never fails.
+pub fn get_text(kind: Option<&str>, session: Option<&str>) -> String {
     let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
     let rows = agent_rows(recs, kind, session);
-    if json_out {
-        println!("{}", Value::Array(rows));
-        return 0;
-    }
     if rows.is_empty() {
-        return 0;
+        return String::new();
     }
-    println!(
-        "{}",
-        proto::render_table(&AGENT_HEADERS, &agent_cells(&rows))
-    );
-    0
+    proto::render_table(&AGENT_HEADERS, &agent_cells(&rows)) + "\n"
 }
 
 /// The agents table's shape, shared with `status`'s agents section. The

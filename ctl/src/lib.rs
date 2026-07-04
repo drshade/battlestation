@@ -215,9 +215,15 @@
 //!
 //! Any subscriber-shaped query — `status`, `agents get`, `ws map get`,
 //! `ws prefs get`, `display get` — takes `--stream`: emit the full result
-//! now, then re-emit it whenever it changes, one line per emission
-//! (NDJSON; `--stream` requires `--format json`, exit 2 otherwise — text
-//! is for eyes, streams are for parsers). Nothing watches bsctl's files
+//! now, then re-emit it whenever it changes. `--stream` is orthogonal to
+//! `--format`; the FRAMING follows the format. json: NDJSON, one compact
+//! line per emission — the machine dialect. text: the same renders framed
+//! for eyes — on a tty, clear screen + cursor home before each emission
+//! (watch(1)-style; `bsctl status --stream` is a live dashboard), piped,
+//! emissions separated by one blank line (the first unseparated). The tty
+//! check is isatty(1), once at startup. An empty text result stays empty
+//! (no lonely headers): a tty clears to blank — the world really emptied —
+//! and a pipe sees a lone separator. Nothing watches bsctl's files
 //! but bsctl: subscribers spawn the process and read stdout. Each
 //! subscriber owns its own process — there is no shared output file, which
 //! is why the old single-writer flock election and its hot-standby

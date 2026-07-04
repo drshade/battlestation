@@ -830,6 +830,62 @@ fn agents_get_stream_shares_the_engine() {
     assert_eq!(v[0]["kind"], json!("codex"));
 }
 
+#[test]
+fn text_stream_frames_with_blank_lines_when_piped() {
+    // --stream is orthogonal to --format: a text stream through a pipe
+    // (stdout here is a pipe by construction — the tty clear-redraw path
+    // needs a pty and stays untested live) renders the same tables as the
+    // one-shot form, emissions separated by one blank line, the first
+    // unseparated.
+    let env = TestEnv::new("stream-text");
+    env.write_state(
+        "t1",
+        r#"{"ws":3,"status":"waiting","kind":"claude","title":"","pid":1}"#,
+    );
+    let mut child = env
+        .cmd()
+        .args(["agents", "get", "--stream"]) // default --format text
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, lines) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let next = |what: &str| -> String {
+        lines
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
+    };
+
+    // First emission: the table, unseparated — header then t1's row.
+    assert!(
+        next("first header").starts_with("KIND"),
+        "first emission must open with the table header"
+    );
+    assert!(next("t1 row").starts_with("claude"));
+
+    // A second session -> a new emission: exactly one blank separator,
+    // then the re-rendered table.
+    env.write_state(
+        "t2",
+        r#"{"ws":4,"status":"tooling","kind":"codex","title":"","pid":1}"#,
+    );
+    assert_eq!(next("separator"), "", "emissions must be blank-separated");
+    assert!(next("second header").starts_with("KIND"));
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 // ---- --stream: compositor events (fake socket2) ------------------------------
 // A fake Hyprland instance dir under <run>/hypr/<name>/ with BOTH sockets:
 // `.socket.sock` answers `j/workspaces` / `j/monitors` from mutable canned
