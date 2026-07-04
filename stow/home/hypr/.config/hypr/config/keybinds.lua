@@ -102,6 +102,7 @@ end
 
 hl.bind(hyperMod .. " + S", hl.dsp.window.move({ workspace = "special" }),                  { description = "Send window to scratchpad" })
 hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces rename"), { description = "Rename workspace" })
+hl.bind(hyperMod .. " + A", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces asks"),   { description = "Asks queue (agent questions)" })
 -- Clear any manual pill reordering: the battlespace map falls back to
 -- identity (bs-id N = the Nth live ws-id, ascending).
 hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " map reset"), { description = "Reset workspace order to default" })

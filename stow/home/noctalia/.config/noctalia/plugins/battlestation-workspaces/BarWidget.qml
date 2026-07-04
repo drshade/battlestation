@@ -107,6 +107,53 @@ Item {
   property var dragIds: []
   property int draggingIndex: -1
 
+  // ---- asks queue -------------------------------------------------------------
+  // The stream's `asks` section (file truth — [] when empty, never null): the
+  // resolved queue, open asks in the human's order then FIFO, answered tail
+  // last. Rows are pushed to the mainInstance so the asks panel (a separate
+  // window, recreated per open) binds to live data; the badge in the row
+  // below renders the open count. asksKey dedupes on serialization so a
+  // stream line that changed something else never churns the panel.
+  property var asksRows: []
+  property string asksKey: ""
+  readonly property int asksOpen: countOpen(asksRows)
+  readonly property bool asksAnyHigh: anyHighOpen(asksRows)
+  readonly property int asksEstMin: sumEstOpen(asksRows)
+  function countOpen(rows) {
+    var n = 0;
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i].state === "open")
+        n++;
+    return n;
+  }
+  function anyHighOpen(rows) {
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i].state === "open" && rows[i].urgency === "high")
+        return true;
+    return false;
+  }
+  function sumEstOpen(rows) {
+    var t = 0;
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i].state === "open" && rows[i].estimate_min)
+        t += rows[i].estimate_min;
+    return t;
+  }
+  function applyAsks(rows) {
+    var key = JSON.stringify(rows);
+    if (key === asksKey)
+      return;
+    asksKey = key;
+    asksRows = rows;
+    // Every bar carries identical world state, so last-writer-wins is sound.
+    if (pluginApi && pluginApi.mainInstance)
+      pluginApi.mainInstance.asksRows = rows;
+  }
+  function toggleAsksPanel() {
+    if (pluginApi && pluginApi.mainInstance)
+      pluginApi.mainInstance.toggleAsksPanel(root.screen, root);
+  }
+
   // Equality guards so stream updates only reassign
   // a reactive structure when its content actually changed -- otherwise
   // identical-but-new values churn the consumers (and rebuilding displayList
@@ -283,6 +330,8 @@ Item {
   //   {"displays": [{id, name, x, y, focused, activeWs, specialShowing}],
   //    "workspaces": [{ws, bs, name, display, windows, active, pref}],
   //    "prefs": [{ws, display, present, live}],
+  //    "asks": [{id, session, kind, ws, type, title, body, options, urgency,
+  //              estimate_min, note, state, answer, created, answered_at}],
   //    "agents": [{session, kind, status, ws, title,
   //                subagents: [{id, type, description, started}]}]}
   // `agents` is the self-cleaning session pass (dead-pid sessions, orphan
@@ -328,6 +377,10 @@ Item {
       return;
     if (data.workspaces || data.displays)
       applyCompositor(data.workspaces, data.displays);
+    // Before the agents early-return: asks are independent of the agents
+    // section and must land even on a line without one.
+    if (data.asks && data.asks.length !== undefined)
+      applyAsks(data.asks);
     var recs = data.agents;
     if (!recs || recs.length === undefined)
       return;
@@ -491,6 +544,15 @@ Item {
     UsageIndicator {
       cfg: config
       screenName: config.screenName
+    }
+
+    AsksBadge {
+      cfg: config
+      screenName: config.screenName
+      count: root.asksOpen
+      anyHigh: root.asksAnyHigh
+      estMin: root.asksEstMin
+      onActivated: root.toggleAsksPanel()
     }
 
     // Pills + a single overlay DropArea. One DropArea over the whole list (rather

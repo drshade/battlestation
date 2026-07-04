@@ -12,11 +12,16 @@ Item {
   id: root
   property var pluginApi: null
 
-  // What the bar panel should show next ("rename" | "settings"), and the rename
-  // target, both read by Panel.qml when it opens.
+  // What the bar panel should show next ("rename" | "settings" | "asks"), and
+  // the rename target, both read by Panel.qml when it opens.
   property string panelMode: "rename"
   property int pendingRenameId: 0
   property string pendingRenameName: ""
+
+  // Live asks rows, pushed by whichever bar instance's stream last changed —
+  // every bar carries identical world state, so last-writer-wins is sound.
+  // The asks panel (recreated on every open) binds to this for live updates.
+  property var asksRows: []
 
   // Per-screen bar widget items, so the panel can attach next to the widget on
   // the right screen (keybind path has no button of its own to anchor to).
@@ -48,6 +53,21 @@ Item {
       pluginApi.openPanel(screen, buttonItem);
   }
 
+  // Toggle the asks panel (badge click + the HYPER+A keybind). Exact toggle
+  // semantics built from openPanel/closePanel rather than togglePanel: the
+  // mode must be staged BEFORE an open, and a toggle of a panel currently
+  // showing another mode should just close it.
+  function toggleAsksPanel(screen, buttonItem) {
+    if (!pluginApi)
+      return;
+    if (pluginApi.panelOpenScreen) {
+      pluginApi.closePanel(pluginApi.panelOpenScreen);
+      return;
+    }
+    panelMode = "asks";
+    pluginApi.openPanel(screen, buttonItem || barItems[screen.name] || null);
+  }
+
   // Rename whichever workspace is currently focused (used by the keybind / IPC).
   function renameActive() {
     if (!pluginApi)
@@ -63,11 +83,19 @@ Item {
     });
   }
 
-  // `qs -c noctalia-shell ipc call plugin:battlestation-workspaces rename` (Super+Shift+R).
+  // `qs -c noctalia-shell ipc call plugin:battlestation-workspaces <fn>`:
+  // rename (HYPER+R) and the asks-panel toggle (HYPER+A).
   IpcHandler {
     target: "plugin:battlestation-workspaces"
     function rename() {
       root.renameActive();
+    }
+    function asks() {
+      if (!root.pluginApi)
+        return;
+      root.pluginApi.withCurrentScreen(function (screen) {
+        root.toggleAsksPanel(screen, root.barItems[screen.name] || null);
+      });
     }
   }
 }
