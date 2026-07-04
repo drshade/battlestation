@@ -23,11 +23,27 @@
 // full-row drag: row bodies keep their clicks, and pressing the handle first
 // collapses the expanded reply area so every open row has the same height —
 // which is what makes the slot arithmetic below trivial. The dragged row's
-// model is untouched until release (a Repeater rebuilds delegates on model
-// change, so live reordering would destroy the very delegate being dragged);
-// instead a floating proxy follows the pointer and a drop line marks the
-// target slot, and release commits the whole open-id list via
-// `asks order set` — the same gesture-agnostic payload as any other reorder.
+// model is untouched until release (rebuilding delegates would destroy the
+// very delegate being dragged); instead a floating proxy follows the pointer
+// and a drop line marks the target slot, and release commits the whole
+// open-id list via `asks order set` — the same gesture-agnostic payload as
+// any other reorder.
+//
+// Two anti-jank rules shape the asks mode (both were live bugs — clicking
+// around used to re-animate the whole panel):
+//  1. IDENTITY-STABLE ROWS. The row Repeater's model is `askIds` — the bare
+//     id sequence, reassigned ONLY when the sequence itself changes
+//     (post/dismiss/state moves/reorder). Everything else about a row flows
+//     through the `askById` lookup map, so a content change (a note, an
+//     urgency bump, the stream echoing our own draft autosave every ~1.5s
+//     while typing) updates bindings IN PLACE and never destroys a delegate
+//     — the same displayList/lookup-maps pattern BarWidget uses for pills.
+//  2. FIXED PANEL GEOMETRY. contentPreferredHeight is snapshotted ONCE at
+//     open (sized to the queue, capped) and never re-bound: the SmartPanel
+//     animates geometry changes, so a height that tracked the content made
+//     every expand/collapse read as a panel re-open. Rows scroll INSIDE
+//     (NScrollView — the settings mode's pattern) and expansion changes
+//     nothing about the panel's frame.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -57,19 +73,60 @@ Item {
   // top/bottom margins + the settings content). No artificial cap: SmartPanel
   // clamps to the screen, and the scroll view only kicks in if it can't fit.
   readonly property real _settingsHeight: settingsLoader.implicitHeight + settingsHeader.implicitHeight + chrome.implicitHeight + 1 + Style.marginM * 3 + Style.marginL * 2
-  property real contentPreferredHeight: (mode === "settings" ? _settingsHeight : mode === "asks" ? asksCol.implicitHeight + Style.marginL * 2 : renameCol.implicitHeight + Style.marginL * 2)
+  // Asks height: SNAPSHOT, not a binding (anti-jank rule 2 in the header).
+  // Sized to the queue at open — chrome + one slot per ask + room for one
+  // expanded reply area — capped; growth mid-open scrolls inside instead of
+  // resizing the animated panel frame. Overwritten in Component.onCompleted.
+  property real asksPanelHeight: 380 * Style.uiScaleRatio
+  function computeAsksHeight() {
+    var n = Math.max(1, askIds.length);
+    return Math.min(620, 108 + n * 46 + 190) * Style.uiScaleRatio;
+  }
+  property real contentPreferredHeight: (mode === "settings" ? _settingsHeight : mode === "asks" ? asksPanelHeight : renameCol.implicitHeight + Style.marginL * 2)
 
   // ---- asks state -------------------------------------------------------------
   readonly property var asksRows: (main && main.asksRows) ? main.asksRows : []
+  // Identity-stable row model (anti-jank rule 1 in the header): askIds is
+  // the bare id sequence in the stream's RESOLVED order and is the row
+  // Repeater's model — reassigned only when the sequence changes; askById
+  // carries every row's content and is reassigned freely (bindings update
+  // delegates in place).
+  property var askIds: []
+  property var askById: ({})
+  onAsksRowsChanged: syncAsks()
+  function sameIdList(a, b) {
+    if (!a || !b || a.length !== b.length)
+      return false;
+    for (var i = 0; i < a.length; i++)
+      if (a[i] !== b[i])
+        return false;
+    return true;
+  }
+  function syncAsks() {
+    var rows = asksRows;
+    var ids = [];
+    var by = {};
+    for (var i = 0; i < rows.length; i++) {
+      ids.push(rows[i].id);
+      by[String(rows[i].id)] = rows[i];
+    }
+    // byId first: a delegate whose id just vanished renders one harmless
+    // empty frame off the ({}) fallback before the ids reassignment (same
+    // JS turn) destroys it — never a dangling lookup.
+    askById = by;
+    if (!sameIdList(ids, askIds))
+      askIds = ids;
+  }
   // Single-expansion: at most one row's reply area is open (triage is one
   // ask at a time, and collapsing everything at drag start is then trivial).
   property int expandedId: -1
-  // The expanded row's reply text, held OUTSIDE the delegates: any stream
-  // change rebuilds the Repeater's delegates (and their inputs), so the
-  // in-progress text must survive on the panel. Snapshotted from the ask's
-  // saved reply at expansion, tracked per keystroke, restored by the
-  // input's Component.onCompleted after every rebuild — an unrelated ask
-  // changing mid-typing costs nothing.
+  // The expanded row's reply text, held OUTSIDE the delegates: an
+  // id-sequence change (another agent posting, a dismiss, a state move)
+  // still rebuilds the delegates mid-typing, so the in-progress text must
+  // survive on the panel. Snapshotted from the ask's saved reply at
+  // expansion, tracked per keystroke, restored by the input's
+  // Component.onCompleted after any such rebuild. (Content-only changes —
+  // including the echo of our own autosave — no longer rebuild anything.)
   property string draftText: ""
   // The last text actually written to the store for the expanded ask —
   // every persist path dedupes against it, so the stream's echo of our own
@@ -103,17 +160,17 @@ Item {
     expandedId = -1;
   }
   // Row-click toggle. Expanding snapshots the saved reply into the
-  // panel-held draft (the input restores from it on every delegate
-  // rebuild); switching rows persists the old row's draft first.
+  // panel-held draft (the input restores from it if delegates rebuild);
+  // switching rows persists the old row's draft first.
   function toggleExpand(row) {
-    if (expandedId === row.modelData.id) {
+    if (expandedId === row.askId) {
       collapseExpanded();
       return;
     }
     persistDraft();
-    draftText = row.modelData.answer || "";
+    draftText = row.ask.answer || "";
     lastPersisted = draftText;
-    expandedId = row.modelData.id;
+    expandedId = row.askId;
   }
   // Age text ticks while the panel is up (rows only re-render on stream
   // changes; age would otherwise freeze at open time).
@@ -126,12 +183,15 @@ Item {
   }
 
   // ---- drag-handle reorder state ----------------------------------------------
-  // Captured in asksCol coordinates at ACTIVATION (first move past the
-  // threshold), one event after the press collapsed the reply areas — by
-  // then the column has relaid out and every open row is slot-height
-  // uniform. A stream update mid-drag rebuilds the delegates and silently
-  // cancels the drag (release finds no state to commit) — accepted; asks
-  // changing under an in-flight drag is rare and the store stays authoritative.
+  // Captured in rowsCol coordinates (the scrolling inner column — slot math
+  // is content-space, immune to the scroll offset) at ACTIVATION (first
+  // move past the threshold), one event after the press collapsed the
+  // reply areas — by then the column has relaid out and every open row is
+  // slot-height uniform. An id-sequence change mid-drag rebuilds the
+  // delegates and silently cancels the drag (release finds no state to
+  // commit) — accepted; asks changing under an in-flight drag is rare and
+  // the store stays authoritative. Content-only stream changes leave the
+  // drag untouched (identity-stable rows).
   property int dragId: -1
   property int dragFrom: -1
   property int dropIndex: -1
@@ -153,27 +213,29 @@ Item {
   function dragPress(row, area, mx, my) {
     collapseExpanded(); // persists any draft; uniform slot heights before any geometry is read
     pressRow = row;
-    pressY0 = area.mapToItem(asksCol, mx, my).y;
+    pressY0 = area.mapToItem(rowsCol, mx, my).y;
   }
   function dragMove(row, area, mx, my) {
-    var p = area.mapToItem(asksCol, mx, my);
+    var p = area.mapToItem(rowsCol, mx, my);
     if (dragId < 0) {
       if (pressRow !== row || Math.abs(p.y - pressY0) < 6)
         return; // activation threshold: a sloppy click must not reorder
-      dragId = row.modelData.id;
+      dragId = row.askId;
       dragFrom = row.index; // open rows lead the resolved order, so model index == open slot
       dragSlotH = row.height;
-      dragFirstY = row.y - row.index * (dragSlotH + asksCol.spacing);
-      dragTitle = row.modelData.title;
+      dragFirstY = row.y - row.index * (dragSlotH + rowsCol.spacing);
+      dragTitle = row.ask.title || "";
     }
     var n = openIds().length;
-    var pitch = dragSlotH + asksCol.spacing;
+    var pitch = dragSlotH + rowsCol.spacing;
     dropIndex = Math.max(0, Math.min(n - 1, Math.round((p.y - dragFirstY - dragSlotH / 2) / pitch)));
     proxyY = area.mapToItem(panelContainer, mx, my).y;
     // The line sits above the target slot when moving up, below it when
     // moving down (the removal shifts everything after the source up one).
-    var edge = dropIndex <= dragFrom ? dragFirstY + dropIndex * pitch : dragFirstY + dropIndex * pitch + dragSlotH + asksCol.spacing;
-    dropLineY = asksCol.y + edge - asksCol.spacing / 2;
+    // Mapped rowsCol -> panelContainer at event time, so the current scroll
+    // offset is baked in (the overlay is a panelContainer sibling).
+    var edge = dropIndex <= dragFrom ? dragFirstY + dropIndex * pitch : dragFirstY + dropIndex * pitch + dragSlotH + rowsCol.spacing;
+    dropLineY = rowsCol.mapToItem(panelContainer, 0, edge).y - rowsCol.spacing / 2;
   }
   function dragRelease() {
     if (dragId >= 0 && dropIndex >= 0 && dropIndex !== dragFrom) {
@@ -368,8 +430,8 @@ Item {
     ColumnLayout {
       id: asksCol
       visible: root.mode === "asks"
-      anchors.centerIn: parent
-      width: parent.width - Style.marginL * 2
+      anchors.fill: parent
+      anchors.margins: Style.marginL
       spacing: Style.marginM
 
       RowLayout {
@@ -393,27 +455,50 @@ Item {
         color: Color.mOutline
       }
 
-      NText {
-        visible: root.asksRows.length === 0
-        text: "no asks — all clear"
-        color: Color.mOnSurfaceVariant
-        Layout.alignment: Qt.AlignHCenter
-        Layout.topMargin: Style.marginS
-        Layout.bottomMargin: Style.marginS
-      }
+      // Rows scroll INSIDE the fixed panel frame (anti-jank rule 2): wheel
+      // scrolling via NScrollView (the settings mode's pattern) — no
+      // ListView, so there is no interactive-flick to fight the handle drag.
+      NScrollView {
+        id: asksScroll
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        horizontalPolicy: ScrollBar.AlwaysOff
 
-      Repeater {
-        // Rows in the stream's RESOLVED order (open in the human's order,
-        // then FIFO, answered tail last) — never re-sorted here.
-        model: root.mode === "asks" ? root.asksRows : []
+        ColumnLayout {
+          id: rowsCol
+          width: parent.width
+          spacing: Style.marginM
 
-        delegate: ColumnLayout {
-          id: askRow
-          required property var modelData
-          required property int index
-          readonly property bool replying: root.expandedId === modelData.id
-          readonly property bool open: modelData.state === "open"
-          readonly property bool dragging: root.dragId === modelData.id
+          Item {
+            visible: root.askIds.length === 0
+            Layout.fillWidth: true
+            implicitHeight: Math.max(60, asksScroll.height * 0.85)
+            NText {
+              anchors.centerIn: parent
+              text: "no asks — all clear"
+              color: Color.mOnSurfaceVariant
+            }
+          }
+
+          Repeater {
+            // Rows in the stream's RESOLVED order (open in the human's
+            // order, then FIFO, answered tail last) — never re-sorted here.
+            // The model is the ID SEQUENCE only; content flows through
+            // askById so delegates survive every content-only change
+            // (anti-jank rule 1).
+            model: root.mode === "asks" ? root.askIds : []
+
+            delegate: ColumnLayout {
+              id: askRow
+              required property var modelData
+              required property int index
+              readonly property int askId: modelData
+              // ({}) fallback covers the one-frame gap while a vanished id's
+              // delegate awaits destruction (see syncAsks).
+              readonly property var ask: root.askById[String(modelData)] || ({})
+              readonly property bool replying: root.expandedId === askId
+              readonly property bool open: ask.state === "open"
+              readonly property bool dragging: root.dragId === askId
 
           Layout.fillWidth: true
           spacing: Style.marginXS
@@ -483,7 +568,7 @@ Item {
                 width: 10
                 height: 10
                 radius: 5
-                color: root.urgencyColor(askRow.modelData.urgency)
+                color: root.urgencyColor(askRow.ask.urgency)
                 opacity: askRow.open ? 1.0 : 0.4
               }
 
@@ -493,14 +578,14 @@ Item {
                 NText {
                   // NText is a Text with elide: ElideRight by default — width
                   // does the truncation now that the panel is wide.
-                  text: askRow.modelData.title
+                  text: askRow.ask.title
                   font.weight: Style.fontWeightBold
                   color: Color.mOnSurface
                   opacity: askRow.open ? 1.0 : 0.6
                   Layout.fillWidth: true
                 }
                 NText {
-                  text: root.askMeta(askRow.modelData)
+                  text: root.askMeta(askRow.ask)
                   pointSize: Style.fontSizeXS
                   color: Color.mOnSurfaceVariant
                   Layout.fillWidth: true
@@ -508,20 +593,20 @@ Item {
               }
 
               NButton {
-                visible: (askRow.modelData.session || "").length > 0
+                visible: (askRow.ask.session || "").length > 0
                 text: "Jump"
                 outlined: true
-                onClicked: root.jumpToAsk(askRow.modelData.session)
+                onClicked: root.jumpToAsk(askRow.ask.session)
               }
               NButton {
-                visible: askRow.modelData.state === "answered"
+                visible: askRow.ask.state === "answered"
                 text: "Reopen"
                 outlined: true
-                onClicked: root.reopenAsk(askRow.modelData.id)
+                onClicked: root.reopenAsk(askRow.askId)
               }
               NIconButton {
                 icon: "close"
-                onClicked: root.dismissAsk(askRow.modelData.id)
+                onClicked: root.dismissAsk(askRow.askId)
               }
             }
           }
@@ -538,15 +623,15 @@ Item {
             spacing: Style.marginXS
 
             NText {
-              visible: (askRow.modelData.body || "").length > 0
-              text: askRow.modelData.body || ""
+              visible: (askRow.ask.body || "").length > 0
+              text: askRow.ask.body || ""
               wrapMode: Text.WordWrap
               color: Color.mOnSurfaceVariant
               Layout.fillWidth: true
             }
 
             RowLayout {
-              visible: askRow.open && (askRow.modelData.options || []).length > 0
+              visible: askRow.open && (askRow.ask.options || []).length > 0
               Layout.fillWidth: true
               spacing: Style.marginXS
               NText {
@@ -555,13 +640,13 @@ Item {
                 color: Color.mOnSurfaceVariant
               }
               Repeater {
-                model: askRow.modelData.options || []
+                model: askRow.ask.options || []
                 delegate: NButton {
                   required property var modelData
                   text: modelData
                   backgroundColor: Color.mPrimary
                   textColor: Color.mOnPrimary
-                  onClicked: root.answerAsk(askRow.modelData.id, modelData)
+                  onClicked: root.answerAsk(askRow.askId, modelData)
                 }
               }
             }
@@ -581,7 +666,7 @@ Item {
                 // expanded one. Cursor to the end after a restore, so a
                 // rebuild between keystrokes never teleports the caret.
                 Component.onCompleted: {
-                  text = askRow.replying ? root.draftText : (askRow.modelData.answer || "");
+                  text = askRow.replying ? root.draftText : (askRow.ask.answer || "");
                   if (askRow.replying && askRow.open)
                     inputItem.cursorPosition = text.length;
                 }
@@ -597,7 +682,7 @@ Item {
                 onEditingFinished: if (askRow.replying && askRow.open)
                   root.persistDraft()
                 onAccepted: if (askRow.open)
-                  root.doneAsk(askRow.modelData.id, text)
+                  root.doneAsk(askRow.askId, text)
               }
               NButton {
                 // Reply AND complete (empty text = ack-only completion).
@@ -606,7 +691,7 @@ Item {
                 text: "Done"
                 backgroundColor: Color.mPrimary
                 textColor: Color.mOnPrimary
-                onClicked: root.doneAsk(askRow.modelData.id, replyInput.text)
+                onClicked: root.doneAsk(askRow.askId, replyInput.text)
               }
             }
 
@@ -621,21 +706,23 @@ Item {
               NButton {
                 text: "working on it"
                 outlined: true
-                onClicked: root.noteAsk(askRow.modelData.id, "working on it")
+                onClicked: root.noteAsk(askRow.askId, "working on it")
               }
               NButton {
                 text: "later"
                 outlined: true
-                onClicked: root.noteAsk(askRow.modelData.id, "later")
+                onClicked: root.noteAsk(askRow.askId, "later")
               }
               NButton {
-                visible: (askRow.modelData.note || "").length > 0
+                visible: (askRow.ask.note || "").length > 0
                 text: "clear"
                 outlined: true
-                onClicked: root.noteAsk(askRow.modelData.id, "")
+                onClicked: root.noteAsk(askRow.askId, "")
               }
             }
           }
+        }
+      }
         }
       }
     }
@@ -754,6 +841,12 @@ Item {
   }
 
   Component.onCompleted: {
+    // Seed the row model, then SNAPSHOT the panel height (imperative on
+    // purpose: a binding would track the queue and re-animate the frame —
+    // anti-jank rule 2).
+    syncAsks();
+    if (root.mode === "asks")
+      asksPanelHeight = computeAsksHeight();
     if (root.mode === "rename") {
       if (main)
         renameInput.text = main.pendingRenameName;
