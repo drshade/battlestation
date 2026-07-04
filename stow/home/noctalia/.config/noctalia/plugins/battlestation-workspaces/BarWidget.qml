@@ -47,7 +47,16 @@ Item {
   property var statusBySid: ({})    // { "<sid>": "thinking" | "tooling" | "waiting" }
   property var titleBySid: ({})     // { "<sid>": "<aiTitle>" }
   property var kindBySid: ({})      // { "<sid>": "claude" } -- future: codex/gemini/...
-  property var agentsBySid: ({})    // { "<sid>": [{id,type,description,started}] } running subagents
+  // Running subagents, split like the pills' id-sequence + lookup pattern:
+  // the ID SEQUENCE drives the sub-bot Repeater (instance-reused unless
+  // membership/order changes, so delegates are never rebuilt by property
+  // churn), and the tooltip strings flow through a flat map that updates
+  // in place. The stream rows also carry `started` (marker mtime, bumped
+  // by EVERY tool call the subagent makes) — deliberately dropped here:
+  // nothing in the bar renders it, and comparing it used to rebuild the
+  // squad — killing any hovered bot's tooltip — on every subagent tool call.
+  property var agentsBySid: ({})    // { "<sid>": [agentId, ...] }
+  property var subTitleByKey: ({})  // { "<sid>.<agentId>": "<type> — <description>" }
 
   // ---- compositor state -------------------------------------------------------
   // All of it parsed from the stream's `workspaces`/`displays` sections
@@ -189,17 +198,17 @@ Item {
     }
     return true;
   }
-  // Deep-compare one sid's subagent list. Used to REUSE the prior array instance
-  // when nothing changed, so the pill's sub-bot Repeater (whose model is that
-  // instance) is never rebuilt by a mere re-poll.
-  function sameAgentList(a, b) {
+  // Compare one sid's subagent ID sequence. Used to REUSE the prior array
+  // instance when membership/order is unchanged, so the pill's sub-bot
+  // Repeater (whose model is that instance) is never rebuilt by property
+  // churn — type/description ride subTitleByKey and update in place, and
+  // volatile `started` is not represented at all (see the property block).
+  function sameAgentIds(a, b) {
     if (!a || a.length !== b.length)
       return false;
-    for (var i = 0; i < a.length; i++) {
-      var x = a[i], y = b[i];
-      if (x.id !== y.id || x.type !== y.type || x.description !== y.description || x.started !== y.started)
+    for (var i = 0; i < a.length; i++)
+      if (a[i] !== b[i])
         return false;
-    }
     return true;
   }
 
@@ -389,6 +398,7 @@ Item {
     var titleBySid = {};
     var kindBySid = {};
     var agentsBySid = {};
+    var subTitleByKey = {};
     var seen = {};      // wsid -> { sid: true } present this poll
     var fresh = {};     // wsid -> [sid] in poll order (for appending new bots)
     for (var i = 0; i < recs.length; i++) {
@@ -399,11 +409,20 @@ Item {
       statusBySid[sid] = r.status || "";
       kindBySid[sid] = r.kind || "claude";
       titleBySid[sid] = r.title || "";
-      // Reuse the prior list instance when its content is unchanged, so the
-      // sub-bot Repeater bound to it never sees a new model on a mere reload.
+      // Reduce each subagent row to its id (sequence) + tooltip string
+      // (lookup); reuse the prior id-list instance when the sequence is
+      // unchanged, so the sub-bot Repeater bound to it never sees a new
+      // model unless a subagent genuinely started or stopped.
       var list = r.subagents || [];
+      var ids = [];
+      for (var s = 0; s < list.length; s++) {
+        var ag = list[s] || {};
+        var aid = String(ag.id !== undefined ? ag.id : s);
+        ids.push(aid);
+        subTitleByKey[sid + "." + aid] = (ag.type || "agent") + (ag.description ? " — " + ag.description : "");
+      }
       var prior = root.agentsBySid[sid];
-      agentsBySid[sid] = root.sameAgentList(prior, list) ? prior : list;
+      agentsBySid[sid] = root.sameAgentIds(prior, ids) ? prior : ids;
       if (!seen[ws]) {
         seen[ws] = {};
         fresh[ws] = [];
@@ -438,8 +457,14 @@ Item {
       root.titleBySid = titleBySid;
     if (!root.sameKeySet(kindBySid, root.kindBySid))
       root.kindBySid = kindBySid;
-    // Identity compare is sound here: unchanged agent lists were reused above,
-    // so a differing value instance means the list's content really changed.
+    // String values, so the plain equality dedupe works; a changed tooltip
+    // updates title bindings in place, never rebuilding a delegate. Assigned
+    // BEFORE the id sequences so a delegate created by the sequence change
+    // never evaluates a not-yet-landed key.
+    if (!root.sameKeySet(subTitleByKey, root.subTitleByKey))
+      root.subTitleByKey = subTitleByKey;
+    // Identity compare is sound here: unchanged id lists were reused above,
+    // so a differing value instance means the sequence really changed.
     if (!root.sameKeySet(agentsBySid, root.agentsBySid))
       root.agentsBySid = agentsBySid;
   }
@@ -672,6 +697,7 @@ Item {
         titleBySid: root.titleBySid
         kindBySid: root.kindBySid
         agentsBySid: root.agentsBySid
+        subTitleByKey: root.subTitleByKey
         occupied: root.occupiedMap[String(dragArea.modelData.id)] === true
         shown: true
         opacity: dragArea.dragActive ? 0.85 : 1.0

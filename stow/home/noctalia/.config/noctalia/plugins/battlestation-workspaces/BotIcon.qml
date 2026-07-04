@@ -3,6 +3,12 @@
 // when pokeNonce changes (workspace clicked / switched to). The mechanics here
 // are kind-agnostic; which faces/motions a kind uses (and its assets + label)
 // comes from Cfg's kind registry.
+//
+// Structure: the root Item is STATIC (fixed geometry, no transforms) and
+// hosts the hover MouseArea; every visual transform — the commander lean,
+// the sub-bot spawn pop, and botImg's own breath/bounce/wiggle — applies to
+// `body` or deeper. A hit region that moved with the animations let
+// containsMouse oscillate under a stationary cursor, flickering the tooltip.
 import QtQuick
 import qs.Commons
 import qs.Services.UI
@@ -33,18 +39,6 @@ Item {
 
   width: d + 2
   height: d
-
-  // Commander leans toward its squad (a real "turn"); the lean eases in/out as the
-  // subagent count crosses zero. transformOrigin is Center, so layout is unaffected.
-  rotation: commander ? 7 : 0
-  Behavior on rotation {
-    NumberAnimation {
-      duration: 280
-      easing.type: Easing.OutBack
-    }
-  }
-  // Sub-bots pop in from near-zero when spawned (see spawnIn); commanders stay 1.0.
-  scale: subordinate ? 0.2 : 1.0
 
   // Only a genuine poke (focus switch) emotes -- not the initial binding when a
   // fresh bot is created on an already-focused pill (whose pokeNonce is nonzero).
@@ -128,11 +122,12 @@ Item {
     if (bot.subordinate)
       spawnIn.start();
   }
-  // Entrance pop for a freshly-spawned sub-bot. Targets the root `scale` (the
-  // breath animates botImg.scale), so the two compose instead of fighting.
+  // Entrance pop for a freshly-spawned sub-bot. Targets body's scale (the
+  // breath animates botImg.scale), so the two compose instead of fighting —
+  // and the root (with its hover hit region) never scales.
   NumberAnimation {
     id: spawnIn
-    target: bot
+    target: body
     property: "scale"
     from: 0.2
     to: 1.0
@@ -140,100 +135,120 @@ Item {
     easing.type: Easing.OutBack
   }
 
-  Image {
-    id: botImg
-    anchors.centerIn: parent
-    // Commander rests on its kind's `rest` face (watching the squad) between
-    // its own transient emotes -- claude's is "look", present for every status
-    // (the tool one has star eyes); a kind without one, and every plain bot,
-    // rests on the status icon.
-    source: bot.faceOverride !== "" ? bot.faceOverride : (bot.commander ? cfg.restIcon(bot.kind, bot.status) : cfg.statusIcon(bot.kind, bot.status))
-    width: bot.d + 2
-    height: bot.d + 2
-    sourceSize.width: Math.round(bot.d * 2)
-    sourceSize.height: Math.round(bot.d * 2)
-    fillMode: Image.PreserveAspectFit
-    smooth: true
-    asynchronous: false
+  // The transformed container: everything visual, nothing hit-tested.
+  Item {
+    id: body
+    anchors.fill: parent
     transformOrigin: Item.Center
-    transform: Translate {
-      id: bobT
-    }
 
-    // Bounce emote: a quick double hop.
-    SequentialAnimation {
-      id: bounceAnim
+    // Commander leans toward its squad (a real "turn"); the lean eases in/out
+    // as the subagent count crosses zero. transformOrigin is Center, so layout
+    // is unaffected.
+    rotation: bot.commander ? 7 : 0
+    Behavior on rotation {
       NumberAnimation {
-        target: bobT
-        property: "y"
-        from: 0
-        to: -3.5 * bot.sizeScale
-        duration: 120
-        easing.type: Easing.OutQuad
-      }
-      NumberAnimation {
-        target: bobT
-        property: "y"
-        from: -3.5 * bot.sizeScale
-        to: 0
-        duration: 240
-        easing.type: Easing.OutBounce
+        duration: 280
+        easing.type: Easing.OutBack
       }
     }
-    // Wiggle emote: a quick shake.
-    SequentialAnimation {
-      id: wiggleAnim
-      NumberAnimation {
-        target: botImg
-        property: "rotation"
-        from: 0
-        to: -9
-        duration: 60
+    // Sub-bots pop in from near-zero when spawned (see spawnIn); commanders stay 1.0.
+    scale: bot.subordinate ? 0.2 : 1.0
+
+    Image {
+      id: botImg
+      anchors.centerIn: parent
+      // Commander rests on its kind's `rest` face (watching the squad) between
+      // its own transient emotes -- claude's is "look", present for every status
+      // (the tool one has star eyes); a kind without one, and every plain bot,
+      // rests on the status icon.
+      source: bot.faceOverride !== "" ? bot.faceOverride : (bot.commander ? cfg.restIcon(bot.kind, bot.status) : cfg.statusIcon(bot.kind, bot.status))
+      width: bot.d + 2
+      height: bot.d + 2
+      sourceSize.width: Math.round(bot.d * 2)
+      sourceSize.height: Math.round(bot.d * 2)
+      fillMode: Image.PreserveAspectFit
+      smooth: true
+      asynchronous: false
+      transformOrigin: Item.Center
+      transform: Translate {
+        id: bobT
       }
-      NumberAnimation {
-        target: botImg
-        property: "rotation"
-        from: -9
-        to: 9
-        duration: 100
+
+      // Bounce emote: a quick double hop.
+      SequentialAnimation {
+        id: bounceAnim
+        NumberAnimation {
+          target: bobT
+          property: "y"
+          from: 0
+          to: -3.5 * bot.sizeScale
+          duration: 120
+          easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+          target: bobT
+          property: "y"
+          from: -3.5 * bot.sizeScale
+          to: 0
+          duration: 240
+          easing.type: Easing.OutBounce
+        }
       }
-      NumberAnimation {
-        target: botImg
-        property: "rotation"
-        from: 9
-        to: -6
-        duration: 90
+      // Wiggle emote: a quick shake.
+      SequentialAnimation {
+        id: wiggleAnim
+        NumberAnimation {
+          target: botImg
+          property: "rotation"
+          from: 0
+          to: -9
+          duration: 60
+        }
+        NumberAnimation {
+          target: botImg
+          property: "rotation"
+          from: -9
+          to: 9
+          duration: 100
+        }
+        NumberAnimation {
+          target: botImg
+          property: "rotation"
+          from: 9
+          to: -6
+          duration: 90
+        }
+        NumberAnimation {
+          target: botImg
+          property: "rotation"
+          from: -6
+          to: 0
+          duration: 70
+        }
       }
-      NumberAnimation {
-        target: botImg
-        property: "rotation"
-        from: -6
-        to: 0
-        duration: 70
+      // Idle breathing: a slight scale pulse, re-jittered each cycle (see breatheOnce).
+      SequentialAnimation {
+        id: breathAnim
+        NumberAnimation {
+          id: breathUp
+          target: botImg
+          property: "scale"
+          from: 1.0
+          to: cfg.breathScale
+          duration: cfg.breathMs
+          easing.type: Easing.InOutSine
+        }
+        NumberAnimation {
+          id: breathDown
+          target: botImg
+          property: "scale"
+          from: cfg.breathScale
+          to: 1.0
+          duration: cfg.breathMs
+          easing.type: Easing.InOutSine
+        }
+        onFinished: Qt.callLater(bot.breatheOnce)
       }
-    }
-    // Idle breathing: a slight scale pulse, re-jittered each cycle (see breatheOnce).
-    SequentialAnimation {
-      id: breathAnim
-      NumberAnimation {
-        id: breathUp
-        target: botImg
-        property: "scale"
-        from: 1.0
-        to: cfg.breathScale
-        duration: cfg.breathMs
-        easing.type: Easing.InOutSine
-      }
-      NumberAnimation {
-        id: breathDown
-        target: botImg
-        property: "scale"
-        from: cfg.breathScale
-        to: 1.0
-        duration: cfg.breathMs
-        easing.type: Easing.InOutSine
-      }
-      onFinished: Qt.callLater(bot.breatheOnce)
     }
   }
 
@@ -241,7 +256,8 @@ Item {
   // name until Claude generates one); a sub-bot shows its "<type> — <description>"
   // (set as `title` by the pill). NoButton so the press still falls through to
   // the pill delegate underneath -- click-to-switch and drag-reorder keep
-  // working over the bots.
+  // working over the bots. Anchored to the STATIC root, never to `body`: the
+  // hit region must not breathe, lean, or pop with the visuals.
   MouseArea {
     anchors.fill: parent
     hoverEnabled: true

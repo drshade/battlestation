@@ -24,7 +24,8 @@ Item {
   property var statusBySid: ({})
   property var titleBySid: ({})
   property var kindBySid: ({})
-  property var agentsBySid: ({})   // { "<sid>": [{id,type,description,started}] }
+  property var agentsBySid: ({})   // { "<sid>": [agentId, ...] } (id sequence; see BarWidget)
+  property var subTitleByKey: ({}) // { "<sid>.<agentId>": tooltip string }
   property bool occupied: false
   property bool shown: true
   property int position: 0         // display position (1-based); shown instead of the raw id
@@ -125,12 +126,15 @@ Item {
       //
       // A squad = the commander bot + a line of smaller sub-agent bots to its right,
       // one per running subagent. The inner Repeater's model is this sid's agent
-      // LIST; BarWidget reuses the list instance across polls unless its content
-      // changed, so surviving sub-bots keep their animations between polls (a list
+      // ID SEQUENCE; BarWidget reuses the list instance across polls unless a
+      // subagent genuinely started or stopped, so surviving sub-bots keep their
+      // animations — and their hover/tooltip state — between polls (a sequence
       // change does rebuild this squad's sub-bots, but only this squad's).
+      // Tooltip text rides subTitleByKey and updates in place.
       Repeater {
         model: cell.sids
         delegate: Row {
+          id: squad
           anchors.verticalCenter: parent.verticalCenter
           required property string modelData          // = the session id
           readonly property var agents: cell.agentsBySid[modelData] || []
@@ -142,22 +146,22 @@ Item {
 
           BotIcon {
             anchors.verticalCenter: parent.verticalCenter
-            status: botStatus
-            title: cell.titleBySid[modelData] || ""
-            kind: botKind
-            commander: agents.length > 0              // turn to face the squad
+            status: squad.botStatus
+            title: cell.titleBySid[squad.modelData] || ""
+            kind: squad.botKind
+            commander: squad.agents.length > 0        // turn to face the squad
             cfg: cell.cfg
             pokeNonce: cell.pokeNonce
           }
 
           Repeater {
-            model: agents
+            model: squad.agents
             delegate: BotIcon {
-              required property var modelData         // = {id,type,description,started}
+              required property string modelData      // = the subagent id
               anchors.verticalCenter: parent.verticalCenter
-              status: botStatus                       // sub-bots mirror the commander
-              kind: botKind                           // inherited from the session
-              title: (modelData.type || "agent") + (modelData.description ? " — " + modelData.description : "")
+              status: squad.botStatus                 // sub-bots mirror the commander
+              kind: squad.botKind                     // inherited from the session
+              title: cell.subTitleByKey[squad.modelData + "." + modelData] || ""
               cfg: cell.cfg
               sizeScale: cfg.subScale
               subordinate: true                       // smaller, pops in
