@@ -10,10 +10,14 @@
 // reply text needs no quoting discipline at all.
 //
 // Reply and completion are decoupled (the asks contract in ctl/src/lib.rs):
-// Save = `asks reply` (a draft — a blocked asker stays parked; agents see
-// the text in progress), Done = `asks answer` (or bare `asks complete` when
-// the input is empty — an ack is an answer), Reopen walks an answered ask
-// back to open with its text kept as a draft.
+// the reply text AUTO-SAVES as a draft (`asks reply` — a blocked asker
+// stays parked; agents see the text in progress) on a 1.5s typing debounce,
+// on blur, on collapse and on panel close — there is no Save button to
+// forget. Done = `asks answer` (or bare `asks complete` when the input is
+// empty — an ack is an answer), Reopen walks an answered ask back to open
+// with its text kept as a draft. Rows expand on CLICK anywhere in the row
+// body (single expansion, one ask at a time); answered rows expand to a
+// read-only view of their answer.
 //
 // Reordering is a drag HANDLE (the grip at each open row's left edge), not a
 // full-row drag: row bodies keep their clicks, and pressing the handle first
@@ -67,6 +71,50 @@ Item {
   // input's Component.onCompleted after every rebuild — an unrelated ask
   // changing mid-typing costs nothing.
   property string draftText: ""
+  // The last text actually written to the store for the expanded ask —
+  // every persist path dedupes against it, so the stream's echo of our own
+  // write (which rebuilds the delegates) never triggers another write.
+  property string lastPersisted: ""
+
+  // Auto-save: a draft is persisted (`asks reply`) on a short typing
+  // debounce, on blur, on collapse and on close — never on a button. All
+  // paths funnel through persistDraft(), which skips unchanged text.
+  Timer {
+    id: draftTimer
+    interval: 1500
+    onTriggered: root.persistDraft()
+  }
+  function persistDraft() {
+    draftTimer.stop();
+    if (expandedId >= 0 && draftText !== lastPersisted) {
+      replyAsk(expandedId, draftText);
+      lastPersisted = draftText;
+    }
+  }
+  // Done / an option click / dismiss supersede the draft: stop the pending
+  // debounce and mark the current text as settled so no later persist path
+  // resurrects it over the final answer.
+  function cancelPendingDraft() {
+    draftTimer.stop();
+    lastPersisted = draftText;
+  }
+  function collapseExpanded() {
+    persistDraft();
+    expandedId = -1;
+  }
+  // Row-click toggle. Expanding snapshots the saved reply into the
+  // panel-held draft (the input restores from it on every delegate
+  // rebuild); switching rows persists the old row's draft first.
+  function toggleExpand(row) {
+    if (expandedId === row.modelData.id) {
+      collapseExpanded();
+      return;
+    }
+    persistDraft();
+    draftText = row.modelData.answer || "";
+    lastPersisted = draftText;
+    expandedId = row.modelData.id;
+  }
   // Age text ticks while the panel is up (rows only re-render on stream
   // changes; age would otherwise freeze at open time).
   property real nowS: Date.now() / 1000
@@ -103,7 +151,7 @@ Item {
     return ids;
   }
   function dragPress(row, area, mx, my) {
-    expandedId = -1; // uniform slot heights before any geometry is read
+    collapseExpanded(); // persists any draft; uniform slot heights before any geometry is read
     pressRow = row;
     pressY0 = area.mapToItem(asksCol, mx, my).y;
   }
@@ -187,20 +235,26 @@ Item {
     askProc.running = true;
   }
   function answerAsk(id, text) {
+    cancelPendingDraft(); // the answer supersedes any in-flight draft write
     if (text.length > 0)
       bsctl(["asks", "answer", String(id), text]);
+    root.expandedId = -1;
   }
-  // Save: update the reply WITHOUT completing — a draft while "still
-  // working on it". The store keeps state open, so a blocked asker stays
-  // parked; agents peeking via get_ask see the draft. Empty text clears.
+  // The auto-save write: update the reply WITHOUT completing — a draft
+  // while "still working on it". The store keeps state open, so a blocked
+  // asker stays parked; agents peeking via get_ask see the draft. Empty
+  // text clears.
   function replyAsk(id, text) {
     bsctl(["asks", "reply", String(id), text]);
   }
   // Done: reply + complete when there's text; a bare completion (an
-  // ack-only answer is legitimate) when there isn't.
+  // ack-only answer is legitimate) when there isn't. The pending debounce
+  // is cancelled, not flushed — Done carries the input's current text
+  // itself, and a trailing draft write would overwrite the final answer.
   function doneAsk(id, text) {
+    cancelPendingDraft();
     if (text.length > 0)
-      answerAsk(id, text);
+      bsctl(["asks", "answer", String(id), text]);
     else
       bsctl(["asks", "complete", String(id)]);
     root.expandedId = -1;
@@ -212,6 +266,10 @@ Item {
     bsctl(["asks", "note", String(id), text]);
   }
   function dismissAsk(id) {
+    if (id === root.expandedId) {
+      cancelPendingDraft(); // a reply to a dismissed ask would be refused anyway
+      root.expandedId = -1;
+    }
     bsctl(["asks", "dismiss", String(id)]);
   }
   // Jump lands on the asking session's exact WINDOW (ws focus --session:
@@ -237,9 +295,16 @@ Item {
   }
 
   function close() {
+    persistDraft(); // the panel's own close paths flush the draft first
     if (pluginApi)
       pluginApi.closePanel(pluginApi.panelOpenScreen);
   }
+
+  // Best-effort flush when the panel is torn down from OUTSIDE (the
+  // HYPER-key/badge toggle closes via Main.qml, not close()). The Process
+  // spawn races the destruction, so the debounce remains the primary
+  // guarantee — this catches keystrokes younger than one debounce.
+  Component.onDestruction: persistDraft()
 
   Process {
     id: renameProc
@@ -348,7 +413,6 @@ Item {
           required property int index
           readonly property bool replying: root.expandedId === modelData.id
           readonly property bool open: modelData.state === "open"
-          readonly property bool answerable: open && (modelData.type === "question" || modelData.type === "review")
           readonly property bool dragging: root.dragId === modelData.id
 
           Layout.fillWidth: true
@@ -357,106 +421,118 @@ Item {
           // pointer — the model must not move until release (see header).
           opacity: dragging ? 0.35 : 1.0
 
-          RowLayout {
+          // Header wrapper: a MouseArea UNDER the row content makes the
+          // whole row body click-to-expand — buttons and the drag handle
+          // sit above it and keep their events; title, meta and gaps fall
+          // through. The tinted backdrop is the clickability affordance.
+          Item {
             Layout.fillWidth: true
-            spacing: Style.marginS
-
-            // The drag handle. Fixed-width slot on every row (answered rows
-            // keep the space so title columns align) but only open rows show
-            // the grip and accept the drag.
-            Item {
-              Layout.preferredWidth: 18
-              Layout.preferredHeight: 22
-              NText {
-                anchors.centerIn: parent
-                text: "≡"
-                visible: askRow.open
-                color: handleArea.containsMouse || askRow.dragging ? Color.mOnSurface : Qt.alpha(Color.mOnSurface, 0.35)
-              }
-              MouseArea {
-                id: handleArea
-                anchors.fill: parent
-                enabled: askRow.open
-                hoverEnabled: true
-                preventStealing: true
-                cursorShape: askRow.dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                onPressed: mouse => root.dragPress(askRow, handleArea, mouse.x, mouse.y)
-                onPositionChanged: mouse => {
-                  if (pressed)
-                    root.dragMove(askRow, handleArea, mouse.x, mouse.y);
-                }
-                onReleased: root.dragRelease()
-                onCanceled: root.dragReset()
-              }
-            }
+            implicitHeight: headerRow.implicitHeight
 
             Rectangle {
-              width: 10
-              height: 10
-              radius: 5
-              color: root.urgencyColor(askRow.modelData.urgency)
-              opacity: askRow.open ? 1.0 : 0.4
+              anchors.fill: parent
+              anchors.leftMargin: -Style.marginXS
+              anchors.rightMargin: -Style.marginXS
+              radius: Style.radiusXS
+              color: rowArea.containsMouse ? Qt.alpha(Color.mOnSurface, 0.06) : "transparent"
+            }
+            MouseArea {
+              id: rowArea
+              anchors.fill: parent
+              hoverEnabled: true
+              onClicked: root.toggleExpand(askRow)
             }
 
-            ColumnLayout {
-              Layout.fillWidth: true
-              spacing: 0
-              NText {
-                // NText is a Text with elide: ElideRight by default — width
-                // does the truncation now that the panel is wide.
-                text: askRow.modelData.title
-                font.weight: Style.fontWeightBold
-                color: Color.mOnSurface
-                opacity: askRow.open ? 1.0 : 0.6
-                Layout.fillWidth: true
-              }
-              NText {
-                text: root.askMeta(askRow.modelData)
-                pointSize: Style.fontSizeXS
-                color: Color.mOnSurfaceVariant
-                Layout.fillWidth: true
-              }
-            }
+            RowLayout {
+              id: headerRow
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.marginS
 
-            NButton {
-              visible: (askRow.modelData.session || "").length > 0
-              text: "Jump"
-              outlined: true
-              onClicked: root.jumpToAsk(askRow.modelData.session)
-            }
-            NButton {
-              visible: askRow.answerable
-              text: askRow.replying ? "Hide" : "Reply"
-              outlined: !askRow.replying
-              onClicked: {
-                if (askRow.replying) {
-                  root.expandedId = -1;
-                } else {
-                  // Snapshot the saved reply (a prior draft) into the
-                  // panel-held draft BEFORE expanding — the input restores
-                  // from it on every delegate rebuild.
-                  root.draftText = askRow.modelData.answer || "";
-                  root.expandedId = askRow.modelData.id;
+              // The drag handle. Fixed-width slot on every row (answered rows
+              // keep the space so title columns align) but only open rows show
+              // the grip and accept the drag.
+              Item {
+                Layout.preferredWidth: 18
+                Layout.preferredHeight: 22
+                NText {
+                  anchors.centerIn: parent
+                  text: "≡"
+                  visible: askRow.open
+                  color: handleArea.containsMouse || askRow.dragging ? Color.mOnSurface : Qt.alpha(Color.mOnSurface, 0.35)
+                }
+                MouseArea {
+                  id: handleArea
+                  anchors.fill: parent
+                  enabled: askRow.open
+                  hoverEnabled: true
+                  preventStealing: true
+                  cursorShape: askRow.dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                  onPressed: mouse => root.dragPress(askRow, handleArea, mouse.x, mouse.y)
+                  onPositionChanged: mouse => {
+                    if (pressed)
+                      root.dragMove(askRow, handleArea, mouse.x, mouse.y);
+                  }
+                  onReleased: root.dragRelease()
+                  onCanceled: root.dragReset()
                 }
               }
-            }
-            NButton {
-              visible: askRow.modelData.state === "answered"
-              text: "Reopen"
-              outlined: true
-              onClicked: root.reopenAsk(askRow.modelData.id)
-            }
-            NIconButton {
-              icon: "close"
-              onClicked: root.dismissAsk(askRow.modelData.id)
+
+              Rectangle {
+                width: 10
+                height: 10
+                radius: 5
+                color: root.urgencyColor(askRow.modelData.urgency)
+                opacity: askRow.open ? 1.0 : 0.4
+              }
+
+              ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+                NText {
+                  // NText is a Text with elide: ElideRight by default — width
+                  // does the truncation now that the panel is wide.
+                  text: askRow.modelData.title
+                  font.weight: Style.fontWeightBold
+                  color: Color.mOnSurface
+                  opacity: askRow.open ? 1.0 : 0.6
+                  Layout.fillWidth: true
+                }
+                NText {
+                  text: root.askMeta(askRow.modelData)
+                  pointSize: Style.fontSizeXS
+                  color: Color.mOnSurfaceVariant
+                  Layout.fillWidth: true
+                }
+              }
+
+              NButton {
+                visible: (askRow.modelData.session || "").length > 0
+                text: "Jump"
+                outlined: true
+                onClicked: root.jumpToAsk(askRow.modelData.session)
+              }
+              NButton {
+                visible: askRow.modelData.state === "answered"
+                text: "Reopen"
+                outlined: true
+                onClicked: root.reopenAsk(askRow.modelData.id)
+              }
+              NIconButton {
+                icon: "close"
+                onClicked: root.dismissAsk(askRow.modelData.id)
+              }
             }
           }
 
           // Expanded detail: body, one-click options, free-text reply, and
           // the note quick-tags (the human half of the queue conversation —
-          // visible to every agent via the stream).
+          // visible to every agent via the stream). Answered rows expand
+          // too — a read-only view of the answer, with Reopen as the way
+          // back to editing.
           ColumnLayout {
-            visible: askRow.replying && askRow.open
+            visible: askRow.replying
             Layout.fillWidth: true
             Layout.leftMargin: 18 + 10 + Style.marginS * 2
             spacing: Style.marginXS
@@ -470,7 +546,7 @@ Item {
             }
 
             RowLayout {
-              visible: (askRow.modelData.options || []).length > 0
+              visible: askRow.open && (askRow.modelData.options || []).length > 0
               Layout.fillWidth: true
               spacing: Style.marginXS
               NText {
@@ -496,23 +572,37 @@ Item {
               NTextInput {
                 id: replyInput
                 Layout.fillWidth: true
-                placeholderText: "Reply…"
+                readOnly: !askRow.open // answered rows show, Reopen edits
+                placeholderText: askRow.open ? "Reply… (auto-saved)" : "(completed without reply text)"
                 // Restore the panel-held draft after any delegate rebuild
-                // (stream changes recreate this input mid-typing); track
-                // keystrokes back into it while this row is the expanded one.
-                Component.onCompleted: text = askRow.replying ? root.draftText : (askRow.modelData.answer || "")
-                onTextChanged: if (askRow.replying)
-                  root.draftText = text
-                onAccepted: root.doneAsk(askRow.modelData.id, text)
-              }
-              NButton {
-                // Reply without completing: "I'm still working on it."
-                text: "Save"
-                outlined: true
-                onClicked: root.replyAsk(askRow.modelData.id, replyInput.text)
+                // (stream changes — including the echo of our own auto-save
+                // — recreate this input mid-typing); track keystrokes back
+                // into it and restart the debounce while this row is the
+                // expanded one. Cursor to the end after a restore, so a
+                // rebuild between keystrokes never teleports the caret.
+                Component.onCompleted: {
+                  text = askRow.replying ? root.draftText : (askRow.modelData.answer || "");
+                  if (askRow.replying && askRow.open)
+                    inputItem.cursorPosition = text.length;
+                }
+                onTextChanged: {
+                  if (askRow.replying && askRow.open && text !== root.draftText) {
+                    root.draftText = text;
+                    draftTimer.restart();
+                  }
+                }
+                // Blur persists (editingFinished fires on focus loss and on
+                // Enter; the dedupe in persistDraft makes the Enter case a
+                // no-op after doneAsk's cancel).
+                onEditingFinished: if (askRow.replying && askRow.open)
+                  root.persistDraft()
+                onAccepted: if (askRow.open)
+                  root.doneAsk(askRow.modelData.id, text)
               }
               NButton {
                 // Reply AND complete (empty text = ack-only completion).
+                // The draft needs no button: it auto-saves.
+                visible: askRow.open
                 text: "Done"
                 backgroundColor: Color.mPrimary
                 textColor: Color.mOnPrimary
