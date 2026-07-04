@@ -6,8 +6,11 @@
 # config. The tracked form is a WHITELIST projection — default-deny, so a
 # table Codex invents tomorrow never churns the repo. Kept: root-table keys
 # in KEEP_ROOT and every section under [hooks] (the battlestation-ws status
-# hooks), plus the comments/blanks attached to kept content. The live file
-# keeps everything; only what git sees is projected.
+# hooks) EXCEPT [hooks.state.*] — Codex stores per-hook trusted_hash values
+# there, inside the kept namespace; they are machine-local trust state that
+# re-churns whenever a hook command changes. Comments/blanks attached to
+# kept content ride along. The live file keeps everything; only what git
+# sees is projected.
 #
 # Why python and line/section-based: jq doesn't parse TOML, and stdlib
 # tomllib parses but cannot serialize (a serializing round-trip would also
@@ -30,6 +33,7 @@ import sys
 # keeps `model` out of the claude settings whitelist.
 KEEP_ROOT = {"service_tier"}
 KEEP_SECTIONS = re.compile(r"^hooks($|[.\s\]])")  # [hooks], [[hooks.X]], ...
+DROP_SECTIONS = re.compile(r"^hooks\.state($|[.\s\]])")  # trust-hash state
 
 HEADER = re.compile(r"^\s*\[\[?\s*([^]]*?)\s*\]\]?\s*(#.*)?$")
 ROOT_KEY = re.compile(r"^\s*([A-Za-z0-9_-]+|\"[^\"]*\"|'[^']*')\s*=")
@@ -46,7 +50,9 @@ for line in sys.stdin:
     m = HEADER.match(line)
     if m:
         in_root = False
-        keeping = bool(KEEP_SECTIONS.match(m.group(1)))
+        keeping = bool(KEEP_SECTIONS.match(m.group(1))) and not DROP_SECTIONS.match(
+            m.group(1)
+        )
         if keeping:
             out.extend(pending)
             out.append(line)
