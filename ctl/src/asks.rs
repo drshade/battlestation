@@ -5,7 +5,10 @@
 //! OUTLIVES any connection: answers land here and are collected later).
 //! Two ownership namespaces, never one field: agents own `urgency` and
 //! `estimate_min` (via `update`), the human owns `note`, `answer` and the
-//! order file. Queue order is FIFO; only the human reorders.
+//! order file. Reply text and completion are DECOUPLED — `reply` drafts
+//! without releasing a blocked asker, `complete` is the releasing
+//! transition, `answer` composes both. Queue order is FIFO; only the human
+//! reorders.
 
 use std::fs;
 use std::io::Write;
@@ -403,9 +406,11 @@ pub fn get(id: Option<i64>, session: Option<&str>, json_out: bool) -> i32 {
     0
 }
 
-/// `asks answer <id> <text>..` — the human's reply: open asks only (an
-/// answered ask already has one; re-answering would silently clobber what
-/// the asker may have collected).
+/// `asks answer <id> <text>..` — the compose shortcut: reply + complete in
+/// ONE locked write (not two verbs chained — a reader must never see the
+/// text without the state). Open asks only (an answered ask already has
+/// one; re-answering would silently clobber what the asker may have
+/// collected). For the decoupled forms see [`reply`]/[`complete`]/[`reopen`].
 pub fn answer(id: i64, text: &str) -> i32 {
     modify("answer", id, |r| {
         let state = proto::field(r, "state");
@@ -415,6 +420,61 @@ pub fn answer(id: i64, text: &str) -> i32 {
         r["answer"] = json!(text);
         r["state"] = json!("answered");
         r["answered_at"] = json!(sys::now_f64());
+        Ok(())
+    })
+}
+
+/// `asks reply <id> [<text>..]` — set/update the reply text WITHOUT
+/// touching state (empty text clears it). On an open ask this is a DRAFT,
+/// and that is the feature's point: the MCP block loop releases on STATE
+/// (mcp::block_verdict), so a draft does not release a blocked agent —
+/// the human can keep revising while "still working on it" — yet an agent
+/// peeking via get_ask sees the reply-in-progress. Also legal on an
+/// answered ask (fixing a typo in a completed reply); dismissed asks are
+/// out of the conversation.
+pub fn reply(id: i64, text: &str) -> i32 {
+    modify("reply", id, |r| {
+        let state = proto::field(r, "state");
+        if state == "dismissed" {
+            return Err(format!("ask {id} is dismissed"));
+        }
+        r["answer"] = if text.is_empty() {
+            Value::Null
+        } else {
+            json!(text)
+        };
+        Ok(())
+    })
+}
+
+/// `asks complete <id>` — open -> answered, whatever the reply text says
+/// (completing with no text is a legitimate ack: "seen, no comment"). This
+/// is the transition that releases a blocked asker.
+pub fn complete(id: i64) -> i32 {
+    modify("complete", id, |r| {
+        let state = proto::field(r, "state");
+        if state != "open" {
+            return Err(format!("ask {id} is {state}, not open"));
+        }
+        r["state"] = json!("answered");
+        r["answered_at"] = json!(sys::now_f64());
+        Ok(())
+    })
+}
+
+/// `asks reopen <id>` — answered -> open; the reply text is KEPT (it
+/// becomes a draft again) and answered_at clears. One-way hazard, stated
+/// honestly: an asker that already collected the answer (a blocking return
+/// or get_ask) cannot have it recalled — reopen governs the queue, not the
+/// past.
+pub fn reopen(id: i64) -> i32 {
+    modify("reopen", id, |r| {
+        let state = proto::field(r, "state");
+        if state != "answered" {
+            return Err(format!("ask {id} is {state}, not answered"));
+        }
+        r["state"] = json!("open");
+        r["answered_at"] = Value::Null;
         Ok(())
     })
 }

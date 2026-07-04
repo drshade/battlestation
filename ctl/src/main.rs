@@ -640,12 +640,18 @@ enum AsksCmd {
         #[arg(long)]
         stream: bool,
     },
-    /// Answer an open ask (the asker collects it from the store)
+    /// Reply AND complete in one step (the compose shortcut)
     Answer {
         id: i64,
         #[arg(required = true)]
         text: Vec<String>,
     },
+    /// Set/update the reply text WITHOUT completing (a draft; empty clears)
+    Reply { id: i64, text: Vec<String> },
+    /// Mark an open ask answered as-is (releases a waiting asker)
+    Complete { id: i64 },
+    /// Answered -> open again; the reply text is kept as a draft
+    Reopen { id: i64 },
     /// Drop an ask from the queue (any state; idempotent)
     Dismiss { id: i64 },
     /// Quick-tag an ask ("working on it"); empty text clears
@@ -935,6 +941,9 @@ fn main() {
                 }
             }
             AsksCmd::Answer { id, text } => bsctl::asks::answer(id, &text.join(" ")),
+            AsksCmd::Reply { id, text } => bsctl::asks::reply(id, &text.join(" ")),
+            AsksCmd::Complete { id } => bsctl::asks::complete(id),
+            AsksCmd::Reopen { id } => bsctl::asks::reopen(id),
             AsksCmd::Dismiss { id } => bsctl::asks::dismiss(id),
             AsksCmd::Note { id, text } => bsctl::asks::note(id, &text.join(" ")),
             AsksCmd::Update { id, fields } => {

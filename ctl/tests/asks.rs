@@ -177,6 +177,71 @@ fn post_get_answer_roundtrip() {
 }
 
 #[test]
+fn reply_complete_reopen_decoupling() {
+    let env = TestEnv::new("decouple");
+    let id = env.post("Needs thought", &["--session", "s-1"]);
+
+    // reply drafts: text lands, state STAYS open (a draft must not release
+    // a blocked asker — the MCP loop keys on state)
+    let (code, _, _) = env.run(&["asks", "reply", "1", "half", "an", "answer"]);
+    assert_eq!(code, 0);
+    let q = env.queue_json(&[]);
+    assert_eq!(q[0]["answer"], "half an answer");
+    assert_eq!(q[0]["state"], "open");
+
+    // reply updates repeatedly; empty reply clears back to null
+    let (code, _, _) = env.run(&["asks", "reply", "1", "better", "answer"]);
+    assert_eq!(code, 0);
+    assert_eq!(env.queue_json(&[])[0]["answer"], "better answer");
+    let (code, _, _) = env.run(&["asks", "reply", "1"]);
+    assert_eq!(code, 0);
+    assert_eq!(env.queue_json(&[])[0]["answer"], Value::Null);
+
+    // complete with NO text: an ack-only completion is legitimate
+    let (code, _, _) = env.run(&["asks", "complete", "1"]);
+    assert_eq!(code, 0);
+    let q = env.queue_json(&[]);
+    assert_eq!(q[0]["state"], "answered");
+    assert_eq!(q[0]["answer"], Value::Null);
+    // complete on a non-open ask: error naming the state
+    let (code, _, err) = env.run(&["asks", "complete", "1"]);
+    assert_eq!((code, err.contains("answered")), (1, true), "{err}");
+
+    // reopen: back to open, answered_at cleared; a draft set before
+    // reopen survives the round-trip
+    let (code, _, _) = env.run(&["asks", "reply", "1", "kept", "draft"]);
+    assert_eq!(code, 0);
+    let (code, _, _) = env.run(&["asks", "reopen", "1"]);
+    assert_eq!(code, 0);
+    let q = env.queue_json(&[]);
+    assert_eq!(q[0]["state"], "open");
+    assert_eq!(q[0]["answer"], "kept draft");
+    assert_eq!(q[0]["answered_at"], Value::Null);
+    // reopen on an open ask: error
+    let (code, _, err) = env.run(&["asks", "reopen", "1"]);
+    assert_eq!((code, err.contains("open")), (1, true), "{err}");
+
+    // answer still composes reply + complete in one step
+    let (code, _, _) = env.run(&["asks", "answer", &id.to_string(), "final"]);
+    assert_eq!(code, 0);
+    let q = env.queue_json(&[]);
+    assert_eq!(q[0]["state"], "answered");
+    assert_eq!(q[0]["answer"], "final");
+
+    // reply on an answered ask: text updates, state stays answered
+    let (code, _, _) = env.run(&["asks", "reply", "1", "typo", "fixed"]);
+    assert_eq!(code, 0);
+    let q = env.queue_json(&[]);
+    assert_eq!(q[0]["answer"], "typo fixed");
+    assert_eq!(q[0]["state"], "answered");
+
+    // reply on a dismissed ask: out of the conversation
+    env.run(&["asks", "dismiss", "1"]);
+    let (code, _, err) = env.run(&["asks", "reply", "1", "too", "late"]);
+    assert_eq!((code, err.contains("dismissed")), (1, true), "{err}");
+}
+
+#[test]
 fn note_update_dismiss_semantics() {
     let env = TestEnv::new("verbs");
     env.post("a", &["--kind", "claude", "--session", "s-1"]);

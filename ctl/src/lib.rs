@@ -141,12 +141,23 @@
 //! (low|medium|high) and `estimate_min` (their estimate of HUMAN minutes
 //! needed) — `asks update` may change exactly those, so escalation means
 //! "my urgency rose", never "I moved myself up". The human owns the rest:
-//! `answer` (open asks only — re-answering would clobber what the asker
-//! may have collected), `note` (the freeform quick-tag: "working on it";
-//! visible to every agent through the stream — the human half of the
-//! coordination conversation), dismissal, and the ORDER: the queue is
-//! FIFO by `created`, and only the human reorders (`asks order set`, the
-//! panel drag). POSTING IS MANDATORY, NOT JUDGED: an agent needing
+//! the reply text and the completion, DECOUPLED on purpose. `asks reply`
+//! sets/updates the text without touching state (empty clears): on an
+//! open ask it is a DRAFT, and because the block loop releases on STATE,
+//! a draft never releases a blocked asker — the human keeps revising
+//! while "still working on it", while an agent peeking via get_ask sees
+//! the reply-in-progress. `asks complete` is the releasing transition
+//! (legal with no text — an ack is an answer); `asks answer` composes
+//! reply + complete in one locked write (open only — re-answering would
+//! clobber what the asker may have collected); `asks reopen` walks
+//! answered back to open KEEPING the text as a draft, with the honest
+//! caveat that an asker who already collected the answer can't have it
+//! recalled — reopen governs the queue, not the past. Also the human's:
+//! `note` (the freeform quick-tag: "working on it"; visible to every
+//! agent through the stream — the human half of the coordination
+//! conversation), dismissal, and the ORDER: the queue is FIFO by
+//! `created`, and only the human reorders (`asks order set`, the panel
+//! drag). POSTING IS MANDATORY, NOT JUDGED: an agent needing
 //! feedback MUST post — proceeding without feedback is the failure mode,
 //! and queue depth is never a reason to self-censor. The norm is carried
 //! by the stage-2 MCP tool descriptions (the one prompt surface every
@@ -158,9 +169,10 @@
 //! asks (FIFO — awaiting collection; the order file deliberately does not
 //! apply to them, they are past triage). Dismissed asks are excluded
 //! everywhere except `asks get --id`, the direct record lookup (any
-//! state — the debugging view). States: open -> answered (the human
-//! replied) or -> dismissed (from ANY state: dismissing an open ask is
-//! declining to answer; idempotent, unknown ids are quiet).
+//! state — the debugging view). States: open -> answered (complete or
+//! answer) or -> dismissed (from ANY state: dismissing an open ask is
+//! declining to answer; idempotent, unknown ids are quiet); answered ->
+//! open again via reopen.
 //!
 //! # MCP (`bsctl mcp --kind <k>`)
 //!

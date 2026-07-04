@@ -336,6 +336,35 @@ fn ping_mid_block_is_ponged_while_the_ask_stays_parked() {
 }
 
 #[test]
+fn draft_reply_does_not_release_a_blocked_ask() {
+    let env = TestEnv::new("draft-block");
+    let mut c = env.server(0);
+    let ask_req = c.send_request(
+        "tools/call",
+        json!({"name": "ask", "arguments": {"title": "Draft me", "wait_secs": 20}}),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    // A draft lands (reply, state stays open) — the block must NOT release:
+    // prove the server is still parked by pinging and getting the pong as
+    // the first line out (several store polls have passed by then).
+    env.asks(&["reply", "1", "thinking about it..."]);
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    let ping_req = c.send_request("ping", json!({}));
+    let line = c.read_line();
+    assert_eq!(
+        line["id"].as_i64(),
+        Some(ping_req),
+        "a draft must keep the ask parked (got {line})"
+    );
+    // Completing is the releasing transition; the collected text is the draft.
+    env.asks(&["complete", "1"]);
+    let resp = c.read_line();
+    assert_eq!(resp["id"].as_i64(), Some(ask_req));
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert_eq!(text, "The human answered ask #1: thinking about it...");
+}
+
+#[test]
 fn cancellation_mid_block_is_honored_and_the_ask_survives() {
     let env = TestEnv::new("cancel-block");
     let mut c = env.server(0);

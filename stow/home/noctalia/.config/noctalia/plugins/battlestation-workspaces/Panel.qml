@@ -9,6 +9,12 @@
 // asks action is a direct-argv bsctl Process — no shell anywhere, so human
 // reply text needs no quoting discipline at all.
 //
+// Reply and completion are decoupled (the asks contract in ctl/src/lib.rs):
+// Save = `asks reply` (a draft — a blocked asker stays parked; agents see
+// the text in progress), Done = `asks answer` (or bare `asks complete` when
+// the input is empty — an ack is an answer), Reopen walks an answered ask
+// back to open with its text kept as a draft.
+//
 // Reordering is a drag HANDLE (the grip at each open row's left edge), not a
 // full-row drag: row bodies keep their clicks, and pressing the handle first
 // collapses the expanded reply area so every open row has the same height —
@@ -54,6 +60,13 @@ Item {
   // Single-expansion: at most one row's reply area is open (triage is one
   // ask at a time, and collapsing everything at drag start is then trivial).
   property int expandedId: -1
+  // The expanded row's reply text, held OUTSIDE the delegates: any stream
+  // change rebuilds the Repeater's delegates (and their inputs), so the
+  // in-progress text must survive on the panel. Snapshotted from the ask's
+  // saved reply at expansion, tracked per keystroke, restored by the
+  // input's Component.onCompleted after every rebuild — an unrelated ask
+  // changing mid-typing costs nothing.
+  property string draftText: ""
   // Age text ticks while the panel is up (rows only re-render on stream
   // changes; age would otherwise freeze at open time).
   property real nowS: Date.now() / 1000
@@ -161,6 +174,8 @@ Item {
       parts.push("~" + r.estimate_min + "m of you");
     if (r.state === "answered")
       parts.push("answered — awaiting pickup");
+    else if (r.answer)
+      parts.push("draft: “" + r.answer + "”"); // reply saved, not yet completed
     if (r.note)
       parts.push("“" + r.note + "”");
     return parts.join("  ·  ");
@@ -175,14 +190,35 @@ Item {
     if (text.length > 0)
       bsctl(["asks", "answer", String(id), text]);
   }
+  // Save: update the reply WITHOUT completing — a draft while "still
+  // working on it". The store keeps state open, so a blocked asker stays
+  // parked; agents peeking via get_ask see the draft. Empty text clears.
+  function replyAsk(id, text) {
+    bsctl(["asks", "reply", String(id), text]);
+  }
+  // Done: reply + complete when there's text; a bare completion (an
+  // ack-only answer is legitimate) when there isn't.
+  function doneAsk(id, text) {
+    if (text.length > 0)
+      answerAsk(id, text);
+    else
+      bsctl(["asks", "complete", String(id)]);
+    root.expandedId = -1;
+  }
+  function reopenAsk(id) {
+    bsctl(["asks", "reopen", String(id)]);
+  }
   function noteAsk(id, text) {
     bsctl(["asks", "note", String(id), text]);
   }
   function dismissAsk(id) {
     bsctl(["asks", "dismiss", String(id)]);
   }
-  function jumpToAsk(ws) {
-    bsctl(["ws", "focus", "--ws-id", String(ws)]);
+  // Jump lands on the asking session's exact WINDOW (ws focus --session:
+  // window dispatch when the session record knows its win, workspace
+  // fallback otherwise — never less than the old --ws-id form).
+  function jumpToAsk(session) {
+    bsctl(["ws", "focus", "--session", session]);
     close();
   }
 
@@ -383,16 +419,32 @@ Item {
             }
 
             NButton {
-              visible: askRow.modelData.ws !== null && askRow.modelData.ws !== undefined
+              visible: (askRow.modelData.session || "").length > 0
               text: "Jump"
               outlined: true
-              onClicked: root.jumpToAsk(askRow.modelData.ws)
+              onClicked: root.jumpToAsk(askRow.modelData.session)
             }
             NButton {
               visible: askRow.answerable
               text: askRow.replying ? "Hide" : "Reply"
               outlined: !askRow.replying
-              onClicked: root.expandedId = askRow.replying ? -1 : askRow.modelData.id
+              onClicked: {
+                if (askRow.replying) {
+                  root.expandedId = -1;
+                } else {
+                  // Snapshot the saved reply (a prior draft) into the
+                  // panel-held draft BEFORE expanding — the input restores
+                  // from it on every delegate rebuild.
+                  root.draftText = askRow.modelData.answer || "";
+                  root.expandedId = askRow.modelData.id;
+                }
+              }
+            }
+            NButton {
+              visible: askRow.modelData.state === "answered"
+              text: "Reopen"
+              outlined: true
+              onClicked: root.reopenAsk(askRow.modelData.id)
             }
             NIconButton {
               icon: "close"
@@ -445,13 +497,26 @@ Item {
                 id: replyInput
                 Layout.fillWidth: true
                 placeholderText: "Reply…"
-                onAccepted: root.answerAsk(askRow.modelData.id, text)
+                // Restore the panel-held draft after any delegate rebuild
+                // (stream changes recreate this input mid-typing); track
+                // keystrokes back into it while this row is the expanded one.
+                Component.onCompleted: text = askRow.replying ? root.draftText : (askRow.modelData.answer || "")
+                onTextChanged: if (askRow.replying)
+                  root.draftText = text
+                onAccepted: root.doneAsk(askRow.modelData.id, text)
               }
               NButton {
-                text: "Send"
+                // Reply without completing: "I'm still working on it."
+                text: "Save"
+                outlined: true
+                onClicked: root.replyAsk(askRow.modelData.id, replyInput.text)
+              }
+              NButton {
+                // Reply AND complete (empty text = ack-only completion).
+                text: "Done"
                 backgroundColor: Color.mPrimary
                 textColor: Color.mOnPrimary
-                onClicked: root.answerAsk(askRow.modelData.id, replyInput.text)
+                onClicked: root.doneAsk(askRow.modelData.id, replyInput.text)
               }
             }
 

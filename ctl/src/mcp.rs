@@ -137,7 +137,9 @@ pub fn tools_json() -> Value {
         {
             "name": "get_ask",
             "description": "One ask by id, any state — how you collect an answer that arrived after \
-                            ask's wait window, or re-check one of your open asks.",
+                            ask's wait window, or re-check one of your open asks. NOTE: answer text \
+                            on a still-OPEN ask is the human drafting a reply — visible for context, \
+                            but not final until the ask's state is answered.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"id": {"type": "integer", "description": "The ask id"}},
