@@ -1,6 +1,6 @@
-//! `bsctl status` — the full state of the world in one object: displays,
-//! the battlespace join, the preferences, the live agent sessions, and the
-//! per-kind plan usage. The
+//! `bsctl status` — the full state of the world in one object: the asks
+//! queue, displays, the battlespace join, the preferences, the live agent
+//! sessions, and the per-kind plan usage. The
 //! text form is the at-a-glance human overview (the model's learning
 //! surface); the json form is the machine feed, and with `--stream` it is
 //! THE subscription the widget lives on (schema in lib.rs). Assembly is
@@ -12,13 +12,13 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::ws::{BsRow, bs_join, displays_from, human_name, live_ids, pref_rows, pref_rows_json};
-use crate::{agents, ipc, proto, sessions, sys, usage, ws};
+use crate::{agents, asks, ipc, proto, sessions, sys, usage, ws};
 
 /// The world, queried live. Session scan first (it sweeps), compositor
-/// snapshots second; the map and prefs files are read lock-free (their
-/// writers rename atomically). Usage rides the shared flocked cache, so
-/// every streamer and poller combined pays at most one fetch per TTL —
-/// and the stream's tick is what picks a TTL expiry up.
+/// snapshots second; the map, prefs and asks files are read lock-free
+/// (their writers rename atomically). Usage rides the shared flocked
+/// cache, so every streamer and poller combined pays at most one fetch per
+/// TTL — and the stream's tick is what picks a TTL expiry up.
 pub fn snapshot() -> Value {
     let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
     let wsj = ipc::json("workspaces");
@@ -30,6 +30,7 @@ pub fn snapshot() -> Value {
         &std::fs::read_to_string(ws::map_file()).unwrap_or_default(),
         &ws::load_prefs(),
         usage::snapshot(None),
+        asks::rows_json(None),
     )
 }
 
@@ -46,6 +47,7 @@ pub fn assemble(
     map_content: &str,
     prefs: &BTreeMap<i64, String>,
     usage: Value,
+    asks: Vec<Value>,
 ) -> Value {
     let comp = match (wsj, mons) {
         (Some(w), Some(m)) => Some((w, m)),
@@ -71,6 +73,9 @@ pub fn assemble(
         ),
     };
     json!({
+        // File truth like prefs: [] when the queue is empty, never null —
+        // an empty queue is not a lost compositor.
+        "asks": Value::Array(asks),
         "displays": displays,
         "workspaces": workspaces,
         "prefs": prefs_v,
@@ -152,6 +157,17 @@ pub fn render_text(world: &Value) -> String {
             .unwrap_or_default()
     };
     let flag = |v: &Value, k: &str| proto::yes(v.get(k).and_then(Value::as_bool) == Some(true));
+
+    // The asks section leads — this is the ATTENTION overview, and who
+    // needs you outranks what the desk looks like.
+    if let Some(rows) = world.get("asks").and_then(Value::as_array)
+        && !rows.is_empty()
+    {
+        sections.push(section(
+            "asks",
+            &proto::render_table(&asks::ASK_HEADERS, &asks::ask_cells(rows, sys::now_f64())),
+        ));
+    }
 
     match world.get("displays").and_then(Value::as_array) {
         None => sections.push(unreachable("displays")),
@@ -275,10 +291,34 @@ mod tests {
         (recs, wsj, mons, prefs)
     }
 
+    /// An ask fixture `created` far in the FUTURE: the age clamp renders
+    /// `0s` regardless of when the test runs, keeping text pins
+    /// deterministic.
+    fn fixture_asks() -> Vec<Value> {
+        vec![json!({
+            "id": 1, "session": "s-1", "kind": "claude", "ws": 3,
+            "type": "question", "title": "Ship it?", "body": "",
+            "options": [], "urgency": "high", "estimate_min": 2,
+            "note": "", "state": "open", "answer": Value::Null,
+            "created": 4e12, "answered_at": Value::Null,
+        })]
+    }
+
     #[test]
     fn assemble_joins_all_sections() {
         let (recs, wsj, mons, prefs) = fixtures();
-        let w = assemble(recs, Some(&wsj), Some(&mons), "", &prefs, fixture_usage());
+        let w = assemble(
+            recs,
+            Some(&wsj),
+            Some(&mons),
+            "",
+            &prefs,
+            fixture_usage(),
+            fixture_asks(),
+        );
+        // asks lead the schema: file truth, [] when empty, never null
+        assert_eq!(w["asks"][0]["id"], 1);
+        assert_eq!(w["asks"][0]["urgency"], "high");
         // displays numbered leftmost-first: eDP-1 at x=0 is display 1
         assert_eq!(w["displays"][0]["name"], "eDP-1");
         assert_eq!(w["displays"][0]["id"], 1);
@@ -311,7 +351,12 @@ mod tests {
     #[test]
     fn assemble_nulls_compositor_sections_when_a_query_fails() {
         let (recs, wsj, _, prefs) = fixtures();
-        let w = assemble(recs, Some(&wsj), None, "", &prefs, json!({}));
+        let w = assemble(recs, Some(&wsj), None, "", &prefs, json!({}), vec![]);
+        assert_eq!(
+            w["asks"],
+            json!([]),
+            "file truth: [] when empty, never null"
+        );
         assert_eq!(w["displays"], Value::Null, "not [] — that would be a lie");
         assert_eq!(w["workspaces"], Value::Null);
         // prefs stay (file truth) with unknowable annotations nulled
@@ -329,7 +374,15 @@ mod tests {
         // The status feed and `agents get` must never drift: same input,
         // same rows.
         let (recs, wsj, mons, prefs) = fixtures();
-        let w = assemble(recs.clone(), Some(&wsj), Some(&mons), "", &prefs, json!({}));
+        let w = assemble(
+            recs.clone(),
+            Some(&wsj),
+            Some(&mons),
+            "",
+            &prefs,
+            json!({}),
+            vec![],
+        );
         assert_eq!(
             w["agents"],
             Value::Array(agents::agent_rows(recs, None, None))
@@ -339,10 +392,22 @@ mod tests {
     #[test]
     fn text_render_reads_like_the_model() {
         let (recs, wsj, mons, prefs) = fixtures();
-        let w = assemble(recs, Some(&wsj), Some(&mons), "", &prefs, fixture_usage());
+        let w = assemble(
+            recs,
+            Some(&wsj),
+            Some(&mons),
+            "",
+            &prefs,
+            fixture_usage(),
+            fixture_asks(),
+        );
         assert_eq!(
             render_text(&w),
-            "displays\n\
+            "asks\n\
+             \x20 ID  AGE  TYPE      URG   EST  WS  KIND    TITLE     NOTE  STATE\n\
+             \x20 1   0s   question  high  2m   3   claude  Ship it?        open\n\
+             \n\
+             displays\n\
              \x20 ID  NAME   FOCUSED  ACTIVE-WS  SPECIAL\n\
              \x20 1   eDP-1           3\n\
              \x20 2   DP-1   yes      1\n\
@@ -366,7 +431,7 @@ mod tests {
         );
         // degraded: honest per-section notes, agents still tabled
         let (recs, ..) = fixtures();
-        let w = assemble(recs, None, None, "", &BTreeMap::new(), json!({}));
+        let w = assemble(recs, None, None, "", &BTreeMap::new(), json!({}), vec![]);
         let t = render_text(&w);
         assert!(t.starts_with(
             "displays\n\

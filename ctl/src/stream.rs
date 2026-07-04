@@ -8,10 +8,10 @@
 //! (contract in lib.rs).
 //!
 //! Three wake sources fold into one re-evaluation: inotify on the runtime
-//! agent-state dir AND on the persistent map/prefs dir, Hyprland's
-//! `.socket2.sock` event stream, and a slow tick (session pids dying and
-//! markers aging are invisible to inotify). Emissions are deduped on the
-//! serialized result, so a subscriber is never woken for nothing.
+//! agent-state dir, the persistent map/prefs dir AND the asks dir,
+//! Hyprland's `.socket2.sock` event stream, and a slow tick (session pids
+//! dying and markers aging are invisible to inotify). Emissions are deduped
+//! on the serialized result, so a subscriber is never woken for nothing.
 //!
 //! ONE deliberate exception to the engine's read-only role: on
 //! `monitoraddedv2` the arriving output's workspace->display preferences
@@ -38,7 +38,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::{ipc, sys, ws};
+use crate::{asks, ipc, sys, ws};
 
 /// Slow tick: inotify cannot see session pids dying or markers aging past
 /// the GC window, so re-evaluate unconditionally this often.
@@ -187,10 +187,13 @@ fn session(
         .map(Path::to_path_buf)
         .unwrap_or_default();
     fs::create_dir_all(&files_dir)?;
-    // One inotify fd, two watches: the runtime agent-state dir and the
-    // persistent map/prefs dir. One trigger filter serves both — each dir's
-    // protocol files are exactly its non-dot entries.
-    let ino = Inotify::new(&[&dir, &files_dir])?;
+    let asks_dir = asks::asks_dir();
+    fs::create_dir_all(&asks_dir)?;
+    // One inotify fd, three watches: the runtime agent-state dir, the
+    // persistent map/prefs dir, and the asks dir. One trigger filter serves
+    // all of them — each dir's protocol files are exactly its non-dot
+    // entries.
+    let ino = Inotify::new(&[&dir, &files_dir, &asks_dir])?;
     // Compositor events; None = degraded mode (no Hyprland), files-only.
     let mut sock = EventSock::connect();
     // Re-init entry: state may have moved while we were broken (dedupe
@@ -298,10 +301,10 @@ fn emit(prev: &mut Option<String>, cur: &str, framing: Framing) -> io::Result<()
 
 /// Should an event on this dir entry trigger a re-evaluation? Non-dot,
 /// non-debug.log names are exactly the protocol files (session files and
-/// markers in the runtime dir; `map` and `prefs` in the persistent dir) —
-/// dotfiles are writers' in-flight temp files and locks, and debug.log is
-/// diagnostics. An empty name is an event about a watched dir itself, not
-/// an entry.
+/// markers in the runtime dir; `map` and `prefs` in the persistent dir;
+/// `asks.json` and `order` in the asks dir) — dotfiles are writers'
+/// in-flight temp files and locks, and debug.log is diagnostics. An empty
+/// name is an event about a watched dir itself, not an entry.
 pub fn name_triggers(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && name != "debug.log"
 }
@@ -596,17 +599,21 @@ mod tests {
     }
 
     #[test]
-    fn trigger_filter_covers_both_watched_dirs() {
+    fn trigger_filter_covers_all_watched_dirs() {
         // runtime dir: session files and markers trigger
         assert!(name_triggers("0198f2-uuid")); // session file
         assert!(name_triggers("0198f2-uuid.9d0aa1")); // marker
         // persistent dir: the map and prefs files trigger
         assert!(name_triggers("map"));
         assert!(name_triggers("prefs"));
+        // asks dir: the store and its order file trigger
+        assert!(name_triggers("asks.json"));
+        assert!(name_triggers("order"));
         // dotfiles are temp writes and locks; debug.log is diagnostics
         assert!(!name_triggers(".sid.tmp")); // hook temp
         assert!(!name_triggers(".map.tmp")); // map temp
         assert!(!name_triggers(".prefs.tmp")); // prefs temp
+        assert!(!name_triggers(".asks.json.tmp")); // asks store temp
         assert!(!name_triggers(".lock")); // state-file write lock
         assert!(!name_triggers(".apply.lock")); // applier election
         assert!(!name_triggers("debug.log"));

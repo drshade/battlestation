@@ -39,6 +39,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AgentsCmd,
     },
+    /// The attention queue: agents post asks, the human triages
+    Asks {
+        #[command(subcommand)]
+        cmd: AsksCmd,
+    },
     /// The full state of the world: displays, battlespaces, prefs, agents, usage
     Status {
         #[arg(long, value_enum, default_value = "text")]
@@ -497,6 +502,139 @@ impl ScaleActionArgs {
     }
 }
 
+// ---- asks ------------------------------------------------------------------------
+
+#[derive(Clone, Copy, ValueEnum)]
+enum AskType {
+    Question,
+    Review,
+    Notify,
+}
+
+impl AskType {
+    fn as_str(self) -> &'static str {
+        match self {
+            AskType::Question => "question",
+            AskType::Review => "review",
+            AskType::Notify => "notify",
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Urgency {
+    Low,
+    Medium,
+    High,
+}
+
+impl Urgency {
+    fn as_str(self) -> &'static str {
+        match self {
+            Urgency::Low => "low",
+            Urgency::Medium => "medium",
+            Urgency::High => "high",
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum AsksCmd {
+    /// Post one ask; prints its id (the MCP server is the usual caller)
+    Post {
+        #[arg(long, value_enum)]
+        r#type: AskType,
+        /// One-line summary (the queue row)
+        #[arg(long)]
+        title: String,
+        /// The full question/request text
+        #[arg(long, default_value = "")]
+        body: String,
+        /// A choice for A/B questions (repeatable)
+        #[arg(long = "option")]
+        options: Vec<String>,
+        #[arg(long, value_enum, default_value = "medium")]
+        urgency: Urgency,
+        /// Estimated HUMAN minutes needed to handle this
+        #[arg(long)]
+        estimate_min: Option<i64>,
+        /// The posting harness kind
+        #[arg(long, default_value = "")]
+        kind: String,
+        /// The posting session id
+        #[arg(long, default_value = "")]
+        session: String,
+        /// The posting session's workspace
+        #[arg(long)]
+        ws: Option<i64>,
+    },
+    /// The resolved queue (or one ask's detail with --id)
+    Get {
+        #[command(flatten)]
+        filter: AsksFilterSel,
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+        /// Keep emitting the result whenever it changes (json: NDJSON; text: live view)
+        #[arg(long)]
+        stream: bool,
+    },
+    /// Answer an open ask (the asker collects it from the store)
+    Answer {
+        id: i64,
+        #[arg(required = true)]
+        text: Vec<String>,
+    },
+    /// Drop an ask from the queue (any state; idempotent)
+    Dismiss { id: i64 },
+    /// Quick-tag an ask ("working on it"); empty text clears
+    Note { id: i64, text: Vec<String> },
+    /// Agent-side self-update: urgency and/or estimate (escalation lives here)
+    Update {
+        id: i64,
+        #[command(flatten)]
+        fields: AsksUpdateFields,
+    },
+    /// The human's queue order (FIFO where unset; agents never reorder)
+    Order {
+        #[command(subcommand)]
+        cmd: AsksOrderCmd,
+    },
+}
+
+/// asks get's optional narrowing: one ask or one session's asks.
+#[derive(Args)]
+#[group(required = false, multiple = false)]
+struct AsksFilterSel {
+    /// One ask, full detail (any state, dismissed included)
+    #[arg(long)]
+    id: Option<i64>,
+    /// Only this session's asks
+    #[arg(long)]
+    session: Option<String>,
+}
+
+/// asks update's fields: at least one required.
+#[derive(Args)]
+#[group(required = true, multiple = true)]
+struct AsksUpdateFields {
+    #[arg(long, value_enum)]
+    urgency: Option<Urgency>,
+    /// Estimated HUMAN minutes needed to handle this
+    #[arg(long)]
+    estimate_min: Option<i64>,
+}
+
+#[derive(Subcommand)]
+enum AsksOrderCmd {
+    /// Write the order: ask ids, first = next up (the FULL list)
+    Set {
+        #[arg(required = true)]
+        ids: Vec<i64>,
+    },
+    /// Print the raw order file
+    Get,
+}
+
 // ---- agents ----------------------------------------------------------------------
 
 #[derive(Subcommand)]
@@ -682,6 +820,68 @@ fn main() {
             AgentsCmd::Usage { kind, format } => {
                 bsctl::usage::get(kind.as_deref(), format == Format::Json)
             }
+        },
+        Cmd::Asks { cmd } => match cmd {
+            AsksCmd::Post {
+                r#type,
+                title,
+                body,
+                options,
+                urgency,
+                estimate_min,
+                kind,
+                session,
+                ws,
+            } => bsctl::asks::post(
+                r#type.as_str(),
+                &title,
+                &body,
+                &options,
+                urgency.as_str(),
+                estimate_min,
+                &kind,
+                &session,
+                ws,
+            ),
+            AsksCmd::Get {
+                filter,
+                format,
+                stream,
+            } => {
+                if stream {
+                    let json = format == Format::Json;
+                    let session = filter.session.clone();
+                    // --id is a one-shot record lookup, not a queue view;
+                    // streaming it would re-emit a single row's age forever.
+                    if filter.id.is_some() {
+                        eprintln!("bsctl asks get: --stream streams the queue, not --id");
+                        exit(2);
+                    }
+                    bsctl::stream::run(
+                        move || {
+                            let s = session.as_deref();
+                            Ok(if json {
+                                bsctl::asks::get_json(s)
+                            } else {
+                                bsctl::asks::get_text(s)
+                            })
+                        },
+                        framing(format),
+                    )
+                } else {
+                    bsctl::asks::get(filter.id, filter.session.as_deref(), format == Format::Json)
+                }
+            }
+            AsksCmd::Answer { id, text } => bsctl::asks::answer(id, &text.join(" ")),
+            AsksCmd::Dismiss { id } => bsctl::asks::dismiss(id),
+            AsksCmd::Note { id, text } => bsctl::asks::note(id, &text.join(" ")),
+            AsksCmd::Update { id, fields } => {
+                bsctl::asks::update(id, fields.urgency.map(Urgency::as_str), fields.estimate_min)
+            }
+            AsksCmd::Order { cmd } => match cmd {
+                AsksOrderCmd::Set { ids } => bsctl::asks::order_set(&ids),
+                AsksOrderCmd::Get => bsctl::asks::order_get(),
+            },
         },
         Cmd::Status { format, stream } => {
             if stream {

@@ -109,6 +109,54 @@
 //! the `status` world feed emits the identical rows (shared code, so the
 //! two surfaces can never drift).
 //!
+//! # The asks queue (`bsctl asks`)
+//!
+//! Attention requests: agents post asks — questions, review requests,
+//! FYIs — into one shared queue and the human triages them from one
+//! surface. The store is the SOURCE OF TRUTH and RPCs are ephemeral: an
+//! ask outlives any connection (the stage-2 MCP `ask` tool may block
+//! briefly on a fresh ask as a fast path, but a timeout returns "ask #N
+//! still open" and the answer lands here to be collected later — an
+//! in-flight RPC is state in the wrong place over hour-scale waits).
+//!
+//! State lives in `${XDG_RUNTIME_DIR:-/tmp}/battlestation-asks/` — its own
+//! dir, a SIBLING of battlestation-ws (the session scan owns that dir's
+//! non-dot namespace, and the stream engine's trigger filter serves whole
+//! directories). Runtime lifetime on purpose: asks reference sessions and
+//! neither survives a reboot. Two files: `asks.json`, one object
+//! `{"next_id": <int>, "asks": [{id, session, kind, ws, type, title,
+//! body, options, urgency, estimate_min, note, state, answer, created,
+//! answered_at}]}` written atomically (a corrupt store reads as fresh —
+//! the ids it named are gone with it); and `order`, the HUMAN's queue
+//! order (ask ids, map-file format). Writers hold a blocking exclusive
+//! flock on `<dir>/.lock` across read-modify-write; readers ride the
+//! atomic renames lock-free (the map/prefs locking rule).
+//!
+//! TWO OWNERSHIP NAMESPACES, never one field. Agents own `urgency`
+//! (low|medium|high) and `estimate_min` (their estimate of HUMAN minutes
+//! needed) — `asks update` may change exactly those, so escalation means
+//! "my urgency rose", never "I moved myself up". The human owns the rest:
+//! `answer` (open asks only — re-answering would clobber what the asker
+//! may have collected), `note` (the freeform quick-tag: "working on it";
+//! visible to every agent through the stream — the human half of the
+//! coordination conversation), dismissal, and the ORDER: the queue is
+//! FIFO by `created`, and only the human reorders (`asks order set`, the
+//! panel drag). POSTING IS MANDATORY, NOT JUDGED: an agent needing
+//! feedback MUST post — proceeding without feedback is the failure mode,
+//! and queue depth is never a reason to self-censor. The norm is carried
+//! by the stage-2 MCP tool descriptions (the one prompt surface every
+//! session gets) plus each harness's stowed global instructions.
+//!
+//! Resolved queue order, emitted by every reader: open asks the order
+//! file lists (in list order, tokens matching ids textually), then
+//! remaining open asks FIFO by `created`, then answered-but-not-dismissed
+//! asks (FIFO — awaiting collection; the order file deliberately does not
+//! apply to them, they are past triage). Dismissed asks are excluded
+//! everywhere except `asks get --id`, the direct record lookup (any
+//! state — the debugging view). States: open -> answered (the human
+//! replied) or -> dismissed (from ANY state: dismissing an open ask is
+//! declining to answer; idempotent, unknown ids are quiet).
+//!
 //! # The battlespace map (`bsctl ws map`)
 //!
 //! Navigate/move by BATTLESPACE instead of Hyprland's immutable workspace
@@ -191,11 +239,13 @@
 //! # The world (`bsctl status`)
 //!
 //! The full state in one object — text is the at-a-glance human overview
-//! (displays, their battlespaces, agents, prefs waiting for absent
-//! displays), json is the machine feed and, with `--stream`, THE
+//! (the asks queue FIRST — who needs you outranks what the desk looks
+//! like — then displays, their battlespaces, agents, prefs waiting for
+//! absent displays), json is the machine feed and, with `--stream`, THE
 //! subscription the widget lives on. Schema (one compact line):
 //!
-//! `{"displays": [{id, name, x, y, focused, activeWs, specialShowing}],
+//! `{"asks": [ ...exactly `asks get`'s resolved rows... ],
+//!   "displays": [{id, name, x, y, focused, activeWs, specialShowing}],
 //!   "workspaces": [{ws, bs, name, display, windows, active, pref}],
 //!   "prefs": [{ws, display, present, live}],
 //!   "agents": [ ...exactly `agents get`'s rows... ],
@@ -209,12 +259,14 @@
 //! would read as a true empty world — so a consumer keeps its last state
 //! across a compositor restart. `prefs` is file truth and always present,
 //! but its annotations degrade to null without a compositor to ask;
-//! `agents` is file+proc truth and never nulls.
+//! `asks` is file truth ([] when the queue is empty, never null) and
+//! `agents` is file+proc truth — neither nulls.
 //!
 //! # Streaming (`--stream`)
 //!
-//! Any subscriber-shaped query — `status`, `agents get`, `ws map get`,
-//! `ws prefs get`, `display get` — takes `--stream`: emit the full result
+//! Any subscriber-shaped query — `status`, `agents get`, `asks get`,
+//! `ws map get`, `ws prefs get`, `display get` — takes `--stream`: emit
+//! the full result
 //! now, then re-emit it whenever it changes. `--stream` is orthogonal to
 //! `--format`; the FRAMING follows the format. json: NDJSON, one compact
 //! line per emission — the machine dialect. text: the same renders framed
@@ -230,8 +282,8 @@
 //! machinery no longer exist.
 //!
 //! The engine folds three wake sources into one re-evaluation: ONE inotify
-//! fd watching both the runtime agent-state dir and the persistent
-//! map/prefs dir (each dir's protocol files are exactly its non-dot
+//! fd watching the runtime agent-state dir, the persistent map/prefs dir
+//! and the asks dir (each dir's protocol files are exactly its non-dot
 //! entries), Hyprland's `.socket2.sock` event stream, and a 10s tick
 //! (session pids dying and markers aging are invisible to inotify). Bursts
 //! coalesce ~50ms (bounded rounds so a steady stream can't starve
@@ -430,6 +482,7 @@
 //! degraded mode.
 
 pub mod agents;
+pub mod asks;
 pub mod display;
 pub mod ipc;
 pub mod proto;
