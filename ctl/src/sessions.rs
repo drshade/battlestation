@@ -146,9 +146,9 @@ pub fn scan(now: f64, dir: &Path, proj: &Path) -> Vec<Value> {
 /// The session whose record carries `pid` — the MCP server's identity
 /// resolution: its own /proc ancestor walk names the harness process, and
 /// the session file that recorded the same pid IS its session. Returns
-/// (sid, ws). A plain read, no sweeping — identity lookups must not race
-/// the scans that own GC.
-pub fn session_by_pid(dir: &Path, pid: i64) -> Option<(String, Option<i64>)> {
+/// (sid, ws, win). A plain read, no sweeping — identity lookups must not
+/// race the scans that own GC.
+pub fn session_by_pid(dir: &Path, pid: i64) -> Option<(String, Option<i64>, Option<String>)> {
     for e in fs::read_dir(dir).ok()?.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         if name.starts_with('.') || name == "debug.log" || proto::split_marker_name(&name).is_some()
@@ -162,7 +162,14 @@ pub fn session_by_pid(dir: &Path, pid: i64) -> Option<(String, Option<i64>)> {
             continue;
         };
         if rec.get("pid").and_then(proto::py_int) == Some(pid) {
-            return Some((name, rec.get("ws").and_then(proto::py_int)));
+            return Some((
+                name,
+                rec.get("ws").and_then(proto::py_int),
+                rec.get("win")
+                    .and_then(Value::as_str)
+                    .filter(|w| !w.is_empty())
+                    .map(str::to_string),
+            ));
         }
     }
     None

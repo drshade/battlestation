@@ -9,7 +9,10 @@
 //! The tool DESCRIPTIONS carry the posting norm (the one prompt surface
 //! every session of every harness receives) — treat their wording as
 //! contract, not copy. So does the initialize result's `instructions`
-//! field, for clients that surface it.
+//! field, for clients that surface it (which also names the agent's own
+//! session when identity resolved by handshake time; `whoami` is the
+//! reliable path otherwise, and ask rows carry a computed `mine` so an
+//! agent never derives its own session id to recognize its asks).
 //!
 //! The agent owns its wait: `ask` takes `wait_secs` (0 = fire-and-forget;
 //! omitted = the server's --block-secs default; capped at 24h). Because a
@@ -129,7 +132,9 @@ pub fn tools_json() -> Value {
         {
             "name": "list_asks",
             "description": "The current attention queue in triage order, every agent's asks included \
-                            (age, urgency, estimate, the human's notes). Transparency for coordination — \
+                            (age, urgency, estimate, the human's notes). Rows are labeled `mine: true` \
+                            when they originated from your session — no need to derive your own \
+                            session id to recognize your asks. Transparency for coordination — \
                             seeing a deep queue is NOT permission to skip posting; the posting norm is \
                             unconditional.",
             "inputSchema": {"type": "object", "properties": {}},
@@ -139,9 +144,9 @@ pub fn tools_json() -> Value {
             "description": "One ask by id, any state — how you collect an answer that arrived after \
                             ask's wait window, or re-check one of your open asks. Collecting your \
                             OWN answered ask marks it delivered (the human's queue reflects that the \
-                            answer reached you). NOTE: answer text on a still-OPEN ask is the human \
-                            drafting a reply — visible for context, but not final until the ask's \
-                            state is answered.",
+                            answer reached you). The record carries `mine` like list_asks rows. NOTE: \
+                            answer text on a still-OPEN ask is the human drafting a reply — visible \
+                            for context, but not final until the ask's state is answered.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"id": {"type": "integer", "description": "The ask id"}},
@@ -169,6 +174,15 @@ pub fn tools_json() -> Value {
                             (battlespace order), workspace->display preferences, every agent session's \
                             status, plan usage, and human presence (state + seconds idle — how long \
                             since the human last touched the desk). Read-only.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "whoami",
+            "description": "Your own session identity on this desk: {session, kind, ws, win}. Match \
+                            `session` against ask rows or agent rows (ask rows already carry a \
+                            computed `mine`). Fields are null when this session isn't registered \
+                            (yet) — identity resolves lazily, so a null now may resolve on a later \
+                            call.",
             "inputSchema": {"type": "object", "properties": {}},
         },
     ])
@@ -295,18 +309,36 @@ pub fn classify_midblock(line: &str, ask_req_id: &Value, ask_id: i64) -> MidBloc
 /// the server often spawns before the first hook writes the session file.
 struct Identity {
     kind: String,
-    resolved: Option<(String, Option<i64>)>,
+    resolved: Option<(String, Option<i64>, Option<String>)>,
 }
 
 impl Identity {
-    fn get(&mut self) -> (String, Option<i64>) {
+    /// (session, ws, win) — empty session / nulls while unresolved.
+    fn get(&mut self) -> (String, Option<i64>, Option<String>) {
         if self.resolved.is_none() {
             let (_, harness) = sys::ancestor_chain(&self.kind);
             self.resolved =
                 harness.and_then(|pid| sessions::session_by_pid(&sys::state_dir(), pid));
         }
-        self.resolved.clone().unwrap_or((String::new(), None))
+        self.resolved.clone().unwrap_or((String::new(), None, None))
     }
+}
+
+/// The ownership rule shared by delivery stamping and the `mine` label:
+/// both identities non-empty AND equal. An unresolved server (empty
+/// session) must never own anything via the empty==empty accident, and a
+/// row with no session belongs to nobody.
+pub fn owns(session: &str, owner: &str) -> bool {
+    !session.is_empty() && !owner.is_empty() && session == owner
+}
+
+/// An ask row as the MCP surface emits it: the stored record plus a
+/// computed `mine` — server-side labeling so an agent never has to derive
+/// its own session id to recognize its asks. MCP-only: the CLI, world and
+/// stream rows have no caller identity to compute it against.
+fn with_mine(mut r: Value, session: &str) -> Value {
+    r["mine"] = json!(owns(session, &crate::proto::field(&r, "session")));
+    r
 }
 
 /// Raw line reader over fd 0 with a carry buffer — BufReader would hide
@@ -518,7 +550,7 @@ fn call_tool(
             if s("title").is_empty() {
                 return done(tool_text("title is required", true));
             }
-            let (session, ws) = srv.identity.get();
+            let (session, ws, _) = srv.identity.get();
             let ask_type = if name == "ask" {
                 "question"
             } else if s("type") == "review" {
@@ -566,20 +598,24 @@ fn call_tool(
                 BlockOutcome::Eof => Flow::Shutdown,
             }
         }
-        "list_asks" => done(tool_text(&asks::get_json(None), false)),
+        "list_asks" => {
+            let (session, _, _) = srv.identity.get();
+            let rows: Vec<Value> = asks::rows_json(None)
+                .into_iter()
+                .map(|r| with_mine(r, &session))
+                .collect();
+            done(tool_text(&Value::Array(rows).to_string(), false))
+        }
         "get_ask" => match args.get("id").and_then(Value::as_i64) {
             Some(id) => match asks::record(id) {
                 Some(r) => {
                     // Stamp point 2 of 2: an answered ask returning to the
-                    // session that POSTED it is a collection. Both sides
-                    // must be non-empty — an unresolved server (empty
-                    // identity) must never stamp on the empty==empty
-                    // accident; a foreign session peeking is not delivery.
-                    let (session, _) = srv.identity.get();
-                    let owner = crate::proto::field(&r, "session");
+                    // session that POSTED it is a collection ([`owns`] — an
+                    // unresolved server must never stamp on the empty==empty
+                    // accident; a foreign session peeking is not delivery).
+                    let (session, _, _) = srv.identity.get();
                     let collected = crate::proto::field(&r, "state") == "answered"
-                        && !session.is_empty()
-                        && owner == session;
+                        && owns(&session, &crate::proto::field(&r, "session"));
                     if collected {
                         asks::mark_delivered(id);
                     }
@@ -591,7 +627,7 @@ fn call_tool(
                     } else {
                         r
                     };
-                    done(tool_text(&r.to_string(), false))
+                    done(tool_text(&with_mine(r, &session).to_string(), false))
                 }
                 None => done(tool_text(&format!("no ask {id}"), true)),
             },
@@ -601,7 +637,7 @@ fn call_tool(
             let Some(id) = args.get("id").and_then(Value::as_i64) else {
                 return done(tool_text("id is required", true));
             };
-            let (session, _) = srv.identity.get();
+            let (session, _, _) = srv.identity.get();
             let owner = asks::record(id)
                 .map(|r| crate::proto::field(&r, "session"))
                 .unwrap_or_default();
@@ -630,6 +666,19 @@ fn call_tool(
             }
         }
         "world" => done(tool_text(&world::snapshot().to_string(), false)),
+        "whoami" => {
+            let (session, ws, win) = srv.identity.get();
+            done(tool_text(
+                &json!({
+                    "session": (!session.is_empty()).then_some(session),
+                    "kind": srv.identity.kind,
+                    "ws": ws,
+                    "win": win,
+                })
+                .to_string(),
+                false,
+            ))
+        }
         other => done(tool_text(&format!("unknown tool {other}"), true)),
     }
 }
@@ -652,6 +701,16 @@ fn handle_line(line: &str, srv: &mut Srv, out: &mut impl Write) -> Flow {
                 .get("protocolVersion")
                 .and_then(Value::as_str)
                 .unwrap_or("");
+            // Identity at handshake time, when it resolves this early — the
+            // agent learns its session with zero tool calls. Unresolved:
+            // say nothing (it may resolve later; whoami is the reliable
+            // path and its description says so).
+            let (session, ws, _) = srv.identity.get();
+            let ident = match (session.as_str(), ws) {
+                ("", _) => String::new(),
+                (s, Some(w)) => format!(" You are session {s} on ws {w}."),
+                (s, None) => format!(" You are session {s}."),
+            };
             Flow::Respond(rpc_result(
                 &id,
                 json!({
@@ -660,7 +719,7 @@ fn handle_line(line: &str, srv: &mut Srv, out: &mut impl Write) -> Flow {
                     "serverInfo": {"name": "bsctl", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": format!(
                         "This server is the desktop's shared attention queue. {NORM} \
-                         Use notify for anything the human should see without needing an answer."),
+                         Use notify for anything the human should see without needing an answer.{ident}"),
                 }),
             ))
         }
@@ -764,7 +823,8 @@ mod tests {
                 "list_asks",
                 "get_ask",
                 "update_ask",
-                "world"
+                "world",
+                "whoami"
             ]
         );
         for t in tools.as_array().unwrap() {
@@ -798,10 +858,11 @@ mod tests {
     fn protocol_shapes() {
         let mut ident = Identity {
             kind: "claude".into(),
-            resolved: Some((String::new(), None)),
+            resolved: Some((String::new(), None, None)),
         };
         let mut sink = Vec::new();
-        // initialize echoes a known version and carries instructions
+        // initialize echoes a known version and carries instructions —
+        // WITHOUT the identity sentence while the session is unresolved
         let resp = drive(
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
             &mut ident, &mut sink,
@@ -810,7 +871,28 @@ mod tests {
         let v: Value = serde_json::from_str(&resp).unwrap();
         assert_eq!(v["result"]["protocolVersion"], "2025-03-26");
         assert_eq!(v["result"]["serverInfo"]["name"], "bsctl");
-        assert!(!v["result"]["instructions"].as_str().unwrap().is_empty());
+        let instr = v["result"]["instructions"].as_str().unwrap();
+        assert!(!instr.is_empty());
+        assert!(!instr.contains("You are session"), "{instr}");
+        // a resolved identity rides the handshake instructions
+        let mut known = Identity {
+            kind: "claude".into(),
+            resolved: Some(("sess-x".into(), Some(3), None)),
+        };
+        let resp = drive(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
+            &mut known, &mut sink,
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(
+            v["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("You are session sess-x on ws 3."),
+            "{}",
+            v["result"]["instructions"]
+        );
         // notifications produce nothing
         assert!(
             drive(
@@ -846,6 +928,28 @@ mod tests {
         let parse = drive("not json", &mut ident, &mut sink).unwrap();
         assert!(parse.contains("-32700"));
         assert!(sink.is_empty(), "no progress without a blocked ask");
+    }
+
+    #[test]
+    fn ownership_requires_both_sides_non_empty_and_equal() {
+        assert!(owns("sess-1", "sess-1"));
+        assert!(!owns("sess-1", "sess-2"));
+        // the empty==empty accident: an unresolved server owns NOTHING,
+        // and a session-less row belongs to nobody
+        assert!(!owns("", ""));
+        assert!(!owns("", "sess-1"));
+        assert!(!owns("sess-1", ""));
+    }
+
+    #[test]
+    fn with_mine_labels_rows() {
+        let row = json!({"id": 1, "session": "sess-1", "state": "open"});
+        assert_eq!(with_mine(row.clone(), "sess-1")["mine"], true);
+        assert_eq!(with_mine(row.clone(), "sess-2")["mine"], false);
+        assert_eq!(with_mine(row, "")["mine"], false);
+        // a session-less row is nobody's even for a resolved server
+        let anon = json!({"id": 2, "session": "", "state": "open"});
+        assert_eq!(with_mine(anon, "sess-1")["mine"], false);
     }
 
     #[test]

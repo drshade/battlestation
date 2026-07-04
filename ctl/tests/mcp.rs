@@ -88,6 +88,7 @@ impl TestEnv {
             stdin,
             stdout,
             next_id: 1,
+            instructions: String::new(),
         };
         let init = c.request(
             "initialize",
@@ -95,6 +96,7 @@ impl TestEnv {
                    "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}),
         );
         assert_eq!(init["protocolVersion"], "2025-06-18");
+        c.instructions = init["instructions"].as_str().unwrap_or("").to_string();
         c.notify("notifications/initialized", json!({}));
         c
     }
@@ -118,6 +120,9 @@ struct McpClient {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     next_id: i64,
+    /// The initialize result's instructions — the identity-sentence tests
+    /// read it after the handshake dance.
+    instructions: String,
 }
 
 impl McpClient {
@@ -203,7 +208,8 @@ fn handshake_tools_and_the_norm() {
             "list_asks",
             "get_ask",
             "update_ask",
-            "world"
+            "world",
+            "whoami"
         ]
     );
     for t in tools["tools"].as_array().unwrap() {
@@ -373,6 +379,104 @@ fn empty_identity_never_stamps_delivery() {
         r["delivered_at"].is_null(),
         "empty identity must never stamp: {r}"
     );
+}
+
+#[test]
+fn whoami_and_mine_label_own_asks() {
+    let env = TestEnv::new("whoami");
+    // The delivery tests' identity fabrication: comm-matched kind + a
+    // session file recording this process's pid = a resolved identity.
+    let comm = fs::read_to_string("/proc/self/comm").unwrap();
+    let kind = comm.trim().to_string();
+    let ws_dir = env.run.join("battlestation-ws");
+    fs::create_dir_all(&ws_dir).unwrap();
+    fs::write(
+        ws_dir.join("sess-own"),
+        json!({"ws": 7, "win": "0xabc123", "status": "waiting", "kind": kind,
+               "title": "", "pid": std::process::id()})
+        .to_string(),
+    )
+    .unwrap();
+    // Identity resolved BEFORE spawn -> the handshake instructions name it.
+    let mut c = env.server_with_kind(&kind, 0);
+    assert!(
+        c.instructions.contains("You are session sess-own on ws 7."),
+        "{}",
+        c.instructions
+    );
+
+    // whoami: the resolved identity, win included.
+    let (text, is_err) = c.call("whoami", json!({}));
+    assert!(!is_err);
+    let who: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(who["session"], "sess-own");
+    assert_eq!(who["kind"], kind);
+    assert_eq!(who["ws"], 7);
+    assert_eq!(who["win"], "0xabc123");
+
+    // Three asks: own, foreign, session-less.
+    env.asks(&[
+        "post",
+        "--type",
+        "question",
+        "--title",
+        "mine",
+        "--session",
+        "sess-own",
+    ]);
+    env.asks(&[
+        "post",
+        "--type",
+        "question",
+        "--title",
+        "theirs",
+        "--session",
+        "s-other",
+    ]);
+    env.asks(&["post", "--type", "question", "--title", "anon"]);
+    let (text, _) = c.call("list_asks", json!({}));
+    let rows: Value = serde_json::from_str(&text).unwrap();
+    let mine_of = |title: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["title"] == title)
+            .unwrap()["mine"]
+            .clone()
+    };
+    assert_eq!(mine_of("mine"), true);
+    assert_eq!(mine_of("theirs"), false);
+    assert_eq!(mine_of("anon"), false, "session-less rows belong to nobody");
+    // get_ask carries the label too.
+    let (text, _) = c.call("get_ask", json!({"id": 1}));
+    let r: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(r["mine"], true);
+    let (text, _) = c.call("get_ask", json!({"id": 2}));
+    let r: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(r["mine"], false);
+}
+
+#[test]
+fn whoami_unresolved_is_honest_nulls() {
+    let env = TestEnv::new("whoami-null");
+    let mut c = env.server(0); // no session files: unresolved forever
+    assert!(
+        !c.instructions.contains("You are session"),
+        "unresolved identity must not be promised at handshake: {}",
+        c.instructions
+    );
+    let (text, is_err) = c.call("whoami", json!({}));
+    assert!(!is_err);
+    let who: Value = serde_json::from_str(&text).unwrap();
+    assert!(who["session"].is_null());
+    assert_eq!(who["kind"], "claude");
+    assert!(who["ws"].is_null());
+    assert!(who["win"].is_null());
+    // and every row reads mine: false under an unresolved identity
+    env.asks(&["post", "--type", "notify", "--title", "x"]);
+    let (text, _) = c.call("list_asks", json!({}));
+    let rows: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(rows[0]["mine"], false);
 }
 
 #[test]

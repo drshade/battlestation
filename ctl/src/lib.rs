@@ -208,7 +208,16 @@
 //! harness process (comm == kind, the hook rule) and the session file
 //! recording that pid IS the session; its sid + ws ride every posted ask.
 //! Unresolvable (headless, hooks not yet fired) degrades to posting with
-//! empty session/null ws and retries per call — never fails.
+//! empty session/null ws and retries per call — never fails. The identity
+//! is also HANDED TO THE AGENT rather than left to archaeology: `whoami`
+//! returns {session, kind, ws, win} (nulls while unresolved — it may
+//! resolve on a later call), ask rows from list_asks/get_ask carry a
+//! computed `mine` (the ownership rule: both sides non-empty and equal —
+//! the delivered-stamp guard, one shared predicate), and when identity
+//! has resolved by handshake time the initialize instructions name it
+//! ("You are session `<sid>` on ws `<n>`."). `mine` is MCP-surface only: the
+//! CLI, world and stream rows have no caller identity to compute it
+//! against.
 //!
 //! TOOLS: `ask` (post a question, store-first, then block awaiting the
 //! answer; answered -> the answer text, dismissed -> "proceed on judgment,
@@ -221,7 +230,8 @@
 //! answered ask is delivery stamp point 2), `update_ask` (urgency/estimate only, own
 //! asks only — the two-namespaces rule enforced at the tool boundary),
 //! `world` (the status object; the MVP deliberately exposes NO mutating
-//! world tools — that needs the consent design). The tool DESCRIPTIONS
+//! world tools — that needs the consent design), `whoami` (the server's
+//! resolved identity, above). The tool DESCRIPTIONS
 //! carry the mandatory-post norm — they are the one prompt surface every
 //! session of every harness receives — as does the initialize
 //! `instructions` field; their wording is contract, not copy.
