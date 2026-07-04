@@ -331,7 +331,8 @@ Item {
   //    "workspaces": [{ws, bs, name, display, windows, active, pref}],
   //    "prefs": [{ws, display, present, live}],
   //    "asks": [{id, session, kind, ws, type, title, body, options, urgency,
-  //              estimate_min, note, state, answer, created, answered_at}],
+  //              estimate_min, note, state, answer, created, answered_at,
+  //              delivered_at}],
   //    "agents": [{session, kind, status, ws, title,
   //                subagents: [{id, type, description, started}]}]}
   // `agents` is the self-cleaning session pass (dead-pid sessions, orphan

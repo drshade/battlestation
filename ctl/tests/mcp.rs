@@ -61,12 +61,18 @@ impl TestEnv {
 
     /// Spawn the MCP server and run the initialize dance.
     fn server(&self, block_secs: u64) -> McpClient {
+        self.server_with_kind("claude", block_secs)
+    }
+
+    /// [`Self::server`] with an explicit kind — the delivery tests pass the
+    /// test process's own comm so identity resolution finds a real session.
+    fn server_with_kind(&self, kind: &str, block_secs: u64) -> McpClient {
         let mut child = self
             .cmd()
             .args([
                 "mcp",
                 "--kind",
-                "claude",
+                kind,
                 "--block-secs",
                 &block_secs.to_string(),
             ])
@@ -265,6 +271,108 @@ fn ask_fast_path_returns_the_answer_mid_block() {
     answerer.join().unwrap();
     assert!(!is_err);
     assert_eq!(text, "The human answered ask #1: go with blue");
+    // Delivery stamp point 1: the block returned the answer to its asker,
+    // so delivered_at lands — and the human's table now says so.
+    let row: Value =
+        serde_json::from_str(&env.asks(&["get", "--id", "1", "--format", "json"])).unwrap();
+    assert!(row["delivered_at"].is_f64(), "block return must stamp");
+    assert_eq!(row["state"], "answered", "delivery is not a third state");
+    let table = env.asks(&["get"]);
+    assert!(table.contains("delivered"), "{table}");
+}
+
+#[test]
+fn get_ask_delivery_stamps_own_session_only() {
+    let env = TestEnv::new("deliver-own");
+    // Identity fabrication: the server resolves its session by walking its
+    // /proc ancestors for comm == kind, then matching that pid against the
+    // session files. This test process IS the server's ancestor, so a kind
+    // equal to our own comm plus a session file recording our pid gives
+    // the server a real identity ("sess-own").
+    let comm = fs::read_to_string("/proc/self/comm").unwrap();
+    let kind = comm.trim().to_string();
+    let ws_dir = env.run.join("battlestation-ws");
+    fs::create_dir_all(&ws_dir).unwrap();
+    fs::write(
+        ws_dir.join("sess-own"),
+        json!({"ws": 7, "status": "waiting", "kind": kind, "title": "",
+               "pid": std::process::id()})
+        .to_string(),
+    )
+    .unwrap();
+
+    // Two answered asks: one posted by sess-own, one by a stranger.
+    env.asks(&[
+        "post",
+        "--type",
+        "question",
+        "--title",
+        "mine",
+        "--session",
+        "sess-own",
+    ]);
+    env.asks(&[
+        "post",
+        "--type",
+        "question",
+        "--title",
+        "theirs",
+        "--session",
+        "sess-other",
+    ]);
+    env.asks(&["answer", "1", "yes"]);
+    env.asks(&["answer", "2", "no"]);
+    let undelivered = |id: &str| {
+        let r: Value =
+            serde_json::from_str(&env.asks(&["get", "--id", id, "--format", "json"])).unwrap();
+        r["delivered_at"].is_null()
+    };
+    // CLI writes and reads (the answers + the gets above) never stamp.
+    assert!(
+        undelivered("1") && undelivered("2"),
+        "CLI paths must not stamp"
+    );
+
+    let mut c = env.server_with_kind(&kind, 0);
+    // A FOREIGN answered ask collected by this session: no stamp.
+    let (text, _) = c.call("get_ask", json!({"id": 2}));
+    let r: Value = serde_json::from_str(&text).unwrap();
+    assert!(r["delivered_at"].is_null(), "foreign peek is not delivery");
+    assert!(undelivered("2"));
+    // OUR OWN answered ask: stamped, and the response carries the stamp.
+    let (text, _) = c.call("get_ask", json!({"id": 1}));
+    let r: Value = serde_json::from_str(&text).unwrap();
+    assert!(r["delivered_at"].is_f64(), "own collection stamps: {r}");
+    let first = r["delivered_at"].as_f64().unwrap();
+    // Idempotent: a second collection keeps the FIRST stamp.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let (text, _) = c.call("get_ask", json!({"id": 1}));
+    let r: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        r["delivered_at"].as_f64().unwrap(),
+        first,
+        "first delivery wins"
+    );
+    // Reopen clears the stamp: the next completion is undelivered again.
+    env.asks(&["reopen", "1"]);
+    assert!(undelivered("1"), "reopen must clear delivered_at");
+}
+
+#[test]
+fn empty_identity_never_stamps_delivery() {
+    let env = TestEnv::new("deliver-empty");
+    let mut c = env.server(0); // kind claude, no session files: identity ""
+    // The empty==empty accident: an ask with an empty session (this very
+    // server posted it, unresolved) collected by the same empty-identity
+    // server must NOT read as "own".
+    c.call("ask", json!({"title": "anon", "wait_secs": 0}));
+    env.asks(&["answer", "1", "ok"]);
+    let (text, _) = c.call("get_ask", json!({"id": 1}));
+    let r: Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        r["delivered_at"].is_null(),
+        "empty identity must never stamp: {r}"
+    );
 }
 
 #[test]

@@ -20,6 +20,7 @@
   },
   "metadata": {
     "defaultSettings": {
+      "asksHideDelivered": true,
       "capitalizeNames": true,
       "showUsage": false,
       "overrideThemeColors": false,

@@ -137,9 +137,11 @@ pub fn tools_json() -> Value {
         {
             "name": "get_ask",
             "description": "One ask by id, any state — how you collect an answer that arrived after \
-                            ask's wait window, or re-check one of your open asks. NOTE: answer text \
-                            on a still-OPEN ask is the human drafting a reply — visible for context, \
-                            but not final until the ask's state is answered.",
+                            ask's wait window, or re-check one of your open asks. Collecting your \
+                            OWN answered ask marks it delivered (the human's queue reflects that the \
+                            answer reached you). NOTE: answer text on a still-OPEN ask is the human \
+                            drafting a reply — visible for context, but not final until the ask's \
+                            state is answered.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"id": {"type": "integer", "description": "The ask id"}},
@@ -431,7 +433,13 @@ fn block_on_answer(
     let mut last_progress = started;
     loop {
         match block_verdict(asks::record(id).as_ref()) {
-            Verdict::Answered(a) => return BlockOutcome::Text(answered_text(id, &a)),
+            Verdict::Answered(a) => {
+                // Stamp point 1 of 2: the answer is returning to the asker
+                // RIGHT NOW — the blocking call is the asker's own by
+                // construction, no identity check needed.
+                asks::mark_delivered(id);
+                return BlockOutcome::Text(answered_text(id, &a));
+            }
             Verdict::Dismissed => return BlockOutcome::Text(dismissed_text(id)),
             Verdict::Open => {}
         }
@@ -561,7 +569,30 @@ fn call_tool(
         "list_asks" => done(tool_text(&asks::get_json(None), false)),
         "get_ask" => match args.get("id").and_then(Value::as_i64) {
             Some(id) => match asks::record(id) {
-                Some(r) => done(tool_text(&r.to_string(), false)),
+                Some(r) => {
+                    // Stamp point 2 of 2: an answered ask returning to the
+                    // session that POSTED it is a collection. Both sides
+                    // must be non-empty — an unresolved server (empty
+                    // identity) must never stamp on the empty==empty
+                    // accident; a foreign session peeking is not delivery.
+                    let (session, _) = srv.identity.get();
+                    let owner = crate::proto::field(&r, "session");
+                    let collected = crate::proto::field(&r, "state") == "answered"
+                        && !session.is_empty()
+                        && owner == session;
+                    if collected {
+                        asks::mark_delivered(id);
+                    }
+                    // Re-read so the response the asker sees carries the
+                    // stamp it just caused (a stale copy would say
+                    // undelivered to the very party that delivered it).
+                    let r = if collected {
+                        asks::record(id).unwrap_or(r)
+                    } else {
+                        r
+                    };
+                    done(tool_text(&r.to_string(), false))
+                }
                 None => done(tool_text(&format!("no ask {id}"), true)),
             },
             None => done(tool_text("id is required", true)),

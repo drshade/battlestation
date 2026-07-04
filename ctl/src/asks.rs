@@ -7,8 +7,10 @@
 //! `estimate_min` (via `update`), the human owns `note`, `answer` and the
 //! order file. Reply text and completion are DECOUPLED — `reply` drafts
 //! without releasing a blocked asker, `complete` is the releasing
-//! transition, `answer` composes both. Queue order is FIFO; only the human
-//! reorders.
+//! transition, `answer` composes both. Delivery is TRACKED, not assumed:
+//! `delivered_at` stamps only when the answer reaches its asker (the two
+//! MCP pickup points — see [`mark_delivered`]). Queue order is FIFO; only
+//! the human reorders.
 
 use std::fs;
 use std::io::Write;
@@ -161,6 +163,18 @@ pub fn est(estimate_min: Option<i64>) -> String {
     estimate_min.map(|m| format!("{m}m")).unwrap_or_default()
 }
 
+/// The STATE cell humans read: an answered ask whose answer has actually
+/// reached its asker renders `delivered` (delivered_at is the
+/// discriminator; the JSON `state` stays "answered" — delivery is a fact
+/// about an answered ask, not a third state).
+pub fn state_label(r: &Value) -> String {
+    let state = proto::field(r, "state");
+    if state == "answered" && r.get("delivered_at").and_then(Value::as_f64).is_some() {
+        return "delivered".to_string();
+    }
+    state
+}
+
 /// The queue table, shared by `asks get` and `status`'s asks section so
 /// the two views can't drift.
 pub const ASK_HEADERS: [&str; 10] = [
@@ -181,7 +195,7 @@ pub fn ask_cells(rows: &[Value], now: f64) -> Vec<Vec<String>> {
                 proto::field(r, "kind"),
                 proto::field(r, "title"),
                 proto::field(r, "note"),
-                proto::field(r, "state"),
+                state_label(r),
             ]
         })
         .collect()
@@ -203,7 +217,7 @@ pub fn detail_text(r: &Value, now: f64) -> String {
         .unwrap_or_default();
     let rows = [
         ("id", proto::field(r, "id")),
-        ("state", proto::field(r, "state")),
+        ("state", state_label(r)),
         ("type", proto::field(r, "type")),
         ("urgency", proto::field(r, "urgency")),
         (
@@ -309,6 +323,7 @@ pub fn create(
             "answer": Value::Null,
             "created": sys::now_f64(),
             "answered_at": Value::Null,
+            "delivered_at": Value::Null,
         }));
         match save(next + 1, &asks) {
             Ok(()) => Ok(next),
@@ -473,10 +488,11 @@ pub fn complete(id: i64) -> i32 {
 }
 
 /// `asks reopen <id>` — answered -> open; the reply text is KEPT (it
-/// becomes a draft again) and answered_at clears. One-way hazard, stated
-/// honestly: an asker that already collected the answer (a blocking return
-/// or get_ask) cannot have it recalled — reopen governs the queue, not the
-/// past.
+/// becomes a draft again) and answered_at clears — as does delivered_at:
+/// whatever the NEXT completion says is by definition undelivered. One-way
+/// hazard, stated honestly: an asker that already collected the answer (a
+/// blocking return or get_ask) cannot have it recalled — reopen governs
+/// the queue, not the past.
 pub fn reopen(id: i64) -> i32 {
     modify("reopen", id, |r| {
         let state = proto::field(r, "state");
@@ -485,7 +501,34 @@ pub fn reopen(id: i64) -> i32 {
         }
         r["state"] = json!("open");
         r["answered_at"] = Value::Null;
+        r["delivered_at"] = Value::Null;
         Ok(())
+    })
+}
+
+/// Stamp `delivered_at` — the answer actually REACHED its asker. Exactly
+/// two callers, both MCP-side (the blocking `ask` return and an
+/// own-session `get_ask` collection); CLI reads and the panel never stamp
+/// (a human looking is not delivery — contract in lib.rs). Idempotent
+/// (first delivery wins) and quiet: only an answered, unstamped ask is
+/// touched, and a vanished id is a no-op — delivery marking is
+/// best-effort bookkeeping that must never fail the collection itself.
+pub fn mark_delivered(id: i64) {
+    with_store_lock(|| {
+        let (next, mut asks) = load();
+        let Some(r) = asks
+            .iter_mut()
+            .find(|r| r.get("id").and_then(Value::as_i64) == Some(id))
+        else {
+            return;
+        };
+        if proto::field(r, "state") != "answered" || !r["delivered_at"].is_null() {
+            return;
+        }
+        r["delivered_at"] = json!(sys::now_f64());
+        if let Err(e) = save(next, &asks) {
+            eprintln!("bsctl asks: mark delivered {id}: {e}");
+        }
     })
 }
 
@@ -583,7 +626,26 @@ mod tests {
             "options": [], "urgency": "medium", "estimate_min": Value::Null,
             "note": "", "state": state, "answer": Value::Null,
             "created": created, "answered_at": Value::Null,
+            "delivered_at": Value::Null,
         })
+    }
+
+    #[test]
+    fn state_label_discriminates_delivery() {
+        // delivered only when answered AND stamped
+        let mut r = ask(1, "answered", 0.0);
+        assert_eq!(state_label(&r), "answered");
+        r["delivered_at"] = json!(123.0);
+        assert_eq!(state_label(&r), "delivered");
+        // other states never read as delivered, stamp or not
+        let mut open = ask(2, "open", 0.0);
+        open["delivered_at"] = json!(123.0); // impossible by contract, but honest
+        assert_eq!(state_label(&open), "open");
+        assert_eq!(state_label(&ask(3, "dismissed", 0.0)), "dismissed");
+        // a legacy record without the field is just its state
+        let mut legacy = ask(4, "answered", 0.0);
+        legacy.as_object_mut().unwrap().remove("delivered_at");
+        assert_eq!(state_label(&legacy), "answered");
     }
 
     #[test]

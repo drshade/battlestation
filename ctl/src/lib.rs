@@ -131,11 +131,12 @@
 //! neither survives a reboot. Two files: `asks.json`, one object
 //! `{"next_id": <int>, "asks": [{id, session, kind, ws, type, title,
 //! body, options, urgency, estimate_min, note, state, answer, created,
-//! answered_at}]}` written atomically (a corrupt store reads as fresh —
-//! the ids it named are gone with it); and `order`, the HUMAN's queue
-//! order (ask ids, map-file format). Writers hold a blocking exclusive
-//! flock on `<dir>/.lock` across read-modify-write; readers ride the
-//! atomic renames lock-free (the map/prefs locking rule).
+//! answered_at, delivered_at}]}` written atomically (a corrupt store
+//! reads as fresh — the ids it named are gone with it); and `order`, the
+//! HUMAN's queue order (ask ids, map-file format). Writers hold a
+//! blocking exclusive flock on `<dir>/.lock` across read-modify-write;
+//! readers ride the atomic renames lock-free (the map/prefs locking
+//! rule).
 //!
 //! TWO OWNERSHIP NAMESPACES, never one field. Agents own `urgency`
 //! (low|medium|high) and `estimate_min` (their estimate of HUMAN minutes
@@ -163,16 +164,31 @@
 //! by the stage-2 MCP tool descriptions (the one prompt surface every
 //! session gets) plus each harness's stowed global instructions.
 //!
+//! DELIVERY IS TRACKED, NOT ASSUMED: `delivered_at` stamps only when the
+//! answer actually reaches its asker — exactly two stamp points, both
+//! MCP-side: the blocking `ask` call returning the answer (the asker's
+//! own call by construction), and `get_ask` returning an ANSWERED ask to
+//! the session that posted it (both identities non-empty and equal — an
+//! unresolved server can never stamp on the empty==empty accident, and a
+//! foreign session peeking is not delivery). CLI reads, the panel,
+//! `list_asks` and the world NEVER stamp — a human looking is not
+//! delivery. Idempotent (first delivery wins); `reopen` clears it (the
+//! next completion is undelivered by definition). Tables render an
+//! answered+stamped row as `delivered`; the JSON `state` stays
+//! "answered" with delivered_at as the discriminator (delivery is a fact
+//! about an answered ask, not a third state).
+//!
 //! Resolved queue order, emitted by every reader: open asks the order
 //! file lists (in list order, tokens matching ids textually), then
 //! remaining open asks FIFO by `created`, then answered-but-not-dismissed
-//! asks (FIFO — awaiting collection; the order file deliberately does not
-//! apply to them, they are past triage). Dismissed asks are excluded
-//! everywhere except `asks get --id`, the direct record lookup (any
-//! state — the debugging view). States: open -> answered (complete or
-//! answer) or -> dismissed (from ANY state: dismissing an open ask is
-//! declining to answer; idempotent, unknown ids are quiet); answered ->
-//! open again via reopen.
+//! asks newest-completion-first (`answered_at` descending — the done pile
+//! reads like an archive; the order file deliberately does not apply to
+//! them, they are past triage). Dismissed asks are excluded everywhere
+//! except `asks get --id`, the direct record lookup (any state — the
+//! debugging view). States: open -> answered (complete or answer) or ->
+//! dismissed (from ANY state: dismissing an open ask is declining to
+//! answer; idempotent, unknown ids are quiet); answered -> open again via
+//! reopen.
 //!
 //! # MCP (`bsctl mcp --kind <k>`)
 //!
@@ -198,9 +214,11 @@
 //! answer; answered -> the answer text, dismissed -> "proceed on judgment,
 //! don't re-post" — dismissal is also the human's release valve for a
 //! blocked agent — wait expiry -> "ask #N remains open" as a SUCCESS: the
-//! RPC is only a fast path and the store outlives it), `notify`
-//! (non-blocking review/FYI post), `list_asks` / `get_ask` (the queue and
-//! the late-answer collection), `update_ask` (urgency/estimate only, own
+//! RPC is only a fast path and the store outlives it; the answered
+//! return is also delivery stamp point 1 — see the asks section),
+//! `notify` (non-blocking review/FYI post), `list_asks` / `get_ask` (the
+//! queue and the late-answer collection; an own-session get_ask of an
+//! answered ask is delivery stamp point 2), `update_ask` (urgency/estimate only, own
 //! asks only — the two-namespaces rule enforced at the tool boundary),
 //! `world` (the status object; the MVP deliberately exposes NO mutating
 //! world tools — that needs the consent design). The tool DESCRIPTIONS

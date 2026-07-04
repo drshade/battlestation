@@ -160,12 +160,15 @@ fn post_get_answer_roundtrip() {
     assert!(detail.contains("options  ship | hold"), "{detail}");
     assert!(detail.contains("state    open"), "{detail}");
 
-    // answer: state flips, text lands, tail keeps it visible
+    // answer: state flips, text lands, tail keeps it visible — and the
+    // answer is NOT delivered (only the asker's own MCP collection stamps
+    // that; every CLI path leaves it null)
     let (code, _, _) = env.run(&["asks", "answer", "1", "ship", "it"]);
     assert_eq!(code, 0);
     let q = env.queue_json(&[]);
     assert_eq!(q[0]["state"], "answered");
     assert_eq!(q[0]["answer"], "ship it");
+    assert_eq!(q[0]["delivered_at"], Value::Null);
     // answering again: error naming the state
     let (code, _, err) = env.run(&["asks", "answer", "1", "again"]);
     assert_eq!(code, 1);

@@ -17,7 +17,11 @@
 // empty — an ack is an answer), Reopen walks an answered ask back to open
 // with its text kept as a draft. Rows expand on CLICK anywhere in the row
 // body (single expansion, one ask at a time); answered rows expand to a
-// read-only view of their answer.
+// read-only view of their answer. Delivery is tracked, not assumed: an
+// answered row reads "awaiting pickup" until the asker's own MCP
+// collection stamps delivered_at, then "delivered ✓" — and the
+// default-on "Hide delivered" checkbox drops it from the list the moment
+// that happens (the auto-fade; persisted in pluginSettings).
 //
 // Reordering is a drag HANDLE (the grip at each open row's left edge), not a
 // full-row drag: row bodies keep their clicks, and pressing the handle first
@@ -94,6 +98,26 @@ Item {
   property var askIds: []
   property var askById: ({})
   onAsksRowsChanged: syncAsks()
+  // "Hide delivered" (default ON): a delivered ask is finished business —
+  // asked, answered, and the answer has reached its asker (delivered_at,
+  // stamped only by the asker's own MCP collection; contract in
+  // ctl/src/lib.rs). Hiding on delivery IS the auto-fade: the row vanishes
+  // the moment the agent collects, no timer. Persisted in pluginSettings
+  // so the choice survives panel opens and shell restarts.
+  property bool hideDelivered: true
+  onHideDeliveredChanged: syncAsks()
+  function loadHideDelivered() {
+    if (pluginApi && pluginApi.pluginSettings)
+      hideDelivered = pluginApi.pluginSettings.asksHideDelivered !== false;
+  }
+  onPluginApiChanged: loadHideDelivered()
+  function setHideDelivered(on) {
+    hideDelivered = on;
+    if (pluginApi && pluginApi.pluginSettings) {
+      pluginApi.pluginSettings.asksHideDelivered = on;
+      pluginApi.saveSettings();
+    }
+  }
   function sameIdList(a, b) {
     if (!a || !b || a.length !== b.length)
       return false;
@@ -107,6 +131,12 @@ Item {
     var ids = [];
     var by = {};
     for (var i = 0; i < rows.length; i++) {
+      // The filter lives in the MEMBERSHIP build on purpose: hiding a
+      // freshly-delivered row is a legitimate sequence change (one
+      // rebuild), while a delivered_at landing with the filter OFF is
+      // content-only — ids unchanged, no delegate churn.
+      if (hideDelivered && rows[i].delivered_at)
+        continue;
       ids.push(rows[i].id);
       by[String(rows[i].id)] = rows[i];
     }
@@ -283,7 +313,9 @@ Item {
     if (r.estimate_min)
       parts.push("~" + r.estimate_min + "m of you");
     if (r.state === "answered")
-      parts.push("answered — awaiting pickup");
+      // delivered_at is the honest discriminator: "awaiting pickup" only
+      // while the asker really hasn't collected (contract in ctl/src/lib.rs)
+      parts.push(r.delivered_at ? "delivered ✓" : "answered — awaiting pickup");
     else if (r.answer)
       parts.push("draft: “" + r.answer + "”"); // reply saved, not yet completed
     if (r.note)
@@ -442,6 +474,12 @@ Item {
           font.weight: Style.fontWeightBold
           color: Color.mOnSurface
           Layout.fillWidth: true
+        }
+        NCheckbox {
+          label: "Hide delivered"
+          labelSize: Style.fontSizeS
+          checked: root.hideDelivered
+          onToggled: checked => root.setHideDelivered(checked)
         }
         NIconButton {
           icon: "close"
@@ -841,9 +879,11 @@ Item {
   }
 
   Component.onCompleted: {
-    // Seed the row model, then SNAPSHOT the panel height (imperative on
+    // Load the persisted filter FIRST (it shapes the membership), then
+    // seed the row model, then SNAPSHOT the panel height (imperative on
     // purpose: a binding would track the queue and re-animate the frame —
     // anti-jank rule 2).
+    loadHideDelivered();
     syncAsks();
     if (root.mode === "asks")
       asksPanelHeight = computeAsksHeight();
