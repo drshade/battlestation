@@ -100,10 +100,12 @@ pub fn parse_store(content: &str) -> (i64, Vec<Value>) {
 /// TEXTUALLY like the map's), then the rest FIFO by `created` — NOT
 /// ascending id; FIFO is the queue's contract, though the two only diverge
 /// if ids ever stop being append-ordered. Then answered-but-not-dismissed
-/// asks (FIFO — they wait for the asker to collect, or the human to
-/// dismiss); the order file deliberately does not apply to them (an
-/// answered ask is no longer triage). Dismissed asks are excluded
-/// everywhere — `get --id` is the one direct-lookup exception.
+/// asks, newest completion FIRST (`answered_at` descending — the done pile
+/// reads like an archive: what you just completed sits at the boundary,
+/// not buried under every older completion); the order file deliberately
+/// does not apply to them (an answered ask is no longer triage). Dismissed
+/// asks are excluded everywhere — `get --id` is the one direct-lookup
+/// exception.
 pub fn resolve_order(order: &str, asks: &[Value]) -> Vec<Value> {
     let created = |r: &Value| -> f64 { r.get("created").and_then(Value::as_f64).unwrap_or(0.0) };
     let state = |r: &Value| -> String { proto::field(r, "state") };
@@ -129,7 +131,15 @@ pub fn resolve_order(order: &str, asks: &[Value]) -> Vec<Value> {
     };
     out.extend(open.iter().filter(|r| !listed(r)).map(|r| (*r).clone()));
     let mut answered: Vec<&Value> = asks.iter().filter(|r| state(r) == "answered").collect();
-    answered.sort_by(|a, b| created(a).total_cmp(&created(b)));
+    // Newest completion first; a missing answered_at (legacy record) sorts
+    // oldest. Ties (same write batch) break FIFO by created.
+    let answered_at =
+        |r: &Value| -> f64 { r.get("answered_at").and_then(Value::as_f64).unwrap_or(0.0) };
+    answered.sort_by(|a, b| {
+        answered_at(b)
+            .total_cmp(&answered_at(a))
+            .then(created(a).total_cmp(&created(b)))
+    });
     out.extend(answered.into_iter().cloned());
     out
 }
@@ -600,29 +610,44 @@ mod tests {
 
     #[test]
     fn resolve_orders_open_by_file_then_fifo_then_answered() {
+        let with_answered_at = |mut a: Value, at: f64| {
+            a["answered_at"] = json!(at);
+            a
+        };
         let asks = vec![
             ask(1, "open", 10.0),
-            ask(2, "answered", 5.0),
+            // answered later than 6 despite being created earlier: the done
+            // pile is newest-completion-first, so 2 precedes 6
+            with_answered_at(ask(2, "answered", 5.0), 100.0),
             ask(3, "open", 30.0),
             ask(4, "dismissed", 1.0),
             ask(5, "open", 20.0),
-            ask(6, "answered", 2.0),
+            with_answered_at(ask(6, "answered", 2.0), 50.0),
         ];
         let ids = |rows: &[Value]| -> Vec<i64> {
             rows.iter()
                 .filter_map(|r| r.get("id").and_then(Value::as_i64))
                 .collect()
         };
-        // no order file: open FIFO by created, answered tail FIFO, no dismissed
-        assert_eq!(ids(&resolve_order("", &asks)), vec![1, 5, 3, 6, 2]);
+        // no order file: open FIFO by created, answered tail newest
+        // completion first, no dismissed
+        assert_eq!(ids(&resolve_order("", &asks)), vec![1, 5, 3, 2, 6]);
         // the human's order lists open asks first, in list order; unlisted
         // open asks follow FIFO; answered stay in the tail (order file does
         // not apply to them — they are past triage)
-        assert_eq!(ids(&resolve_order("3 1", &asks)), vec![3, 1, 5, 6, 2]);
+        assert_eq!(ids(&resolve_order("3 1", &asks)), vec![3, 1, 5, 2, 6]);
         // dead/dismissed/answered ids in the file resolve away silently
-        assert_eq!(ids(&resolve_order("99 4 2 5", &asks)), vec![5, 1, 3, 6, 2]);
+        assert_eq!(ids(&resolve_order("99 4 2 5", &asks)), vec![5, 1, 3, 2, 6]);
         // tokens match textually: "05" is not id 5
-        assert_eq!(ids(&resolve_order("05", &asks)), vec![1, 5, 3, 6, 2]);
+        assert_eq!(ids(&resolve_order("05", &asks)), vec![1, 5, 3, 2, 6]);
+        // legacy records without answered_at sort oldest in the done pile,
+        // ties breaking FIFO by created
+        let legacy = vec![
+            with_answered_at(ask(7, "answered", 9.0), 40.0),
+            ask(8, "answered", 3.0),
+            ask(9, "answered", 6.0),
+        ];
+        assert_eq!(ids(&resolve_order("", &legacy)), vec![7, 8, 9]);
     }
 
     #[test]
