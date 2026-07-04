@@ -8,6 +8,16 @@
 // the panel is opened (the panel content is recreated on every open). Every
 // asks action is a direct-argv bsctl Process — no shell anywhere, so human
 // reply text needs no quoting discipline at all.
+//
+// Reordering is a drag HANDLE (the grip at each open row's left edge), not a
+// full-row drag: row bodies keep their clicks, and pressing the handle first
+// collapses the expanded reply area so every open row has the same height —
+// which is what makes the slot arithmetic below trivial. The dragged row's
+// model is untouched until release (a Repeater rebuilds delegates on model
+// change, so live reordering would destroy the very delegate being dragged);
+// instead a floating proxy follows the pointer and a drop line marks the
+// target slot, and release commits the whole open-id list via
+// `asks order set` — the same gesture-agnostic payload as any other reorder.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -26,12 +36,13 @@ Item {
   readonly property string mode: main ? main.panelMode : "rename"
   readonly property int wsId: main ? main.pendingRenameId : 0
 
-  // SmartPanel contract. Settings is wider and sized to its full content
-  // (SmartPanel clamps to the screen, and the scroll view only kicks in if it
-  // can't fit); rename and asks hug their content.
+  // SmartPanel contract. Asks is the widest — a triage row needs title, meta
+  // and its action cluster side by side without fighting; settings is sized
+  // to its full content (SmartPanel clamps to the screen, and the scroll
+  // view only kicks in if it can't fit); rename hugs its content.
   readonly property var geometryPlaceholder: panelContainer
   readonly property bool allowAttach: true
-  property real contentPreferredWidth: (mode === "settings" ? 580 : mode === "asks" ? 480 : 320) * Style.uiScaleRatio
+  property real contentPreferredWidth: (mode === "settings" ? 580 : mode === "asks" ? 800 : 320) * Style.uiScaleRatio
   // Full natural height of the settings column (header + separator + 3 row gaps +
   // top/bottom margins + the settings content). No artificial cap: SmartPanel
   // clamps to the screen, and the scroll view only kicks in if it can't fit.
@@ -40,6 +51,9 @@ Item {
 
   // ---- asks state -------------------------------------------------------------
   readonly property var asksRows: (main && main.asksRows) ? main.asksRows : []
+  // Single-expansion: at most one row's reply area is open (triage is one
+  // ask at a time, and collapsing everything at drag start is then trivial).
+  property int expandedId: -1
   // Age text ticks while the panel is up (rows only re-render on stream
   // changes; age would otherwise freeze at open time).
   property real nowS: Date.now() / 1000
@@ -48,6 +62,76 @@ Item {
     running: root.mode === "asks"
     repeat: true
     onTriggered: root.nowS = Date.now() / 1000
+  }
+
+  // ---- drag-handle reorder state ----------------------------------------------
+  // Captured in asksCol coordinates at ACTIVATION (first move past the
+  // threshold), one event after the press collapsed the reply areas — by
+  // then the column has relaid out and every open row is slot-height
+  // uniform. A stream update mid-drag rebuilds the delegates and silently
+  // cancels the drag (release finds no state to commit) — accepted; asks
+  // changing under an in-flight drag is rare and the store stays authoritative.
+  property int dragId: -1
+  property int dragFrom: -1
+  property int dropIndex: -1
+  property real dragSlotH: 0
+  property real dragFirstY: 0
+  property string dragTitle: ""
+  property real proxyY: 0
+  property real dropLineY: 0
+  property var pressRow: null
+  property real pressY0: 0
+
+  function openIds() {
+    var ids = [];
+    for (var i = 0; i < asksRows.length; i++)
+      if (asksRows[i].state === "open")
+        ids.push(asksRows[i].id);
+    return ids;
+  }
+  function dragPress(row, area, mx, my) {
+    expandedId = -1; // uniform slot heights before any geometry is read
+    pressRow = row;
+    pressY0 = area.mapToItem(asksCol, mx, my).y;
+  }
+  function dragMove(row, area, mx, my) {
+    var p = area.mapToItem(asksCol, mx, my);
+    if (dragId < 0) {
+      if (pressRow !== row || Math.abs(p.y - pressY0) < 6)
+        return; // activation threshold: a sloppy click must not reorder
+      dragId = row.modelData.id;
+      dragFrom = row.index; // open rows lead the resolved order, so model index == open slot
+      dragSlotH = row.height;
+      dragFirstY = row.y - row.index * (dragSlotH + asksCol.spacing);
+      dragTitle = row.modelData.title;
+    }
+    var n = openIds().length;
+    var pitch = dragSlotH + asksCol.spacing;
+    dropIndex = Math.max(0, Math.min(n - 1, Math.round((p.y - dragFirstY - dragSlotH / 2) / pitch)));
+    proxyY = area.mapToItem(panelContainer, mx, my).y;
+    // The line sits above the target slot when moving up, below it when
+    // moving down (the removal shifts everything after the source up one).
+    var edge = dropIndex <= dragFrom ? dragFirstY + dropIndex * pitch : dragFirstY + dropIndex * pitch + dragSlotH + asksCol.spacing;
+    dropLineY = asksCol.y + edge - asksCol.spacing / 2;
+  }
+  function dragRelease() {
+    if (dragId >= 0 && dropIndex >= 0 && dropIndex !== dragFrom) {
+      var ids = openIds();
+      var from = ids.indexOf(dragId);
+      if (from >= 0) {
+        ids.splice(from, 1);
+        ids.splice(dropIndex, 0, dragId);
+        bsctl(["asks", "order", "set"].concat(ids.map(String)));
+      }
+    }
+    dragReset();
+  }
+  function dragReset() {
+    dragId = -1;
+    dragFrom = -1;
+    dropIndex = -1;
+    pressRow = null;
+    dragTitle = "";
   }
 
   // Presentation helpers for ask rows. (Cfg has the pill-side helpers; the
@@ -100,22 +184,6 @@ Item {
   function jumpToAsk(ws) {
     bsctl(["ws", "focus", "--ws-id", String(ws)]);
     close();
-  }
-  // Reorder = the human's order file, whole-list semantics: all OPEN ids with
-  // the moved one shifted a slot (edges no-op). Answered rows aren't
-  // reorderable — they're past triage.
-  function moveAsk(id, delta) {
-    var ids = [];
-    for (var i = 0; i < asksRows.length; i++)
-      if (asksRows[i].state === "open")
-        ids.push(asksRows[i].id);
-    var from = ids.indexOf(id);
-    var to = from + delta;
-    if (from < 0 || to < 0 || to >= ids.length)
-      return;
-    ids.splice(from, 1);
-    ids.splice(to, 0, id);
-    bsctl(["asks", "order", "set"].concat(ids.map(String)));
   }
 
   function renameSubmit() {
@@ -242,16 +310,49 @@ Item {
           id: askRow
           required property var modelData
           required property int index
-          property bool replying: false
+          readonly property bool replying: root.expandedId === modelData.id
           readonly property bool open: modelData.state === "open"
           readonly property bool answerable: open && (modelData.type === "question" || modelData.type === "review")
+          readonly property bool dragging: root.dragId === modelData.id
 
           Layout.fillWidth: true
           spacing: Style.marginXS
+          // The original stays in place, dimmed, while its proxy rides the
+          // pointer — the model must not move until release (see header).
+          opacity: dragging ? 0.35 : 1.0
 
           RowLayout {
             Layout.fillWidth: true
             spacing: Style.marginS
+
+            // The drag handle. Fixed-width slot on every row (answered rows
+            // keep the space so title columns align) but only open rows show
+            // the grip and accept the drag.
+            Item {
+              Layout.preferredWidth: 18
+              Layout.preferredHeight: 22
+              NText {
+                anchors.centerIn: parent
+                text: "≡"
+                visible: askRow.open
+                color: handleArea.containsMouse || askRow.dragging ? Color.mOnSurface : Qt.alpha(Color.mOnSurface, 0.35)
+              }
+              MouseArea {
+                id: handleArea
+                anchors.fill: parent
+                enabled: askRow.open
+                hoverEnabled: true
+                preventStealing: true
+                cursorShape: askRow.dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                onPressed: mouse => root.dragPress(askRow, handleArea, mouse.x, mouse.y)
+                onPositionChanged: mouse => {
+                  if (pressed)
+                    root.dragMove(askRow, handleArea, mouse.x, mouse.y);
+                }
+                onReleased: root.dragRelease()
+                onCanceled: root.dragReset()
+              }
+            }
 
             Rectangle {
               width: 10
@@ -265,8 +366,9 @@ Item {
               Layout.fillWidth: true
               spacing: 0
               NText {
-                // No elide on NText: cap like pillLabel does.
-                text: String(askRow.modelData.title).length > 60 ? String(askRow.modelData.title).substring(0, 60) + "…" : askRow.modelData.title
+                // NText is a Text with elide: ElideRight by default — width
+                // does the truncation now that the panel is wide.
+                text: askRow.modelData.title
                 font.weight: Style.fontWeightBold
                 color: Color.mOnSurface
                 opacity: askRow.open ? 1.0 : 0.6
@@ -281,18 +383,6 @@ Item {
             }
 
             NButton {
-              visible: askRow.open
-              text: "↑"
-              outlined: true
-              onClicked: root.moveAsk(askRow.modelData.id, -1)
-            }
-            NButton {
-              visible: askRow.open
-              text: "↓"
-              outlined: true
-              onClicked: root.moveAsk(askRow.modelData.id, 1)
-            }
-            NButton {
               visible: askRow.modelData.ws !== null && askRow.modelData.ws !== undefined
               text: "Jump"
               outlined: true
@@ -302,7 +392,7 @@ Item {
               visible: askRow.answerable
               text: askRow.replying ? "Hide" : "Reply"
               outlined: !askRow.replying
-              onClicked: askRow.replying = !askRow.replying
+              onClicked: root.expandedId = askRow.replying ? -1 : askRow.modelData.id
             }
             NIconButton {
               icon: "close"
@@ -316,7 +406,7 @@ Item {
           ColumnLayout {
             visible: askRow.replying && askRow.open
             Layout.fillWidth: true
-            Layout.leftMargin: 10 + Style.marginS
+            Layout.leftMargin: 18 + 10 + Style.marginS * 2
             spacing: Style.marginXS
 
             NText {
@@ -393,6 +483,51 @@ Item {
           }
         }
       }
+    }
+
+    // ---- drag overlay (asks mode) ----
+    // Floating proxy + drop line live OUTSIDE asksCol: a ColumnLayout lays
+    // out every child, so free-positioned items must be siblings. Positions
+    // are computed in dragMove (event-time mapping, not bindings — the
+    // panel can re-center mid-drag and stale bindings would lie).
+    Rectangle {
+      visible: root.dragId >= 0
+      x: asksCol.x
+      y: root.proxyY - height / 2
+      width: asksCol.width
+      height: 30
+      radius: Style.radiusXS
+      color: Color.mSurfaceVariant
+      border.color: Color.mPrimary
+      border.width: 1
+      opacity: 0.92
+      z: 100
+      RowLayout {
+        anchors.fill: parent
+        anchors.leftMargin: Style.marginS
+        anchors.rightMargin: Style.marginS
+        spacing: Style.marginS
+        NText {
+          text: "≡"
+          color: Color.mOnSurface
+        }
+        NText {
+          text: root.dragTitle
+          font.weight: Style.fontWeightBold
+          color: Color.mOnSurface
+          Layout.fillWidth: true
+        }
+      }
+    }
+    Rectangle {
+      visible: root.dragId >= 0 && root.dropIndex !== root.dragFrom
+      x: asksCol.x
+      y: root.dropLineY - height / 2
+      width: asksCol.width
+      height: 2
+      radius: 1
+      color: Color.mPrimary
+      z: 99
     }
 
     // ---- settings ----
