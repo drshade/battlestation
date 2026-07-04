@@ -47,3 +47,10 @@ matcher = "*"
 [[hooks.SubagentStop.hooks]]
 type = "command"
 command = "$HOME/.local/bin/bsctl agents set --kind codex subagent-stop"
+
+# battlestation MCP server: the asks queue + read-only world queries
+# (contract in ctl/src/lib.rs). Via sh -c because Codex execs MCP commands
+# directly (no shell), so $HOME would not expand in `command`.
+[mcp_servers.battlestation]
+command = "/bin/sh"
+args = ["-c", 'exec "$HOME/.local/bin/bsctl" mcp --kind codex']

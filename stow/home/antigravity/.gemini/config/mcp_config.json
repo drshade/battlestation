@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "battlestation": {
+      "command": "/bin/sh",
+      "args": ["-c", "exec \"$HOME/.local/bin/bsctl\" mcp --kind agy"]
+    }
+  }
+}

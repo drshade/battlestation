@@ -157,6 +157,55 @@
 //! replied) or -> dismissed (from ANY state: dismissing an open ask is
 //! declining to answer; idempotent, unknown ids are quiet).
 //!
+//! # MCP (`bsctl mcp --kind <k>`)
+//!
+//! A stdio MCP server giving every harness the asks queue and read-only
+//! world queries — one server per session, spawned by the harness's MCP
+//! config the way the hooks spawn `agents set`, with the same `--kind`
+//! discriminator. Hand-rolled JSON-RPC 2.0 over stdio lines (no SDK: the
+//! needed surface is five requests — initialize, ping, tools/list,
+//! tools/call — plus tolerated lifecycle notifications and outbound
+//! notifications/progress; an SDK would bring an async runtime to a
+//! blocking line loop). The handshake echoes the client's protocol version
+//! when known (2024-11-05 / 2025-03-26 / 2025-06-18 — wire-compatible for
+//! this surface), else answers the newest known.
+//!
+//! SESSION IDENTITY: no harness tells an MCP server which session spawned
+//! it, so the server resolves its own — the /proc ancestor walk names the
+//! harness process (comm == kind, the hook rule) and the session file
+//! recording that pid IS the session; its sid + ws ride every posted ask.
+//! Unresolvable (headless, hooks not yet fired) degrades to posting with
+//! empty session/null ws and retries per call — never fails.
+//!
+//! TOOLS: `ask` (post a question, store-first, then a BOUNDED block — poll
+//! the store 500ms up to --block-secs, default 90, progress-notified ~10s
+//! when the client sent a progressToken; answered -> the answer text,
+//! dismissed -> "proceed on judgment, don't re-post", timeout -> "ask #N
+//! remains open" as a SUCCESS: the RPC is only a fast path and the store
+//! outlives it), `notify` (non-blocking review/FYI post), `list_asks` /
+//! `get_ask` (the queue and the late-answer collection), `update_ask`
+//! (urgency/estimate only, own asks only — the two-namespaces rule
+//! enforced at the tool boundary), `world` (the status object; the MVP
+//! deliberately exposes NO mutating world tools — that needs the consent
+//! design). The tool DESCRIPTIONS carry the mandatory-post norm — they are
+//! the one prompt surface every session of every harness receives — as does
+//! the initialize `instructions` field; their wording is contract, not
+//! copy. While `ask` blocks, stdin goes unread (pings answered late);
+//! accepted because the block is bounded and a client that kills us loses
+//! nothing. Stdin EOF is shutdown (exit 0).
+//!
+//! WIRING (per harness, verified live 2026-07-04): Claude Code reads user-
+//! scope servers from `~/.claude.json` only (settings.json `mcpServers` is
+//! ignored — probed empirically on 2.1.200), which is unstowable state, so
+//! registration is a one-time `claude mcp add --scope user` documented in
+//! setup/deps-00-claude-code.md. Codex: `[mcp_servers.battlestation]` in
+//! the stowed config.toml (the filter keeps `mcp_servers` sections).
+//! Antigravity: `~/.gemini/config/mcp_config.json` (its embedded docs name
+//! it; standard mcpServers shape), stowed alongside hooks.json. Codex and
+//! agy exec the command directly (no shell), so both wire through
+//! `/bin/sh -c 'exec "$HOME/..."'` for expansion; Claude stores the
+//! absolute path at add time.
+//!
 //! # The battlespace map (`bsctl ws map`)
 //!
 //! Navigate/move by BATTLESPACE instead of Hyprland's immutable workspace
@@ -485,6 +534,7 @@ pub mod agents;
 pub mod asks;
 pub mod display;
 pub mod ipc;
+pub mod mcp;
 pub mod proto;
 pub mod scale;
 pub mod sessions;

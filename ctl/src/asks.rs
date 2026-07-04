@@ -263,11 +263,11 @@ fn modify(verb: &str, id: i64, f: impl FnOnce(&mut Value) -> Result<(), String>)
 
 // ---- verbs ---------------------------------------------------------------------
 
-/// `asks post` — append one ask, print its id (`ask 7`). The MCP server
-/// (stage 2) is the usual caller and fills session/kind/ws from the calling
-/// harness; the flags exist for shell agents and tests.
+/// Append one ask and return its id — the write path shared by `asks post`
+/// and the MCP server (which owns stdout as its protocol channel and must
+/// never have an id printed under it).
 #[allow(clippy::too_many_arguments)]
-pub fn post(
+pub fn create(
     ask_type: &str,
     title: &str,
     body: &str,
@@ -277,7 +277,7 @@ pub fn post(
     kind: &str,
     session: &str,
     ws: Option<i64>,
-) -> i32 {
+) -> Result<i64, String> {
     with_store_lock(|| {
         let (next, mut asks) = load();
         asks.push(json!({
@@ -298,16 +298,55 @@ pub fn post(
             "answered_at": Value::Null,
         }));
         match save(next + 1, &asks) {
-            Ok(()) => {
-                println!("ask {next}");
-                0
-            }
-            Err(e) => {
-                eprintln!("bsctl asks post: {}: {e}", store_file().display());
-                1
-            }
+            Ok(()) => Ok(next),
+            Err(e) => Err(format!("{}: {e}", store_file().display())),
         }
     })
+}
+
+/// `asks post` — append one ask, print its id (`ask 7`). The MCP server is
+/// the usual writer (via [`create`]) and fills session/kind/ws from the
+/// calling harness; the flags exist for shell agents and tests.
+#[allow(clippy::too_many_arguments)]
+pub fn post(
+    ask_type: &str,
+    title: &str,
+    body: &str,
+    options: &[String],
+    urgency: &str,
+    estimate_min: Option<i64>,
+    kind: &str,
+    session: &str,
+    ws: Option<i64>,
+) -> i32 {
+    match create(
+        ask_type,
+        title,
+        body,
+        options,
+        urgency,
+        estimate_min,
+        kind,
+        session,
+        ws,
+    ) {
+        Ok(id) => {
+            println!("ask {id}");
+            0
+        }
+        Err(e) => {
+            eprintln!("bsctl asks post: {e}");
+            1
+        }
+    }
+}
+
+/// One ask by id, any state — the MCP server's answer-collection read
+/// (`get_ask`, and the `ask` fast path's poll). Lock-free like every read.
+pub fn record(id: i64) -> Option<Value> {
+    let (_, asks) = load();
+    asks.into_iter()
+        .find(|r| r.get("id").and_then(Value::as_i64) == Some(id))
 }
 
 /// The resolved queue as its published JSON rows — shared by `asks get

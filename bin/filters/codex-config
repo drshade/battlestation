@@ -6,11 +6,12 @@
 # config. The tracked form is a WHITELIST projection — default-deny, so a
 # table Codex invents tomorrow never churns the repo. Kept: root-table keys
 # in KEEP_ROOT and every section under [hooks] (the battlestation-ws status
-# hooks) EXCEPT [hooks.state.*] — Codex stores per-hook trusted_hash values
-# there, inside the kept namespace; they are machine-local trust state that
-# re-churns whenever a hook command changes. Comments/blanks attached to
-# kept content ride along. The live file keeps everything; only what git
-# sees is projected.
+# hooks) or [mcp_servers] (the battlestation MCP server) — EXCEPT
+# [hooks.state.*], where Codex stores per-hook trusted_hash values inside
+# the kept namespace; they are machine-local trust state that re-churns
+# whenever a hook command changes. Comments/blanks attached to kept content
+# ride along. The live file keeps everything; only what git sees is
+# projected.
 #
 # Why python and line/section-based: jq doesn't parse TOML, and stdlib
 # tomllib parses but cannot serialize (a serializing round-trip would also
@@ -32,7 +33,7 @@ import sys
 # both through the stow symlink), the same UI-managed-preference churn that
 # keeps `model` out of the claude settings whitelist.
 KEEP_ROOT = {"service_tier"}
-KEEP_SECTIONS = re.compile(r"^hooks($|[.\s\]])")  # [hooks], [[hooks.X]], ...
+KEEP_SECTIONS = re.compile(r"^(hooks|mcp_servers)($|[.\s\]])")  # [hooks], [[hooks.X]], [mcp_servers.X]
 DROP_SECTIONS = re.compile(r"^hooks\.state($|[.\s\]])")  # trust-hash state
 
 HEADER = re.compile(r"^\s*\[\[?\s*([^]]*?)\s*\]\]?\s*(#.*)?$")

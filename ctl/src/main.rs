@@ -52,6 +52,15 @@ enum Cmd {
         #[arg(long)]
         stream: bool,
     },
+    /// MCP server over stdio: the asks queue + read-only world queries
+    Mcp {
+        /// The harness kind this server serves (resolves the session identity)
+        #[arg(long)]
+        kind: String,
+        /// Max seconds `ask` blocks awaiting an answer (0 = return immediately)
+        #[arg(long, default_value_t = 90)]
+        block_secs: u64,
+    },
     /// Generate shell completions on stdout
     Completions { shell: clap_complete::Shell },
 }
@@ -905,6 +914,7 @@ fn main() {
                 0
             }
         }
+        Cmd::Mcp { kind, block_secs } => bsctl::mcp::run(&kind, block_secs),
         Cmd::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "bsctl", &mut std::io::stdout());
             0
