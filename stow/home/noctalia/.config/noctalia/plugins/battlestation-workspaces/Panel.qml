@@ -72,7 +72,7 @@ Item {
   // view only kicks in if it can't fit); rename hugs its content.
   readonly property var geometryPlaceholder: panelContainer
   readonly property bool allowAttach: true
-  property real contentPreferredWidth: (mode === "settings" ? 580 : mode === "asks" ? 800 : 320) * Style.uiScaleRatio
+  property real contentPreferredWidth: (mode === "settings" ? 580 : mode === "asks" ? 880 : 320) * Style.uiScaleRatio
   // Full natural height of the settings column (header + separator + 3 row gaps +
   // top/bottom margins + the settings content). No artificial cap: SmartPanel
   // clamps to the screen, and the scroll view only kicks in if it can't fit.
@@ -304,11 +304,13 @@ Item {
     return Math.floor(s / 3600) + "h";
   }
   function askMeta(r) {
-    var parts = [];
+    // Order per the user's triage grammar: id first (the handle every verb
+    // takes), then who, then where (ws number + name), then when/how-long.
+    var parts = ["#" + r.id];
     if (r.kind)
       parts.push(r.kind);
     if (r.ws !== null && r.ws !== undefined)
-      parts.push("ws " + r.ws);
+      parts.push("ws " + r.ws + (r.wsName ? " — " + r.wsName : ""));
     parts.push(fmtAge(r.created));
     if (r.estimate_min)
       parts.push("~" + r.estimate_min + "m of you");

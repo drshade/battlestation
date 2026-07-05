@@ -153,6 +153,15 @@ Item {
     if (key === asksKey)
       return;
     asksKey = key;
+    // Enrich each row with its workspace's display name (the stream's ask
+    // rows carry only the ws id; names live in the compositor section we
+    // already fold into nameById). Panel meta renders "ws 3 — dropkick".
+    // An unnamed workspace's name IS its number — suppress the echo.
+    for (var i = 0; i < rows.length; i++) {
+      var wsKey = rows[i].ws !== null && rows[i].ws !== undefined ? String(rows[i].ws) : "";
+      var n = wsKey ? (nameById[wsKey] || "") : "";
+      rows[i].wsName = n === wsKey ? "" : n;
+    }
     asksRows = rows;
     // Every bar carries identical world state, so last-writer-wins is sound.
     if (pluginApi && pluginApi.mainInstance)
