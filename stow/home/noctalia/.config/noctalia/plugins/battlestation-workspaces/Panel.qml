@@ -495,7 +495,7 @@ Item {
       RowLayout {
         Layout.fillWidth: true
         NText {
-          text: "Asks"
+          text: "The Bridge"
           pointSize: Style.fontSizeL
           font.weight: Style.fontWeightBold
           color: Color.mOnSurface
@@ -544,7 +544,7 @@ Item {
             implicitHeight: Math.max(60, asksScroll.height * 0.85)
             NText {
               anchors.centerIn: parent
-              text: "no asks — all clear"
+              text: "the Bridge is clear"
               color: Color.mOnSurfaceVariant
             }
           }

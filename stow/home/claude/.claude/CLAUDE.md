@@ -2,7 +2,10 @@
 
 This desktop runs a shared attention queue for every agent harness — the
 `battlestation` MCP server (`bsctl mcp`; contract in the battlestation
-repo's `ctl/src/lib.rs`). The rule it exists for:
+repo's `ctl/src/lib.rs`). The human calls this queue **the Bridge**: when
+they tell you to report, check in, or "let someone know via the Bridge",
+they mean posting to it with the `ask`/`notify` tools. The rule it exists
+for:
 
 **When you need the human's input, you MUST post an ask through the `ask`
 tool rather than proceed on an assumption you couldn't defend.** Queue
