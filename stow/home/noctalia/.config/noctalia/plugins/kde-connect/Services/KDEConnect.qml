@@ -147,12 +147,6 @@ QtObject {
     onExited: (exitCode, exitStatus) => {
       root.daemonAvailable = exitCode == 0;
       if (root.daemonAvailable) {
-        // Poll the device list WITHOUT forceOnNetworkChange: forcing makes
-        // kdeconnectd tear down and re-announce every link, so a 5s poll
-        // loop kept dropping live phone connections (the widget caused the
-        // very flapping it displayed). getDevices reads state; the force
-        // belongs only on real network changes, which the daemon already
-        // watches itself.
         getDevicesProc.running = true;
       } else {
         root.devices = []
@@ -444,10 +438,6 @@ QtObject {
       id: proc
       property string deviceId: ""
       property string filePath: ""
-      // `busctl call` needs the D-Bus type signature before the argument:
-      // shareUrl takes one string, so params are ["s", value] — the "s" was
-      // missing, so busctl misread the file path as the signature and the
-      // send silently no-op'd (verified live 2026-07-05).
       command: busctlCall("/modules/kdeconnect/devices/" + deviceId + "/share", "org.kde.kdeconnect.device.share", "shareUrl", [ "s", "file://" + filePath ])
       stdout: StdioCollector {
         onStreamFinished: {
