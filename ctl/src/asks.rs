@@ -172,12 +172,14 @@ pub fn state_label(r: &Value) -> String {
 }
 
 /// The queue table, shared by `asks get` and `status`'s asks section so
-/// the two views can't drift.
-pub const ASK_HEADERS: [&str; 10] = [
-    "ID", "AGE", "TYPE", "URG", "EST", "WS", "KIND", "TITLE", "NOTE", "STATE",
+/// the two views can't drift. BLOCKING = an agent's ask call is parked on
+/// this row right now (the yes/blank dialect — it only matters when set).
+pub const ASK_HEADERS: [&str; 11] = [
+    "ID", "AGE", "TYPE", "URG", "EST", "WS", "KIND", "TITLE", "NOTE", "STATE", "BLOCKING",
 ];
 
-/// [`ASK_HEADERS`]'s cells for resolved rows at time `now`.
+/// [`ASK_HEADERS`]'s cells for PUBLISHED rows at time `now` (the `blocking`
+/// flag is read from the row — callers go through [`published`]/[`rows_json`]).
 pub fn ask_cells(rows: &[Value], now: f64) -> Vec<Vec<String>> {
     rows.iter()
         .map(|r| {
@@ -192,6 +194,7 @@ pub fn ask_cells(rows: &[Value], now: f64) -> Vec<Vec<String>> {
                 proto::field(r, "title"),
                 proto::field(r, "note"),
                 state_label(r),
+                proto::yes(r.get("blocking").and_then(Value::as_bool).unwrap_or(false)),
             ]
         })
         .collect()
@@ -214,6 +217,10 @@ pub fn detail_text(r: &Value, now: f64) -> String {
     let rows = [
         ("id", proto::field(r, "id")),
         ("state", state_label(r)),
+        (
+            "blocking",
+            proto::yes(r.get("blocking").and_then(Value::as_bool).unwrap_or(false)),
+        ),
         ("type", proto::field(r, "type")),
         ("urgency", proto::field(r, "urgency")),
         (
@@ -320,6 +327,7 @@ pub fn create(
             "created": sys::now_f64(),
             "answered_at": Value::Null,
             "delivered_at": Value::Null,
+            "waiting_pid": Value::Null,
         }));
         match save(next + 1, &asks) {
             Ok(()) => Ok(next),
@@ -374,13 +382,15 @@ pub fn record(id: i64) -> Option<Value> {
 }
 
 /// The resolved queue as its published JSON rows — shared by `asks get
-/// --format json`, its stream form, and the `status` world section.
+/// --format json`, its stream form, and the `status` world section. Rows
+/// pass through [`published`] (blocking computed, waiting_pid stripped).
 pub fn rows_json(session: Option<&str>) -> Vec<Value> {
     let (_, asks) = load();
     let order = fs::read_to_string(order_file()).unwrap_or_default();
     resolve_order(&order, &asks)
         .into_iter()
         .filter(|r| session.is_none_or(|s| proto::field(r, "session") == s))
+        .map(published)
         .collect()
 }
 
@@ -412,10 +422,11 @@ pub fn get(id: Option<i64>, session: Option<&str>, json_out: bool) -> i32 {
             eprintln!("bsctl asks get: no ask {id}");
             return 1;
         };
+        let r = published(r.clone());
         if json_out {
             println!("{r}");
         } else {
-            print!("{}", detail_text(r, sys::now_f64()));
+            print!("{}", detail_text(&r, sys::now_f64()));
         }
         return 0;
     }
@@ -526,6 +537,66 @@ pub fn mark_delivered(id: i64) {
             eprintln!("bsctl asks: mark delivered {id}: {e}");
         }
     })
+}
+
+/// Record that an MCP `ask` call is PARKED on this ask right now — the
+/// asker's server pid, stamped as the block loop enters and cleared by
+/// [`clear_waiting`] on every exit path. Internal bookkeeping (readers
+/// publish it as the computed `blocking` flag, never the pid — see
+/// [`published`]); quiet like [`mark_delivered`]: liveness bookkeeping must
+/// never fail the ask itself. A server that dies mid-block can't clear —
+/// that lie is neutralized at read time by [`blocking`]'s pid check.
+pub fn mark_waiting(id: i64, pid: u32) {
+    set_waiting(id, json!(pid));
+}
+
+/// Clear the parked marker (answered/dismissed/timeout/cancel — the block
+/// loop's one shared exit).
+pub fn clear_waiting(id: i64) {
+    set_waiting(id, Value::Null);
+}
+
+fn set_waiting(id: i64, pid: Value) {
+    with_store_lock(|| {
+        let (next, mut asks) = load();
+        let Some(r) = asks
+            .iter_mut()
+            .find(|r| r.get("id").and_then(Value::as_i64) == Some(id))
+        else {
+            return;
+        };
+        if r.get("waiting_pid") == Some(&pid) {
+            return; // no-op writes would wake the stream for nothing
+        }
+        r["waiting_pid"] = pid;
+        if let Err(e) = save(next, &asks) {
+            eprintln!("bsctl asks: mark waiting {id}: {e}");
+        }
+    })
+}
+
+/// Is an agent parked on this ask RIGHT NOW? `waiting_pid` set AND that
+/// pid alive (`/proc/<pid>` — local by construction, the session sweep's
+/// idiom). The liveness check is the read-time sanitize: a server that
+/// crashed mid-block leaves a stale pid, and a dead pid must read as
+/// not-blocking rather than lie forever.
+pub fn blocking(r: &Value) -> bool {
+    r.get("waiting_pid")
+        .and_then(Value::as_i64)
+        .is_some_and(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists())
+}
+
+/// The published form of a record: the computed `blocking` flag in, the
+/// internal `waiting_pid` out. Every emitting surface (queue rows, `get
+/// --id`, the MCP tools) goes through here; [`record`] stays raw for the
+/// internal readers (the block loop's verdict poll, ownership checks).
+pub fn published(mut r: Value) -> Value {
+    let b = blocking(&r);
+    if let Some(o) = r.as_object_mut() {
+        o.remove("waiting_pid");
+        o.insert("blocking".into(), json!(b));
+    }
+    r
 }
 
 /// `asks dismiss <id>` — from ANY state: dismissing an open ask is the
@@ -796,6 +867,32 @@ mod tests {
     }
 
     #[test]
+    fn blocking_requires_a_live_pid_and_published_strips_it() {
+        // no marker: not blocking
+        let r = ask(1, "open", 0.0);
+        assert!(!blocking(&r));
+        // a LIVE pid (our own — always alive) reads as blocking
+        let mut live = ask(2, "open", 0.0);
+        live["waiting_pid"] = json!(std::process::id());
+        assert!(blocking(&live));
+        // a DEAD pid (beyond pid_max, the suite's canonical dead pid) is the
+        // crashed-server stale marker: sanitized to false at read time
+        let mut dead = ask(3, "open", 0.0);
+        dead["waiting_pid"] = json!(4_000_000);
+        assert!(!blocking(&dead));
+        // published(): blocking computed in, waiting_pid stripped out
+        let p = published(live);
+        assert_eq!(p["blocking"], true);
+        assert!(p.get("waiting_pid").is_none());
+        let p = published(dead);
+        assert_eq!(p["blocking"], false);
+        // legacy record without the field publishes false, no panic
+        let mut legacy = ask(4, "open", 0.0);
+        legacy.as_object_mut().unwrap().remove("waiting_pid");
+        assert_eq!(published(legacy)["blocking"], false);
+    }
+
+    #[test]
     fn store_parse_is_tolerant_and_heals_next_id() {
         // fresh / corrupt / non-object all read as a fresh store
         assert_eq!(parse_store(""), (1, vec![]));
@@ -877,11 +974,14 @@ mod tests {
         r["options"] = json!(["ship it", "hold"]);
         r["answer"] = json!("ship it");
         r["estimate_min"] = json!(5);
+        // detail_text reads the PUBLISHED shape; an unset blocking renders
+        // as the empty cell (the line trims bare, like body/note).
         let text = detail_text(&r, 130.0);
         assert_eq!(
             text,
             "id       7\n\
              state    answered\n\
+             blocking\n\
              type     question\n\
              urgency  medium\n\
              estimate 5m\n\

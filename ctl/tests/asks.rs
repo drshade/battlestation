@@ -163,13 +163,14 @@ fn post_get_answer_roundtrip() {
     let mut lines = table.lines();
     assert_eq!(
         lines.next().unwrap(),
-        "ID  AGE  TYPE      URG   EST  WS  KIND    TITLE              NOTE  STATE"
+        "ID  AGE  TYPE      URG   EST  WS  KIND    TITLE              NOTE  STATE  BLOCKING"
     );
     let row = lines.next().unwrap();
     assert!(
         row.starts_with("1   0s   question  high  5m   3   claude  Ship the release?"),
         "unexpected row: {row}"
     );
+    // BLOCKING is blank for a CLI-posted ask (nobody is parked on it).
     assert!(row.ends_with("open"));
 
     // json form: the full record in resolved order

@@ -131,8 +131,9 @@
 //! neither survives a reboot. Two files: `asks.json`, one object
 //! `{"next_id": <int>, "asks": [{id, session, kind, ws, type, title,
 //! body, options, urgency, estimate_min, note, state, answer, created,
-//! answered_at, delivered_at}]}` written atomically (a corrupt store
-//! reads as fresh — the ids it named are gone with it); and `order`, the
+//! answered_at, delivered_at, waiting_pid}]}` written atomically (a
+//! corrupt store reads as fresh — the ids it named are gone with it);
+//! and `order`, the
 //! HUMAN's queue order (ask ids, map-file format). Writers hold a
 //! blocking exclusive flock on `<dir>/.lock` across read-modify-write;
 //! readers ride the atomic renames lock-free (the map/prefs locking
@@ -200,6 +201,19 @@
 //! fact about an answered ask, not a third state). Dismissed-while-open
 //! is deliberately NOT inboxed: the blocking path's dismissal text and
 //! the `mine` rows cover it; a future need can add it here.
+//!
+//! BLOCKING IS LIVE STATE, sanitized at read time. `waiting_pid` (the MCP
+//! server's own pid) is stamped when the `ask` block loop PARKS — never
+//! for `wait_secs: 0`, which posts and returns — and cleared by the loop's
+//! one shared exit (answered, dismissed, timeout, cancellation, EOF). A
+//! server killed outright can't clear, so the field is internal-only:
+//! every emitting surface goes through the published form, which computes
+//! `blocking` = pid set AND `/proc/<pid>` alive (the session sweep's
+//! idiom) and strips the pid — a crashed server's stale marker reads as
+//! not-blocking instead of lying forever. Queue tables carry a BLOCKING
+//! column (yes/blank); the panel's row dot is this flag (green = an agent
+//! is holding a turn open on this ask right now, grey = nobody waits
+//! live) — urgency renders as colored text in the meta line, not the dot.
 //!
 //! Resolved queue order, emitted by every reader: open asks the order
 //! file lists (in list order, tokens matching ids textually), then

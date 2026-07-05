@@ -295,8 +295,22 @@ Item {
   // Presentation helpers for ask rows. (Cfg has the pill-side helpers; the
   // panel has no screen to instantiate a Cfg against, so these small
   // functions live here.)
-  function urgencyColor(u) {
-    return u === "high" ? Color.mError : u === "medium" ? Color.mTertiary : Qt.alpha(Color.mOnSurface, 0.35);
+  // The row DOT is the LIVE signal, not urgency: green = an agent's ask
+  // call is parked on this row right now, holding its turn open (the
+  // stream's `blocking`, pid-sanitized in bsctl so a crashed server can't
+  // lie); grey = nobody waits live. mTertiary is the green accent under
+  // the current scheme (same verification as the old urgency-medium dot).
+  function dotColor(blocking) {
+    return blocking ? Color.mTertiary : Qt.alpha(Color.mOnSurface, 0.35);
+  }
+  // Urgency is TEXT in the meta line (the user's design): high red,
+  // med blue (mPrimary — the scheme's blue accent, per the focused-pill
+  // swatch ground truth), low plain foreground.
+  function urgencyLabel(u) {
+    return u === "medium" ? "med" : u || "low";
+  }
+  function urgencyTextColor(u) {
+    return u === "high" ? Color.mError : u === "medium" ? Color.mPrimary : Color.mOnSurfaceVariant;
   }
   function fmtAge(created) {
     if (!created)
@@ -311,7 +325,12 @@ Item {
   function askMeta(r) {
     // Order per the user's triage grammar: id first (the handle every verb
     // takes), then who, then where (ws number + name), then when/how-long.
+    // Urgency is NOT here — it renders as its own colored segment beside
+    // this text (askMetaRow); blocking gets a textual echo so the dot's
+    // green has words.
     var parts = ["#" + r.id];
+    if (r.blocking)
+      parts.push("blocking — agent waiting");
     if (r.kind)
       parts.push(r.kind);
     if (r.ws !== null && r.ws !== undefined)
@@ -621,7 +640,7 @@ Item {
                 width: 10
                 height: 10
                 radius: 5
-                color: root.urgencyColor(askRow.ask.urgency)
+                color: root.dotColor(askRow.ask.blocking === true)
                 opacity: askRow.open ? 1.0 : 0.4
               }
 
@@ -647,11 +666,24 @@ Item {
                   opacity: askRow.open ? 1.0 : 0.6
                   Layout.fillWidth: true
                 }
-                NText {
-                  text: root.askMeta(askRow.ask)
-                  pointSize: Style.fontSizeXS
-                  color: Color.mOnSurfaceVariant
+                RowLayout {
+                  // Urgency as its own colored segment (elide + rich text
+                  // don't mix on one Text, so the token is a sibling).
                   Layout.fillWidth: true
+                  spacing: 0
+                  NText {
+                    text: root.urgencyLabel(askRow.ask.urgency)
+                    pointSize: Style.fontSizeXS
+                    font.weight: askRow.ask.urgency === "high" ? Style.fontWeightBold : Style.fontWeightRegular
+                    color: root.urgencyTextColor(askRow.ask.urgency)
+                    opacity: askRow.open ? 1.0 : 0.6
+                  }
+                  NText {
+                    text: "  ·  " + root.askMeta(askRow.ask)
+                    pointSize: Style.fontSizeXS
+                    color: Color.mOnSurfaceVariant
+                    Layout.fillWidth: true
+                  }
                 }
               }
 

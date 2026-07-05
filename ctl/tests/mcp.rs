@@ -596,11 +596,81 @@ fn cancellation_mid_block_is_honored_and_the_ask_survives() {
         Some(ping_req),
         "nothing may be emitted for the cancelled ask call (got {line})"
     );
-    // The ask outlives the cancelled transport: still open in the store.
+    // The ask outlives the cancelled transport: still open in the store —
+    // and no longer blocking (cancellation is one of the clear paths).
     let row: Value =
         serde_json::from_str(&env.asks(&["get", "--id", "1", "--format", "json"])).unwrap();
     assert_eq!(row["state"], "open");
+    assert_eq!(row["blocking"], false, "cancel must clear the park marker");
     let _ = ask_req;
+}
+
+#[test]
+fn parked_ask_reads_blocking_until_the_block_exits() {
+    let env = TestEnv::new("blocking-flag");
+    let mut c = env.server(10);
+    // A concurrent reader mid-park must see blocking:true — then answer,
+    // releasing the block (the answered exit path).
+    let checker = {
+        let cmd_env: Vec<(String, String)> = [
+            ("XDG_RUNTIME_DIR", env.run.display().to_string()),
+            ("PATH", env.path.clone()),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            let run = |args: &[&str]| {
+                let mut c = Command::new(BIN);
+                for (k, v) in &cmd_env {
+                    c.env(k, v);
+                }
+                c.args(args).output().unwrap()
+            };
+            let out = run(&["asks", "get", "--id", "1", "--format", "json"]);
+            let row: Value =
+                serde_json::from_str(String::from_utf8_lossy(&out.stdout).trim()).unwrap();
+            assert_eq!(row["blocking"], true, "mid-park must read blocking");
+            assert!(
+                row.get("waiting_pid").is_none(),
+                "the pid is internal bookkeeping, never published"
+            );
+            let out = run(&["asks", "answer", "1", "done"]);
+            assert!(out.status.success());
+        })
+    };
+    let (text, is_err) = c.call("ask", json!({"title": "Park me"}));
+    checker.join().unwrap();
+    assert!(!is_err);
+    assert!(text.contains("done"), "{text}");
+    // Answered exit cleared the marker.
+    let row: Value =
+        serde_json::from_str(&env.asks(&["get", "--id", "1", "--format", "json"])).unwrap();
+    assert_eq!(row["blocking"], false, "answer must clear the park marker");
+    // BLOCKING renders as a table column while parked... and the store
+    // itself never leaks the pid through the queue rows either.
+    assert!(env.asks(&["get"]).contains("BLOCKING"));
+}
+
+#[test]
+fn wait_zero_never_parks_and_timeout_clears() {
+    let env = TestEnv::new("no-park");
+    // wait_secs 0: posts and returns — never marked.
+    let mut c = env.server(0);
+    let (text, is_err) = c.call("ask", json!({"title": "Fire and forget", "wait_secs": 0}));
+    assert!(!is_err);
+    assert!(text.contains("Posted ask #1"), "{text}");
+    let row: Value =
+        serde_json::from_str(&env.asks(&["get", "--id", "1", "--format", "json"])).unwrap();
+    assert_eq!(row["blocking"], false, "wait 0 never parks");
+    // A real (short) wait that expires: the timeout exit clears the marker.
+    let (text, is_err) = c.call("ask", json!({"title": "Expire me", "wait_secs": 1}));
+    assert!(!is_err);
+    assert!(text.contains("remains open"), "{text}");
+    let row: Value =
+        serde_json::from_str(&env.asks(&["get", "--id", "2", "--format", "json"])).unwrap();
+    assert_eq!(row["blocking"], false, "timeout must clear the park marker");
 }
 
 #[test]

@@ -594,7 +594,16 @@ fn call_tool(
             if wait == 0 {
                 return done(tool_text(&posted_text(id), false));
             }
-            match block_on_answer(id, wait, req_id, progress_token, srv.reader, out) {
+            // The park is PUBLISHED state: waiting_pid marks this ask as
+            // holding a live turn open (readers emit it as `blocking`).
+            // One clear after the loop covers every exit path — answered,
+            // dismissed, timeout, cancellation, even EOF; only a server
+            // killed outright can't clear, and the read-time pid check in
+            // asks::blocking neutralizes that stale marker.
+            asks::mark_waiting(id, std::process::id());
+            let outcome = block_on_answer(id, wait, req_id, progress_token, srv.reader, out);
+            asks::clear_waiting(id);
+            match outcome {
                 BlockOutcome::Text(t) => done(tool_text(&t, false)),
                 BlockOutcome::Cancelled => Flow::Silent,
                 BlockOutcome::Eof => Flow::Shutdown,
@@ -629,7 +638,12 @@ fn call_tool(
                     } else {
                         r
                     };
-                    done(tool_text(&with_mine(r, &session).to_string(), false))
+                    // record() is raw (internal readers need waiting_pid);
+                    // everything emitted goes through published().
+                    done(tool_text(
+                        &with_mine(asks::published(r), &session).to_string(),
+                        false,
+                    ))
                 }
                 None => done(tool_text(&format!("no ask {id}"), true)),
             },

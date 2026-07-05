@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(
             render_text(&w),
             "asks\n\
-             \x20 ID  AGE  TYPE      URG   EST  WS  KIND    TITLE     NOTE  STATE\n\
+             \x20 ID  AGE  TYPE      URG   EST  WS  KIND    TITLE     NOTE  STATE  BLOCKING\n\
              \x20 1   0s   question  high  2m   3   claude  Ship it?        open\n\
              \n\
              displays\n\
