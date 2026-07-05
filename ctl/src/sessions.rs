@@ -127,6 +127,8 @@ pub fn scan(now: f64, dir: &Path, proj: &Path) -> Vec<Value> {
             "sid": sid,
             "ws": rec.get("ws").cloned().unwrap_or(Value::Null),
             "win": rec.get("win").cloned().unwrap_or(Value::Null),
+            "pid": rec.get("pid").cloned().unwrap_or(Value::Null),
+            "term_pid": rec.get("term_pid").cloned().unwrap_or(Value::Null),
             "status": proto::field(&rec, "status"),
             "kind": proto::field_or(&rec, "kind", "claude"),
             "title": proto::field(&rec, "title"),

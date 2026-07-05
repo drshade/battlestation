@@ -197,9 +197,20 @@ fn session_write_with_title_and_injected_ws() {
     // record carries (the first matching ANCESTOR wins the clients pass).
     let win = rec["win"].as_str().expect("win must be captured");
     assert!(win.starts_with("0xaddr"), "stub-shaped address: {win}");
-    // And the published agents row exposes it under the same key.
+    // term_pid is the matched clients row's OWN pid (the terminal owning the
+    // window). The stub builds each row's address as 0xaddr<that-pid>, so the
+    // captured term_pid must equal the pid embedded in win.
+    let term_pid = rec["term_pid"].as_i64().expect("term_pid must be captured");
+    assert_eq!(
+        win,
+        format!("0xaddr{term_pid}"),
+        "term_pid == the win row's pid"
+    );
+    // And the published agents row exposes win, pid and term_pid.
     let rows = env.agents_get(&["--session-id", "sess-1"]);
     assert_eq!(rows[0]["win"], json!(win));
+    assert_eq!(rows[0]["pid"], json!(pid)); // harness pid present-or-null; here the live ancestor
+    assert_eq!(rows[0]["term_pid"], json!(term_pid));
 }
 
 #[test]
@@ -644,13 +655,14 @@ fn write_session_unit_seam() {
         7,
         Some("0xseam"),
         1,
+        Some(4321),
         "claude",
     )
     .unwrap();
     assert_eq!(
         env.read_json("seam"),
         json!({"ws": 7, "win": "0xseam", "status": "waiting", "kind": "claude",
-               "title": "A title", "pid": 1})
+               "title": "A title", "pid": 1, "term_pid": 4321})
     );
     // and the scan picks it straight up (pid 1 alive)
     let out = bsctl::sessions::scan(

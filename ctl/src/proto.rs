@@ -235,20 +235,24 @@ pub fn marker_record(atype: &str, desc: &str) -> Value {
 
 /// Session file content:
 /// `{"ws": <int>, "win": <addr>|null, "status": ..., "kind": ..., "title":
-/// ..., "pid": <int>}`. `kind` is the harness discriminator (`bsctl agents
-/// set --kind`, mandatory); `win` is the terminal window's Hyprland address
-/// (null when the clients row carried none), refreshed like `ws` on every
-/// hook event so a moved terminal heals — see the protocol contract in
-/// lib.rs.
+/// ..., "pid": <int>, "term_pid": <int>|null}`. `kind` is the harness
+/// discriminator (`bsctl agents set --kind`, mandatory). `pid` is the
+/// HARNESS process (the comm-matched /proc ancestor — the claude/codex/agy
+/// process). `win` is the terminal window's Hyprland address and `term_pid`
+/// is the TERMINAL process owning that window (the clients-row pid — kitty
+/// here, the harness's ancestor); both are best-effort (null when the
+/// clients row lacked them) and refresh like `ws` on every hook event so a
+/// moved terminal heals — see the protocol contract in lib.rs.
 pub fn session_record(
     ws: i64,
     win: Option<&str>,
     status: &str,
     title: &str,
     pid: i64,
+    term_pid: Option<i64>,
     kind: &str,
 ) -> Value {
-    json!({"ws": ws, "win": win, "status": status, "kind": kind, "title": title, "pid": pid})
+    json!({"ws": ws, "win": win, "status": status, "kind": kind, "title": title, "pid": pid, "term_pid": term_pid})
 }
 
 /// The house table for every human text view: UPPERCASE header row, columns

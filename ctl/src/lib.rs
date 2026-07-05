@@ -38,14 +38,16 @@
 //! - `<session_id>` — one file per live session:
 //!   `{"ws": <int>, "win": "<addr>"|null, "status":
 //!     "waiting"|"thinking"|"tooling", "kind": "<harness>",
-//!     "title": "<aiTitle>", "pid": <int>}`.
+//!     "title": "<aiTitle>", "pid": <int>, "term_pid": <int>|null}`.
 //!   `ws` is the Hyprland workspace id owning the session's terminal window
-//!   (found by walking /proc ancestors against `hyprctl clients -j`), and
-//!   `win` is that same clients row's window address (null when the row
-//!   carried none) — both refresh on every hook event, so a moved terminal
-//!   heals; `win` is what upgrades `ws focus --session` from
-//!   jump-to-workspace to jump-to-window. `pid`
-//!   is the harness process — the nearest ancestor whose comm matches the
+//!   (found by walking /proc ancestors against `hyprctl clients -j`), `win`
+//!   is that same clients row's window address (null when the row carried
+//!   none), and `term_pid` is that same clients row's OWN pid — the
+//!   terminal process owning the window (kitty here), as distinct from the
+//!   harness `pid` below (its descendant). All three refresh on every hook
+//!   event, so a moved terminal heals; `win` is what upgrades
+//!   `ws focus --session` from jump-to-workspace to jump-to-window. `pid`
+//!   is the HARNESS process — the nearest ancestor whose comm matches the
 //!   kind (harness binaries are named after their kind: comm `claude` /
 //!   `codex`, both verified live; comm is the kernel's 15-char truncation,
 //!   so longer kinds match on their truncation) — and the scan sweeps
@@ -109,9 +111,11 @@
 //! `agents get [--kind K] [--session-id S] [--format text|json]` is the
 //! readable query over the same state, sweeping like every scan (dead
 //! pids, orphan and stale markers). Its published schema — `[{session,
-//! kind, status, ws, win, title, subagents: [{id, type, description,
-//! started}]}]` — deliberately respells the on-disk `sid`/`agents` keys;
-//! the `status` world feed emits the identical rows (shared code, so the
+//! kind, status, ws, win, pid, term_pid, title, subagents: [{id, type,
+//! description, started}]}]` — deliberately respells the on-disk
+//! `sid`/`agents` keys; `pid` (harness) and `term_pid` (terminal owning
+//! the window) are JSON-only, omitted from the human text table as machine
+//! data. The `status` world feed emits the identical rows (shared code, so the
 //! two surfaces can never drift).
 //!
 //! # The asks queue (`bsctl asks`)
