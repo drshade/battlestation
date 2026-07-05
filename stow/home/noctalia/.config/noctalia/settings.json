@@ -156,12 +156,6 @@
             ],
             "right": [
                 {
-                    "colorName": "primary",
-                    "hideWhenIdle": true,
-                    "id": "AudioVisualizer",
-                    "width": 200
-                },
-                {
                     "compactMode": false,
                     "hideMode": "hidden",
                     "hideWhenIdle": false,
@@ -169,13 +163,13 @@
                     "maxWidth": 145,
                     "panelShowAlbumArt": true,
                     "scrollingMode": "hover",
-                    "showAlbumArt": true,
+                    "showAlbumArt": false,
                     "showArtistFirst": true,
-                    "showProgressRing": true,
-                    "showVisualizer": false,
+                    "showProgressRing": false,
+                    "showVisualizer": true,
                     "textColor": "none",
                     "useFixedWidth": false,
-                    "visualizerType": "linear"
+                    "visualizerType": "wave"
                 },
                 {
                     "iconColor": "none",
