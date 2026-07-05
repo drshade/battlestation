@@ -118,6 +118,21 @@
 //! data. The `status` world feed emits the identical rows (shared code, so the
 //! two surfaces can never drift).
 //!
+//! `agents send --session-id S [--submit] [--force]` types text (read from
+//! stdin) into a session's terminal — the human write-path behind the Deck,
+//! the return channel the read-only queue lacks. It is a `bsctl` verb ONLY,
+//! deliberately absent from the MCP tool list, so the write-path stays
+//! human-driven (bar/CLI); exposing it to agents later is one tools_json entry
+//! plus a consent ask, with no change here. Routing reuses the captured
+//! `term_pid`: each kitty window is its own process listening on
+//! `unix:/tmp/kitty-<its pid>` (kitty.conf's `listen_on`/`{kitty_pid}`), so
+//! term_pid IS the socket — no window scan, no `--match`. Unlike the `set`
+//! hook it is LOUD: unknown session, missing term_pid, absent socket (window
+//! predates remote control or isn't kitty), or a non-idle session without
+//! `--force` each exit nonzero with a reason. The text is STAGED unsent by
+//! default; `--submit` appends the Enter (the conservative default until
+//! submit behaviour is proven against each harness's input box, not a shell).
+//!
 //! # The asks queue (`bsctl asks`)
 //!
 //! Attention requests: agents post asks — questions, review requests,

@@ -782,6 +782,19 @@ enum AgentsCmd {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
+    /// Type text (read from stdin) into a session's terminal — the human
+    /// write-path behind the Deck. NOT exposed over MCP: agents cannot call it.
+    Send {
+        /// The session to type into
+        #[arg(long)]
+        session_id: String,
+        /// Also press Enter to submit the line (default: stage the text unsent)
+        #[arg(long)]
+        submit: bool,
+        /// Send even when the session isn't idle/waiting (mid-turn)
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 fn main() {
@@ -929,6 +942,11 @@ fn main() {
             AgentsCmd::Usage { kind, format } => {
                 bsctl::usage::get(kind.as_deref(), format == Format::Json)
             }
+            AgentsCmd::Send {
+                session_id,
+                submit,
+                force,
+            } => bsctl::agents::send(&session_id, submit, force),
         },
         Cmd::Asks { cmd } => match cmd {
             AsksCmd::Post {

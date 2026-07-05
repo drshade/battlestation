@@ -12,6 +12,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
 
@@ -378,6 +379,85 @@ pub fn get(kind: Option<&str>, session: Option<&str>, json_out: bool) -> i32 {
         print!("{}", get_text(kind, session));
     }
     0
+}
+
+/// `agents send --session-id S [--submit] [--force]` — type text (read from
+/// stdin) into a session's terminal. This is the human write-path behind the
+/// Deck: it is a `bsctl` verb only, deliberately NOT an MCP tool, so no harness
+/// can drive it — the human answers or nudges a session from the bar or the
+/// CLI. Routing needs no window scan: each kitty window is its own process
+/// listening on `unix:/tmp/kitty-<its pid>` (kitty.conf), and that pid is
+/// exactly the `term_pid` the session scan already records, so term_pid IS the
+/// socket. Unlike the `set` hook this is loud: every miss is a nonzero exit
+/// with a reason on stderr (fail-loud, not hook silence). The text is STAGED
+/// unsent by default; `--submit` appends the Enter that submits it — the
+/// conservative default until the paste/submit behaviour is proven against
+/// each harness's own input box, not just a shell. The status gate refuses a
+/// non-idle session (mid-turn keystrokes interleave with the agent's own
+/// output) unless `--force` is given.
+pub fn send(session_id: &str, submit: bool, force: bool) -> i32 {
+    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let Some(rec) = recs.iter().find(|r| proto::field(r, "sid") == session_id) else {
+        eprintln!("bsctl: no live session {session_id}");
+        return 1;
+    };
+    let status = proto::field(rec, "status");
+    if !force && status != "waiting" {
+        eprintln!(
+            "bsctl: session {session_id} is '{status}', not idle — pass --force to send anyway"
+        );
+        return 1;
+    }
+    let Some(term_pid) = rec.get("term_pid").and_then(proto::py_int) else {
+        eprintln!("bsctl: session {session_id} has no terminal pid (no owning window)");
+        return 1;
+    };
+    let sock = format!("/tmp/kitty-{term_pid}");
+    if !Path::new(&sock).exists() {
+        eprintln!(
+            "bsctl: no kitty control socket for session {session_id} at {sock} — relaunch its \
+             window (remote control attaches per-window), or it isn't a kitty terminal"
+        );
+        return 1;
+    }
+
+    let mut text = Vec::new();
+    let _ = io::stdin().read_to_end(&mut text);
+    if submit {
+        text.push(b'\r'); // the Enter that submits the line
+    }
+
+    // `kitty @` ships with (and speaks the protocol of) the running kitty, the
+    // same version-matched-fallback logic ipc.rs uses for hyprctl. One window
+    // per socket, so no --match is needed.
+    let to = format!("unix:{sock}");
+    let mut child = match Command::new("kitty")
+        .args(["@", "--to", &to, "send-text", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("bsctl: cannot run kitty: {e}");
+            return 1;
+        }
+    };
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(&text);
+    } // drop closes stdin -> kitten sends and exits
+    match child.wait_with_output() {
+        Ok(o) if o.status.success() => 0,
+        Ok(o) => {
+            eprint!("bsctl: kitty send-text failed: {}", String::from_utf8_lossy(&o.stderr));
+            1
+        }
+        Err(e) => {
+            eprintln!("bsctl: kitty send-text failed: {e}");
+            1
+        }
+    }
 }
 
 /// One `agents get` text result — the table (newline-terminated), or ""
