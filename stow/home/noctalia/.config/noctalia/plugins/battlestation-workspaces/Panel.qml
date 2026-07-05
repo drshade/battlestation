@@ -17,7 +17,12 @@
 // empty — an ack is an answer), Reopen walks an answered ask back to open
 // with its text kept as a draft. Rows expand on CLICK anywhere in the row
 // body (single expansion, one ask at a time); answered rows expand to a
-// read-only view of their answer. Delivery is tracked, not assumed: an
+// read-only view of their answer. Ask TYPES render distinctly: a glyph per
+// type (question-mark / eye / info-circle) beside the urgency dot, and
+// notify rows — FYIs whose lifecycle is seen -> gone — expand to body +
+// "Got it" (dismiss) with no reply machinery at all; their creation also
+// toasts (Main.qml owns that, as the single dedupe point across bars).
+// Delivery is tracked, not assumed: an
 // answered row reads "awaiting pickup" until the asker's own MCP
 // collection stamps delivered_at, then "delivered ✓" — and the
 // default-on "Hide delivered" checkbox drops it from the list the moment
@@ -544,6 +549,9 @@ Item {
               readonly property bool replying: root.expandedId === askId
               readonly property bool open: ask.state === "open"
               readonly property bool dragging: root.dragId === askId
+              // An FYI's lifecycle is seen -> gone: notify rows swap the
+              // whole reply machinery for a single "Got it" (dismiss).
+              readonly property bool isNotify: ask.type === "notify"
 
           Layout.fillWidth: true
           spacing: Style.marginXS
@@ -617,6 +625,16 @@ Item {
                 opacity: askRow.open ? 1.0 : 0.4
               }
 
+              // Type at a glance (names verified against the Tabler map):
+              // question-mark / eye (review) / info-circle (notify, in the
+              // secondary accent so FYIs read different without shouting).
+              NIcon {
+                icon: askRow.isNotify ? "info-circle" : askRow.ask.type === "review" ? "eye" : "question-mark"
+                pointSize: Style.fontSizeS
+                color: askRow.isNotify ? Color.mSecondary : Color.mOnSurfaceVariant
+                opacity: askRow.open ? 1.0 : 0.5
+              }
+
               ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 0
@@ -676,7 +694,7 @@ Item {
             }
 
             RowLayout {
-              visible: askRow.open && (askRow.ask.options || []).length > 0
+              visible: askRow.open && !askRow.isNotify && (askRow.ask.options || []).length > 0
               Layout.fillWidth: true
               spacing: Style.marginXS
               NText {
@@ -696,7 +714,27 @@ Item {
               }
             }
 
+            // Notify expansion: body above, one acknowledgment below — no
+            // reply input, no Done, no draft wiring (the panel's draft state
+            // stays inert: no input exists to feed it, and persistDraft's
+            // unchanged-text guard makes the collapse paths no-ops).
             RowLayout {
+              visible: askRow.isNotify
+              Layout.fillWidth: true
+              spacing: Style.marginXS
+              Item {
+                Layout.fillWidth: true
+              }
+              NButton {
+                text: "Got it"
+                backgroundColor: Color.mPrimary
+                textColor: Color.mOnPrimary
+                onClicked: root.dismissAsk(askRow.askId)
+              }
+            }
+
+            RowLayout {
+              visible: !askRow.isNotify
               Layout.fillWidth: true
               spacing: Style.marginXS
               NTextInput {
