@@ -151,6 +151,14 @@ The stream already delivers more than the widget renders:
   for the agent plane.
 - **Doctor for the unmanaged** — `~/.local/bin` (where bsctl and all three
   harness binaries live) has no drift visibility at all.
+- **Doctor: flag gitignored files physically inside stow packages.** Stow
+  links whatever is in the package; git tracks only what isn't ignored —
+  when they disagree, live config silently depends on files a clone won't
+  have. Bit for real: plugin-manager-installed plugins (polkit-agent,
+  screen-toolkit) sat untracked-but-stowed for days, their live copies
+  symlinks into files git couldn't see. Doctor checks every TRACKED leaf;
+  the inverse check (ignored-but-present under `stow/<group>/`) is the
+  missing half.
 
 ## Small ergonomics
 
