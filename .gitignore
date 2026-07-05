@@ -50,6 +50,16 @@ stow/home/code/.config/Code - OSS/**
 # would only churn.
 stow/home/noctalia/.config/noctalia/colors.json
 
+# Noctalia TEMPLATE outputs (same derived-output class as colors.json): the
+# enabled templates in settings.json regenerate these into ~/.config on every
+# theme change — they live at the target as REAL files the template engine
+# owns (kitty's machinery even replaces current-theme.conf wholesale, which
+# is why stow must not own these paths). A fresh machine gets them on the
+# first theme apply.
+stow/home/kitty/.config/kitty/themes/
+stow/home/kitty/.config/kitty/current-theme.conf
+stow/home/btop/.config/btop/themes/
+
 # Noctalia plugins (~/.config/noctalia/plugins): default-deny — plugin code is
 # installed/updated by Noctalia's plugin manager, and plugins.json (tracked)
 # already records the source + enabled set; tracking third-party code here
