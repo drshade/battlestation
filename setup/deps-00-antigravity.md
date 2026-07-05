@@ -29,6 +29,12 @@ runtime, so no clean filter is needed.
   Claude's `~/.claude/CLAUDE.md` or Codex's `~/.codex/AGENTS.md` — so the
   asks-queue posting norm reaches agy sessions through the MCP tool
   descriptions alone.
+- **No turn-boundary answer injection.** agy's hook surface has no
+  UserPromptSubmit event and no context-injection output (no
+  `additionalContext` anywhere in the binary, probed 1.0.16), so the
+  `bsctl asks inbox` delivery hook the other harnesses run cannot be
+  wired: agy agents collect late answers via `get_ask` only (the norm the
+  tool descriptions carry).
 - **Between-turns status is approximate.** agy fires a trailing PostToolUse
   (→ thinking) after Stop — which is why Stop maps to `waiting` rather than
   `clear` (a clear would be resurrected as "thinking" moments later). An

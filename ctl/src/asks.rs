@@ -8,9 +8,9 @@
 //! order file. Reply text and completion are DECOUPLED — `reply` drafts
 //! without releasing a blocked asker, `complete` is the releasing
 //! transition, `answer` composes both. Delivery is TRACKED, not assumed:
-//! `delivered_at` stamps only when the answer reaches its asker (the two
-//! MCP pickup points — see [`mark_delivered`]). Queue order is FIFO; only
-//! the human reorders.
+//! `delivered_at` stamps only when the answer reaches its asker — the two
+//! MCP pickup points (see [`mark_delivered`]) plus [`inbox`]'s turn-start
+//! injection. Queue order is FIFO; only the human reorders.
 
 use std::fs;
 use std::io::Write;
@@ -615,6 +615,126 @@ pub fn order_get() -> i32 {
     0
 }
 
+// ---- inbox (turn-boundary delivery) -------------------------------------------
+
+/// The ownership rule shared by delivery stamping, the MCP `mine` label and
+/// the inbox: both identities non-empty AND equal. An unresolved identity
+/// (empty session) must never own anything via the empty==empty accident,
+/// and a row with no session belongs to nobody.
+pub fn owns(session: &str, owner: &str) -> bool {
+    !session.is_empty() && !owner.is_empty() && session == owner
+}
+
+/// Title cell for an inbox line: chars-safe truncation with an ellipsis
+/// (titles are the human's one-liners; the ANSWER is the payload and is
+/// never truncated).
+fn short_title(title: &str) -> String {
+    let mut it = title.chars();
+    let cut: String = it.by_ref().take(50).collect();
+    if it.next().is_some() {
+        format!("{cut}…")
+    } else {
+        cut
+    }
+}
+
+/// The context block one inbox delivery injects — pure for the tests.
+/// `(id, title, answer)` per delivered ask; a None answer is an ack-only
+/// completion and says so.
+pub fn inbox_text(delivered: &[(i64, String, Option<String>)]) -> String {
+    let mut out = String::new();
+    for (id, title, answer) in delivered {
+        let what = match answer {
+            Some(a) => format!("was answered: \"{a}\""),
+            None => "was completed without reply text (an acknowledgment)".to_string(),
+        };
+        out.push_str(&format!(
+            "[asks] Your ask #{id} (\"{}\") {what}\n",
+            short_title(title)
+        ));
+    }
+    if !out.is_empty() {
+        out.push_str("[asks] (Delivered — no need to re-raise these with the human.)");
+    }
+    out
+}
+
+/// `asks inbox` — turn-boundary delivery, the third pickup point (after
+/// the blocking `ask` return and an own-session `get_ask`): wired as a
+/// SYNCHRONOUS UserPromptSubmit hook, it hands the session's answered,
+/// undelivered asks to the agent as injected context the moment its next
+/// turn starts — the agent never has to remember to check. Hook surface,
+/// hook contract: payload JSON on stdin (session_id, falling back to agy's
+/// conversationId), an optional `--session-id` argv override outranking
+/// it, ALWAYS exit 0, and no session resolvable means print nothing.
+/// Collect-and-stamp happens under ONE store lock — the printed text IS
+/// the delivery, so the stamp rides the same write. Output is the
+/// hookSpecificOutput envelope (`additionalContext`) rather than bare
+/// text: Claude Code documents both forms for UserPromptSubmit, Codex's
+/// hook runtime models exactly this wire shape, and the envelope is the
+/// one format both parse (a harness that injected it raw would still be
+/// legible).
+pub fn inbox(args: &[String]) -> i32 {
+    // Tolerant --session-id extraction, agents-set discipline: this is a
+    // hook surface, so flag junk is ignored, never errored.
+    let mut session = String::new();
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a == "--session-id" {
+            session = args.get(i + 1).cloned().unwrap_or_default();
+            i += 2;
+        } else if let Some(v) = a.strip_prefix("--session-id=") {
+            session = v.to_string();
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    let mut input = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut input);
+    if session.is_empty() {
+        session = proto::session_key(&proto::parse_payload(&input));
+    }
+    if session.is_empty() {
+        return 0; // no identity, no inbox — silently, like every hook path
+    }
+    let delivered: Vec<(i64, String, Option<String>)> = with_store_lock(|| {
+        let (next, mut asks) = load();
+        let mut out = Vec::new();
+        for r in asks.iter_mut() {
+            if proto::field(r, "state") == "answered"
+                && r["delivered_at"].is_null()
+                && owns(&session, &proto::field(r, "session"))
+            {
+                out.push((
+                    r.get("id").and_then(Value::as_i64).unwrap_or(0),
+                    proto::field(r, "title"),
+                    r.get("answer").and_then(Value::as_str).map(str::to_string),
+                ));
+                r["delivered_at"] = json!(sys::now_f64());
+            }
+        }
+        if !out.is_empty() && save(next, &asks).is_err() {
+            // The write failing must not deliver-and-forget: an unstamped
+            // store means the next inbox re-delivers, which beats losing
+            // the answer. Print anyway.
+        }
+        out
+    });
+    if delivered.is_empty() {
+        return 0;
+    }
+    println!(
+        "{}",
+        json!({"hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": inbox_text(&delivered),
+        }})
+    );
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +748,37 @@ mod tests {
             "created": created, "answered_at": Value::Null,
             "delivered_at": Value::Null,
         })
+    }
+
+    #[test]
+    fn inbox_text_formats_answers_and_acks() {
+        assert_eq!(inbox_text(&[]), "");
+        let one = inbox_text(&[(26, "Overnight report".into(), Some("all working!".into()))]);
+        assert_eq!(
+            one,
+            "[asks] Your ask #26 (\"Overnight report\") was answered: \"all working!\"\n\
+             [asks] (Delivered — no need to re-raise these with the human.)"
+        );
+        // ack-only completions say so; long titles truncate chars-safe
+        let long = "x".repeat(60);
+        let two = inbox_text(&[(3, long.clone(), None)]);
+        assert!(two.contains("was completed without reply text"));
+        assert!(two.contains(&format!("(\"{}…\")", "x".repeat(50))));
+        // multi-ask: one line each, one trailer
+        let both = inbox_text(&[(1, "a".into(), Some("yes".into())), (2, "b".into(), None)]);
+        assert_eq!(both.matches("[asks] Your ask").count(), 2);
+        assert_eq!(both.matches("no need to re-raise").count(), 1);
+    }
+
+    #[test]
+    fn ownership_requires_both_sides_non_empty_and_equal() {
+        assert!(owns("sess-1", "sess-1"));
+        assert!(!owns("sess-1", "sess-2"));
+        // the empty==empty accident: an unresolved identity owns NOTHING,
+        // and a session-less row belongs to nobody
+        assert!(!owns("", ""));
+        assert!(!owns("", "sess-1"));
+        assert!(!owns("sess-1", ""));
     }
 
     #[test]

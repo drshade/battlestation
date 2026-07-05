@@ -12,3 +12,9 @@ without needed feedback is the failure mode the queue prevents. Use
 (review requests, completion reports). If an ask times out, keep working
 where you can and collect the answer later with `get_ask`; escalate by
 raising your ask's urgency via `update_ask`, never by re-posting.
+
+Answers you didn't wait for arrive on their own: a turn-start hook injects
+any answered ask of yours into your context (`[asks] ...` lines) the
+moment your next turn begins. **Before re-raising one of your asks with
+the human — mentioning it, asking for status, re-posting it — check it
+first with `get_ask`: it may already be answered.**

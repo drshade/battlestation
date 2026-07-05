@@ -116,6 +116,10 @@
             "async": true,
             "command": "$HOME/.local/bin/bsctl agents set --kind claude thinking",
             "type": "command"
+          },
+          {
+            "command": "$HOME/.local/bin/bsctl asks inbox",
+            "type": "command"
           }
         ]
       }

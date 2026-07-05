@@ -672,6 +672,15 @@ enum AsksCmd {
         #[command(subcommand)]
         cmd: AsksOrderCmd,
     },
+    /// Turn-boundary delivery hook; hook-event JSON on stdin (always exits 0)
+    Inbox {
+        /// [--session-id <s>] — override the payload's session key
+        // Raw tokens, NOT clap-typed args — this is a hook surface like
+        // `agents set`: a miswired --session-id must stay a silent exit 0,
+        // and a clap option with a missing value exits 2 loudly.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 /// asks get's optional narrowing: one ask or one session's asks.
@@ -985,6 +994,7 @@ fn main() {
                 AsksOrderCmd::Set { ids } => bsctl::asks::order_set(&ids),
                 AsksOrderCmd::Get => bsctl::asks::order_get(),
             },
+            AsksCmd::Inbox { args } => bsctl::asks::inbox(&args),
         },
         Cmd::Presence { cmd } => match cmd {
             PresenceCmd::Set { state, already } => bsctl::presence::set(

@@ -12,6 +12,16 @@ command = "$HOME/.local/bin/bsctl agents set --kind codex waiting"
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
 command = "$HOME/.local/bin/bsctl agents set --kind codex thinking"
+# Turn-boundary asks delivery: `asks inbox` emits the Claude-compatible
+# hookSpecificOutput/additionalContext envelope, which Codex's hook runtime
+# models (UserPromptSubmitHookSpecificOutputWire, probed on 0.142.5). A new
+# hook command needs the one-time /hooks re-trust. `|| true` is
+# load-bearing: a failing prompt-time hook (stale binary without the verb,
+# missing binary on a fresh machine) can block the human's prompt — an
+# injection hook's only acceptable failure mode is empty output + exit 0.
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "/bin/sh -c 'exec \"$HOME/.local/bin/bsctl\" asks inbox'"
 
 [[hooks.PreToolUse]]
 matcher = "*"
@@ -57,3 +67,9 @@ args = ["-c", 'exec "$HOME/.local/bin/bsctl" mcp --kind codex']
 # 2h (default 60s): the ask tool legitimately blocks for long waits —
 # the agent picks wait_secs; this is the client-side ceiling.
 tool_timeout_sec = 7200
+
+[mcp_servers.battlestation.tools.whoami]
+approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.list_asks]
+approval_mode = "approve"

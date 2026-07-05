@@ -94,6 +94,31 @@ impl TestEnv {
         assert_eq!(code, 0);
         serde_json::from_str(&out).unwrap()
     }
+
+    /// Run with a stdin payload (the hook-surface verbs read the event JSON
+    /// there); returns (exit code, stdout).
+    fn run_stdin(&self, args: &[&str], payload: &str) -> (i32, String) {
+        use std::io::Write;
+        let mut child = self
+            .cmd()
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        (
+            out.status.code().unwrap(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    }
 }
 
 impl Drop for TestEnv {
@@ -544,4 +569,68 @@ fn status_and_stream_carry_presence() {
     // and the text overview now shows the one-line human section
     let (_, text, _) = env.run(&["status"]);
     assert!(text.contains("human\n  idle"), "{text}");
+}
+
+#[test]
+fn inbox_delivers_once_and_stamps() {
+    let env = TestEnv::new("inbox");
+    let mine = env.post("Pick a color", &["--session", "s-me", "--option", "red"]);
+    let theirs = env.post("Foreign ask", &["--session", "s-other"]);
+    let open_mine = env.post("Still open", &["--session", "s-me"]);
+    assert_eq!(env.run(&["asks", "answer", &mine.to_string(), "red"]).0, 0);
+    assert_eq!(
+        env.run(&["asks", "answer", &theirs.to_string(), "blue"]).0,
+        0
+    );
+
+    // No session resolvable: silent exit 0, nothing printed, nothing stamped.
+    let (code, out) = env.run_stdin(&["asks", "inbox"], "{}");
+    assert_eq!((code, out.as_str()), (0, ""));
+    let (code, out) = env.run_stdin(&["asks", "inbox"], "not json");
+    assert_eq!((code, out.as_str()), (0, ""));
+
+    // The session's answered, undelivered ask is delivered: the envelope
+    // carries the [asks] block, and delivered_at lands in the store.
+    let payload = r#"{"session_id": "s-me"}"#;
+    let (code, out) = env.run_stdin(&["asks", "inbox"], payload);
+    assert_eq!(code, 0);
+    let v: Value = serde_json::from_str(&out).expect("hookSpecificOutput envelope");
+    assert_eq!(v["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit");
+    let ctx = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(ctx.contains(&format!("Your ask #{mine}")), "{ctx}");
+    assert!(ctx.contains("was answered: \"red\""), "{ctx}");
+    assert!(ctx.contains("no need to re-raise"), "{ctx}");
+    // the open ask and the foreign ask are NOT in the block
+    assert!(!ctx.contains(&format!("#{open_mine}")), "{ctx}");
+    assert!(!ctx.contains("blue"), "{ctx}");
+    let (_, detail, _) = env.run(&["asks", "get", "--id", &mine.to_string()]);
+    assert!(detail.contains("state    delivered"), "{detail}");
+    // the foreign session's ask stays undelivered
+    let (_, detail, _) = env.run(&["asks", "get", "--id", &theirs.to_string()]);
+    assert!(detail.contains("state    answered"), "{detail}");
+
+    // Second call: already delivered, nothing to say.
+    let (code, out) = env.run_stdin(&["asks", "inbox"], payload);
+    assert_eq!((code, out.as_str()), (0, ""));
+
+    // The --session-id override outranks the payload (agents-set precedence)
+    // and delivers the foreign session's answer to ITS owner.
+    let (code, out) = env.run_stdin(
+        &["asks", "inbox", "--session-id", "s-other"],
+        r#"{"session_id": "s-me"}"#,
+    );
+    assert_eq!(code, 0);
+    assert!(out.contains("blue"), "{out}");
+    // A valueless --session-id swallows only its slot: payload key rules,
+    // and s-me has nothing left -> silence (hook tolerance, exit 0).
+    let (code, out) = env.run_stdin(&["asks", "inbox", "--session-id"], payload);
+    assert_eq!((code, out.as_str()), (0, ""));
+
+    // An ack-only completion (no reply text) delivers as an acknowledgment.
+    let ack = env.post("Ack me", &["--session", "s-me"]);
+    assert_eq!(env.run(&["asks", "complete", &ack.to_string()]).0, 0);
+    let (_, out) = env.run_stdin(&["asks", "inbox"], payload);
+    assert!(out.contains("completed without reply text"), "{out}");
 }

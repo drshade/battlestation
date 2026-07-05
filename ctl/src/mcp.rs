@@ -92,7 +92,10 @@ pub fn tools_json() -> Value {
                  ride for a quick back-and-forth; pass a long wait (minutes to hours) when you are \
                  truly blocked and waiting IS the right use of your time. Consider list_asks first — \
                  queue depth and the human's notes tell you how long an answer might take. If the \
-                 wait expires the ask stays open; the human sees the queue either way."),
+                 wait expires the ask stays open; the human sees the queue either way. Answers you \
+                 didn't wait for are delivered into your context automatically at your next turn \
+                 (where the harness supports it) — and before RE-RAISING any ask with the human, \
+                 get_ask it first: it may already be answered."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -115,7 +118,9 @@ pub fn tools_json() -> Value {
             "description": "Post a non-blocking item to the human's attention queue: a review request, \
                             a completion report, anything the human should see even though you need no \
                             answer. Post these liberally — silent completion is almost as bad as a \
-                            silent assumption. Returns the ask id immediately.",
+                            silent assumption. Returns the ask id immediately. If the human replies, \
+                            the reply reaches you like any answer: injected at your next turn (where \
+                            the harness supports it), or via get_ask — check before re-raising.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -324,13 +329,10 @@ impl Identity {
     }
 }
 
-/// The ownership rule shared by delivery stamping and the `mine` label:
-/// both identities non-empty AND equal. An unresolved server (empty
-/// session) must never own anything via the empty==empty accident, and a
-/// row with no session belongs to nobody.
-pub fn owns(session: &str, owner: &str) -> bool {
-    !session.is_empty() && !owner.is_empty() && session == owner
-}
+/// The ownership rule: both identities non-empty AND equal. Lives in
+/// [`crate::asks`] (the inbox shares it); re-exported here because it is
+/// also this server's delivery-stamp and `mine`-label predicate.
+pub use crate::asks::owns;
 
 /// An ask row as the MCP surface emits it: the stored record plus a
 /// computed `mine` — server-side labeling so an agent never has to derive
@@ -930,16 +932,7 @@ mod tests {
         assert!(sink.is_empty(), "no progress without a blocked ask");
     }
 
-    #[test]
-    fn ownership_requires_both_sides_non_empty_and_equal() {
-        assert!(owns("sess-1", "sess-1"));
-        assert!(!owns("sess-1", "sess-2"));
-        // the empty==empty accident: an unresolved server owns NOTHING,
-        // and a session-less row belongs to nobody
-        assert!(!owns("", ""));
-        assert!(!owns("", "sess-1"));
-        assert!(!owns("sess-1", ""));
-    }
+    // (the ownership predicate's unit test lives with it in asks.rs)
 
     #[test]
     fn with_mine_labels_rows() {

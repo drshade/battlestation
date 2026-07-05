@@ -14,9 +14,12 @@ queue) — protocol contracts in `ctl/src/lib.rs`. The package also stows
 `~/.codex/AGENTS.md`, Codex's global instructions, carrying the asks-queue
 posting norm. Two out-of-band steps:
 
-- **Trust the hooks (one-time).** Codex refuses non-managed command hooks
-  until they are reviewed: open `codex` and approve them via `/hooks`, else
-  the status widget never sees Codex sessions.
+- **Trust the hooks (one-time, and again per change).** Codex refuses
+  non-managed command hooks until they are reviewed: open `codex` and
+  approve them via `/hooks`, else the status widget never sees Codex
+  sessions. Every added or edited hook command (e.g. the `asks inbox`
+  delivery hook) needs the same re-approval — an untrusted hook is
+  silently skipped.
 - Codex rewrites `config.toml` at runtime (project trust tables, `[tui.*]`
   state). That churn is projected out by the `codex-config` clean filter
   (`bin/filters/codex-config`, merged-config pattern per AGENTS.md); a fresh

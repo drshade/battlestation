@@ -165,18 +165,41 @@
 //! session gets) plus each harness's stowed global instructions.
 //!
 //! DELIVERY IS TRACKED, NOT ASSUMED: `delivered_at` stamps only when the
-//! answer actually reaches its asker — exactly two stamp points, both
-//! MCP-side: the blocking `ask` call returning the answer (the asker's
-//! own call by construction), and `get_ask` returning an ANSWERED ask to
-//! the session that posted it (both identities non-empty and equal — an
-//! unresolved server can never stamp on the empty==empty accident, and a
-//! foreign session peeking is not delivery). CLI reads, the panel,
-//! `list_asks` and the world NEVER stamp — a human looking is not
-//! delivery. Idempotent (first delivery wins); `reopen` clears it (the
-//! next completion is undelivered by definition). Tables render an
-//! answered+stamped row as `delivered`; the JSON `state` stays
-//! "answered" with delivered_at as the discriminator (delivery is a fact
-//! about an answered ask, not a third state).
+//! answer actually reaches its asker — exactly three stamp points: the
+//! blocking `ask` call returning the answer (the asker's own call by
+//! construction), `get_ask` returning an ANSWERED ask to the session that
+//! posted it, and `asks inbox` — turn-boundary delivery: a SYNCHRONOUS
+//! UserPromptSubmit hook (hook contract: payload on stdin, optional
+//! `--session-id` override, always exit 0, no session = print nothing)
+//! that hands the session's answered, undelivered asks to the agent as
+//! injected context the moment its next turn starts, collect-and-stamp
+//! under one lock (the printed text IS the delivery; a failed stamp write
+//! prints anyway — re-delivering beats losing an answer). WIRING NOTE for
+//! this and every future prompt-time hook referencing bsctl: the command
+//! is called DIRECTLY, no shell armor — a synchronous UserPromptSubmit
+//! hook that exits non-zero BLOCKS the human's prompt (seen live: a stale
+//! binary without the verb turned a clap usage error into a blocked
+//! prompt), and that loudness is DELIBERATE policy: a masked failure
+//! (`|| true`) would hide real breakage forever, while a blocked prompt
+//! gets fixed within the hour. The protection is deploy ordering — build
+//! and install the binary BEFORE wiring config to a new verb; the verb
+//! itself is contractually silent (exit 0) for every EXPECTED degraded
+//! case (no session, empty store). Its output is
+//! the hookSpecificOutput/additionalContext envelope: Claude Code
+//! documents it for UserPromptSubmit and Codex's hook runtime models the
+//! same wire shape (probed 0.142.5); agy has no injection surface — its
+//! agents collect via get_ask (see setup/deps-00-antigravity.md). All
+//! ownership checks share one predicate ([`asks::owns`]): both identities
+//! non-empty AND equal — an unresolved identity never owns anything via
+//! the empty==empty accident, and a foreign session peeking is not
+//! delivery. CLI reads, the panel, `list_asks` and the world NEVER stamp
+//! — a human looking is not delivery. Idempotent (first delivery wins);
+//! `reopen` clears it (the next completion is undelivered by definition).
+//! Tables render an answered+stamped row as `delivered`; the JSON `state`
+//! stays "answered" with delivered_at as the discriminator (delivery is a
+//! fact about an answered ask, not a third state). Dismissed-while-open
+//! is deliberately NOT inboxed: the blocking path's dismissal text and
+//! the `mine` rows cover it; a future need can add it here.
 //!
 //! Resolved queue order, emitted by every reader: open asks the order
 //! file lists (in list order, tokens matching ids textually), then
@@ -227,7 +250,11 @@
 //! return is also delivery stamp point 1 — see the asks section),
 //! `notify` (non-blocking review/FYI post), `list_asks` / `get_ask` (the
 //! queue and the late-answer collection; an own-session get_ask of an
-//! answered ask is delivery stamp point 2), `update_ask` (urgency/estimate only, own
+//! answered ask is delivery stamp point 2 — stamp point 3 is the `asks
+//! inbox` turn-start hook, which usually beats the agent to it: answers
+//! not waited for arrive as injected context on the next turn, and the
+//! descriptions tell agents to get_ask before ever RE-RAISING an ask
+//! with the human), `update_ask` (urgency/estimate only, own
 //! asks only — the two-namespaces rule enforced at the tool boundary),
 //! `world` (the status object; the MVP deliberately exposes NO mutating
 //! world tools — that needs the consent design), `whoami` (the server's
