@@ -25,7 +25,16 @@ done
 
 # Runtime/state/cache dirs that are never dotfiles — a report FILTER, not a
 # correctness mechanism. Edit freely; suppressed count is always shown.
-NOISE=(pulse dconf session mozilla gh ghc uv nautilus)
+# Triaged 2026-07-05: app-private state (discord, teams-for-linux, shelly,
+# cachyos*), Noctalia TEMPLATE outputs (gtk-3.0/4.0, qt5ct/qt6ct, kdeglobals
+# — the derived-output class, regenerated on every theme change), xdg-user-dirs
+# generated files, and kdeconnect (pairing certs + PRIVATE KEY — machine
+# state that must never be adopted into a published repo).
+NOISE=(pulse dconf session mozilla gh ghc uv nautilus
+  discord teams-for-linux shelly cachyos cachyos-hello.json
+  gtk-3.0 gtk-4.0 qt5ct qt6ct kdeglobals
+  user-dirs.dirs user-dirs.locale
+  kdeconnect)
 # Same idea for ~/.local/share/applications: entries written by tools about
 # themselves, not configuration to adopt.
 APP_NOISE=(claude-code-url-handler.desktop)

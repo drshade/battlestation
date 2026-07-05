@@ -37,3 +37,4 @@ typst                          # document typesetting
 # --- CLI utilities -----------------------------------------------------------
 tree
 shelly                         # modern pacman/AUR wrapper (config: ~/.config/shelly, unmanaged)
+sshfs                 # kde-connect plugin: browse phone files (SFTP mount)

@@ -25,3 +25,9 @@ sudo ufw allow KDEConnect
 
 ufw owns `/etc/ufw/user{,6}.rules`, so this isn't stowable — it's a one-off that
 persists across reboots once applied. Pair from the phone, then `kdeconnect-cli -l`.
+
+The bar integration is the `kde-connect` Noctalia plugin (per-device battery,
+notifications, ring, file browsing — needs `sshfs` for the latter, in the
+pacman manifest): registered in the tracked `plugins.json` and placed on the
+bar in `settings.json`, so a fresh machine gets it through the normal
+plugin-manager install flow.
