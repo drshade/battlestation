@@ -480,6 +480,11 @@ Item {
           labelSize: Style.fontSizeS
           checked: root.hideDelivered
           onToggled: checked => root.setHideDelivered(checked)
+          // NCheckbox is a fill-width RowLayout with an internal spacer that
+          // shoves the box to its far edge — stretched beside the fill-width
+          // title, its label strands mid-header. Compact keeps label + box
+          // together as one right-aligned unit.
+          Layout.fillWidth: false
         }
         NIconButton {
           icon: "close"
