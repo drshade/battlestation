@@ -87,9 +87,6 @@ hooks config).
 - Promote `battlestation-workspaces` to its own repo; this copy becomes an
   install location. Keep the widget's bsctl dependency optional (the
   state-file protocol is simple enough to consume directly).
-- De-vendor `keybind-cheatsheet` when upstream PRs merge — trigger and links
-  in `setup/noctalia-00-plugins.md`
-  (https://github.com/noctalia-dev/legacy-v4-plugins/pull/937).
 - Optional CI (gitleaks + shellcheck + `stow --simulate` + `cargo test` on
   push) — the repo is published.
 - Drift triage of remaining unmanaged `~/.config` entries as they catch the

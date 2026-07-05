@@ -54,13 +54,10 @@ stow/home/noctalia/.config/noctalia/colors.json
 # installed/updated by Noctalia's plugin manager, and plugins.json (tracked)
 # already records the source + enabled set; tracking third-party code here
 # duplicates upstream and churns on every update. Opt-ins are only for plugins
-# whose source of truth IS this repo. keybind-cheatsheet is temporary — it
-# carries two patches pending upstream (see setup/noctalia-00-plugins.md).
+# whose source of truth IS this repo.
 stow/home/noctalia/.config/noctalia/plugins/*
 !stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/
 !stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/**
-!stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/
-!stow/home/noctalia/.config/noctalia/plugins/keybind-cheatsheet/**
 
 # Rust build output (ctl/): cargo-generated, never tracked
 ctl/target/
