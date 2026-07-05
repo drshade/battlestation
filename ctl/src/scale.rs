@@ -11,7 +11,6 @@
 //! the reported value. The reported scale only seeds the start rung
 //! (nearest match) when no index is saved.
 
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -231,14 +230,9 @@ pub fn reflow_plan(
         .collect()
 }
 
-/// `${XDG_RUNTIME_DIR:-/tmp}/hypr-display-scale.<name>` (empty env counts
-/// as unset, like the sh `:-` default).
+/// `<runtime-dir>/hypr-display-scale.<name>` ([`crate::sys::runtime_dir`]).
 pub fn state_path(name: &str) -> PathBuf {
-    env::var_os("XDG_RUNTIME_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join(format!("hypr-display-scale.{name}"))
+    crate::sys::runtime_dir().join(format!("hypr-display-scale.{name}"))
 }
 
 // ---- command ----------------------------------------------------------------

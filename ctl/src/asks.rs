@@ -20,18 +20,14 @@ use serde_json::{Value, json};
 
 use crate::{proto, sys};
 
-/// `${XDG_RUNTIME_DIR:-/tmp}/battlestation-asks` — its own runtime dir, a
-/// SIBLING of battlestation-ws on purpose: the session scan treats that
-/// dir's non-dot files as session records, and the stream engine's trigger
-/// filter serves whole directories, so co-tenancy would tangle both.
-/// Runtime lifetime is deliberate: asks reference sessions, and neither
-/// survives a reboot.
+/// `<runtime-dir>/battlestation-asks` ([`sys::runtime_dir`] — env, then
+/// /run/user/<uid>, then /tmp) — its own dir, a SIBLING of battlestation-ws
+/// on purpose: the session scan treats that dir's non-dot files as session
+/// records, and the stream engine's trigger filter serves whole
+/// directories, so co-tenancy would tangle both. Runtime lifetime is
+/// deliberate: asks reference sessions, and neither survives a reboot.
 pub fn asks_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("battlestation-asks")
+    sys::runtime_dir().join("battlestation-asks")
 }
 
 /// `<dir>/asks.json` — one object `{"next_id": <int>, "asks": [..]}`,

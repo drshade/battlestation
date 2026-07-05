@@ -10,14 +10,28 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-/// `${XDG_RUNTIME_DIR:-/tmp}/battlestation-ws` (an empty env var counts as
-/// unset, like the sh `:-` default and python's `get(...) or "/tmp"`).
+/// The user runtime dir every bsctl state path hangs off: XDG_RUNTIME_DIR
+/// when set and non-empty, else the systemd-standard `/run/user/<uid>` IF
+/// it exists, else `/tmp`. The middle rung is load-bearing: some harnesses
+/// spawn MCP servers with a SCRUBBED environment (seen live: Codex 0.142.5
+/// dropped XDG_RUNTIME_DIR, so the server wrote a parallel store under
+/// /tmp and read an empty session dir — asks landed where no reader
+/// looks). The uid derivation needs no env at all, so a scrubbed child
+/// still converges on the same dirs as everyone else.
+pub fn runtime_dir() -> PathBuf {
+    if let Some(v) = env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
+        return PathBuf::from(v);
+    }
+    let run = PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
+    if run.is_dir() {
+        return run;
+    }
+    PathBuf::from("/tmp")
+}
+
+/// `<runtime-dir>/battlestation-ws` — the agent-session state dir.
 pub fn state_dir() -> PathBuf {
-    env::var_os("XDG_RUNTIME_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("battlestation-ws")
+    runtime_dir().join("battlestation-ws")
 }
 
 /// Temp-file + rename in the same dir keeps every write atomic for the

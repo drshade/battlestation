@@ -57,13 +57,13 @@ use serde_json::Value;
 
 use crate::sys;
 
-/// `${XDG_RUNTIME_DIR:-/run/user/<uid>}` (empty counts as unset; the uid
-/// default is restart_crashed_lock.sh's, for VT shells with a bare env).
+/// The shared resolver ([`sys::runtime_dir`]): env, then /run/user/<uid> —
+/// the uid rung was born here as restart_crashed_lock.sh's VT-shell walk
+/// and now serves every bsctl state path (scrubbed-env MCP spawns hit it
+/// too). A /tmp terminal fallback can't contain a hypr instance dir, so
+/// discovery below just finds nothing there — same as no Hyprland.
 fn runtime_dir() -> PathBuf {
-    env::var_os("XDG_RUNTIME_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })))
+    sys::runtime_dir()
 }
 
 /// Newest-mtime pick among instance-dir candidates — the
