@@ -5,9 +5,9 @@ function fish_greeting
         --pipe false \
         --kitty "$HOME/.config/fish/battlestation-logo.png" \
         --logo-preserve-aspect-ratio \
-        --logo-width 40 \
+        --logo-width 28 \
         --logo-padding 2 \
-        --logo-padding-top 4
+        --logo-padding-top 6
 end
 export PATH="$HOME/.local/bin:$PATH"
 
