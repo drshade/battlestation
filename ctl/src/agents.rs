@@ -404,7 +404,8 @@ pub fn send(session_id: &str, submit: bool, force: bool) -> i32 {
 /// The core of [`send`] with the text supplied directly rather than read from
 /// stdin — so in-process callers (the `asks wake` verb composes a fixed
 /// wakeup line) reuse the exact lookup, status gate, socket resolution and
-/// spawn without round-tripping through a pipe. `submit` appends the Enter.
+/// spawn without round-tripping through a pipe. `submit` sends the Enter as a
+/// SEPARATE, delayed keystroke (a CR in the same burst is racy — see below).
 pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i32 {
     let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
     let Some(rec) = recs.iter().find(|r| proto::field(r, "sid") == session_id) else {
@@ -431,17 +432,30 @@ pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i3
         return 1;
     }
 
-    let mut text = text.to_vec();
-    if submit {
-        text.push(b'\r'); // the Enter that submits the line
-    }
-
-    // `kitty @` ships with (and speaks the protocol of) the running kitty, the
-    // same version-matched-fallback logic ipc.rs uses for hyprctl. One window
-    // per socket, so no --match is needed.
+    // Send the text, then — when submitting — a SEPARATE Enter after a short
+    // beat. A CR appended to the SAME burst is racy: Claude Code's TUI paste
+    // detection folds a trailing CR into the pasted text as a literal newline
+    // instead of a submit about as often as not (observed live 2026-07-05 —
+    // identical bytes submitted one run, newlined the next). A lone CR arriving
+    // after the burst has settled reads as Enter deterministically.
     let to = format!("unix:{sock}");
+    if kitty_send_text(&to, text) != 0 {
+        return 1; // error already reported
+    }
+    if submit {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        return kitty_send_text(&to, b"\r");
+    }
+    0
+}
+
+/// Pipe `bytes` to `kitty @ --to <to> send-text --stdin`. `kitty @` ships with
+/// (and speaks the protocol of) the running kitty — the version-matched
+/// fallback logic ipc.rs uses for hyprctl. One window per socket, so no
+/// `--match` is needed. Nonzero + stderr on any spawn/exec failure.
+fn kitty_send_text(to: &str, bytes: &[u8]) -> i32 {
     let mut child = match Command::new("kitty")
-        .args(["@", "--to", &to, "send-text", "--stdin"])
+        .args(["@", "--to", to, "send-text", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -454,7 +468,7 @@ pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i3
         }
     };
     if let Some(mut si) = child.stdin.take() {
-        let _ = si.write_all(&text);
+        let _ = si.write_all(bytes);
     } // drop closes stdin -> kitten sends and exits
     match child.wait_with_output() {
         Ok(o) if o.status.success() => 0,
