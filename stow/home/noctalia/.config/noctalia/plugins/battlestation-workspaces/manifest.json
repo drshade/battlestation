@@ -26,8 +26,6 @@
       "overrideThemeColors": false,
       "outlinePills": false,
       "hideTrailing": true,
-      "breathScale": 1.045,
-      "breathMs": 1700,
       "activeMs": 1000,
       "waitS": 30,
       "jitter": 0.35,

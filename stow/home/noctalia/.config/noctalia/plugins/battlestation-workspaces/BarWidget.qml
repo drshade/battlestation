@@ -102,8 +102,8 @@ Item {
   // plain ids and look everything else up by id. displayList -- the
   // DelegateModel's model -- is rebuilt ONLY when the visible id SEQUENCE
   // changes, so pills (and the bots inside them) survive churn instead of
-  // being recreated, which used to reset every bot's breathing/emote timer
-  // and freeze animation on a busy workspace.
+  // being recreated, which used to reset every bot's emote timer and
+  // freeze animation on a busy workspace.
   property var orderedIds: []   // GLOBAL bs order (all displays), real ws-ids
   property var displayIds: []   // orderedIds filtered to this screen + trimmed: what the ListView shows
   property var displaySlots: [] // displaySlots[k] = 0-based slot of displayIds[k] in orderedIds (bs-id - 1)

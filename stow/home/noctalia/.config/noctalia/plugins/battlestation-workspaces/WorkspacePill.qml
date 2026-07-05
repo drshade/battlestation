@@ -120,7 +120,7 @@ Item {
       // One "squad" per agent instance here, keyed by session id. The outer model
       // is the sid LIST (identity-stable): a status/title/agent change leaves the
       // list untouched, so the squad isn't recreated -- its bots read new state
-      // from the maps and update in place, keeping their breathing/emote timers.
+      // from the maps and update in place, keeping their emote timers.
       // Only an instance starting/stopping changes the sequence (and then only this
       // pill's squads rebuild, never another workspace's).
       //

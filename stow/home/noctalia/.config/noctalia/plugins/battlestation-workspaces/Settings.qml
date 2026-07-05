@@ -16,8 +16,6 @@ ColumnLayout {
   property bool hideTrailing: true
 
   // Animation tunables (Advanced section)
-  property real breathScale: 1.045
-  property int breathMs: 1700
   property int activeMs: 1000
   property int waitS: 30
   property real jitter: 0.35
@@ -149,8 +147,6 @@ ColumnLayout {
     customColours = s.overrideThemeColors === true;
     outlinePills = s.outlinePills === true;
     hideTrailing = s.hideTrailing !== false;
-    breathScale = s.breathScale || 1.045;
-    breathMs = s.breathMs || 1700;
     activeMs = s.activeMs || 1000;
     waitS = s.waitS || 30;
     jitter = (s.jitter !== undefined ? s.jitter : 0.35);
@@ -172,8 +168,6 @@ ColumnLayout {
     s.overrideThemeColors = customColours;
     s.outlinePills = outlinePills;
     s.hideTrailing = hideTrailing;
-    s.breathScale = breathScale;
-    s.breathMs = breathMs;
     s.activeMs = activeMs;
     s.waitS = waitS;
     s.jitter = jitter;
@@ -326,36 +320,6 @@ ColumnLayout {
 
     NValueSlider {
       Layout.fillWidth: true
-      label: "Breathing amount"
-      text: ((root.breathScale - 1) * 100).toFixed(1) + "%"
-      from: 1.0
-      to: 1.12
-      stepSize: 0.005
-      value: root.breathScale
-      defaultValue: 1.045
-      showReset: true
-      onMoved: value => {
-        root.breathScale = value;
-        root.saveSettings();
-      }
-    }
-    NValueSlider {
-      Layout.fillWidth: true
-      label: "Breathing speed"
-      text: (root.breathMs / 1000).toFixed(1) + "s"
-      from: 600
-      to: 3000
-      stepSize: 100
-      value: root.breathMs
-      defaultValue: 1700
-      showReset: true
-      onMoved: value => {
-        root.breathMs = Math.round(value);
-        root.saveSettings();
-      }
-    }
-    NValueSlider {
-      Layout.fillWidth: true
       label: "Active emote gap"
       text: (root.activeMs / 1000).toFixed(1) + "s"
       from: 300
@@ -405,8 +369,6 @@ ColumnLayout {
       text: "Reset to defaults"
       icon: "refresh"
       onClicked: {
-        root.breathScale = 1.045;
-        root.breathMs = 1700;
         root.activeMs = 1000;
         root.waitS = 30;
         root.jitter = 0.35;

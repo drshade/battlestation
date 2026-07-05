@@ -1,12 +1,15 @@
 // Animations: one expressive bot for a single agent instance. Random emote
-// events (faces + bounce/wiggle), idle breathing, and a forced "poke" emote
-// when pokeNonce changes (workspace clicked / switched to). The mechanics here
-// are kind-agnostic; which faces/motions a kind uses (and its assets + label)
-// comes from Cfg's kind registry.
+// events (faces + bounce/wiggle) and a forced "poke" emote when pokeNonce
+// changes (workspace clicked / switched to). All motion is TRANSIENT — a
+// short burst then idle — deliberately: there is no continuous idle
+// animation (breathing was removed as a per-frame CPU cost that repainted
+// every bot forever for a pulse too subtle to notice at this size). The
+// mechanics here are kind-agnostic; which faces/motions a kind uses (and
+// its assets + label) comes from Cfg's kind registry.
 //
 // Structure: the root Item is STATIC (fixed geometry, no transforms) and
 // hosts the hover MouseArea; every visual transform — the commander lean,
-// the sub-bot spawn pop, and botImg's own breath/bounce/wiggle — applies to
+// the sub-bot spawn pop, and botImg's own bounce/wiggle — applies to
 // `body` or deeper. A hit region that moved with the animations let
 // containsMouse oscillate under a stationary cursor, flickering the tooltip.
 import QtQuick
@@ -69,16 +72,6 @@ Item {
     var base = status === "waiting" ? cfg.waitS * 1000 : cfg.activeMs;
     return base * rnd(1 - cfg.jitter, 1 + cfg.jitter);
   }
-  // Run one breath, re-jittering its amplitude + duration; loops via onFinished.
-  function breatheOnce() {
-    var amp = (cfg.breathScale - 1) * rnd(1 - cfg.jitter, 1 + cfg.jitter);
-    var dur = cfg.breathMs * rnd(1 - cfg.jitter, 1 + cfg.jitter);
-    breathUp.to = 1.0 + Math.max(0, amp);
-    breathDown.from = breathUp.to;
-    breathUp.duration = dur;
-    breathDown.duration = dur;
-    breathAnim.start();
-  }
   function showFace(emote) {
     bot.faceOverride = cfg.faceUrl(kind, status, emote);
     faceTimer.interval = cfg.faceHoldMs(emote);
@@ -117,14 +110,13 @@ Item {
   Component.onCompleted: {
     emoteTimer.interval = bot.nextDelay();
     emoteTimer.start();
-    breatheOnce();
     pokeReady = true;
     if (bot.subordinate)
       spawnIn.start();
   }
-  // Entrance pop for a freshly-spawned sub-bot. Targets body's scale (the
-  // breath animates botImg.scale), so the two compose instead of fighting —
-  // and the root (with its hover hit region) never scales.
+  // Entrance pop for a freshly-spawned sub-bot. Targets body's scale (a
+  // level above botImg's own bounce/wiggle, so they compose) — and the root
+  // (with its hover hit region) never scales.
   NumberAnimation {
     id: spawnIn
     target: body
@@ -226,29 +218,6 @@ Item {
           duration: 70
         }
       }
-      // Idle breathing: a slight scale pulse, re-jittered each cycle (see breatheOnce).
-      SequentialAnimation {
-        id: breathAnim
-        NumberAnimation {
-          id: breathUp
-          target: botImg
-          property: "scale"
-          from: 1.0
-          to: cfg.breathScale
-          duration: cfg.breathMs
-          easing.type: Easing.InOutSine
-        }
-        NumberAnimation {
-          id: breathDown
-          target: botImg
-          property: "scale"
-          from: cfg.breathScale
-          to: 1.0
-          duration: cfg.breathMs
-          easing.type: Easing.InOutSine
-        }
-        onFinished: Qt.callLater(bot.breatheOnce)
-      }
     }
   }
 
@@ -257,7 +226,7 @@ Item {
   // (set as `title` by the pill). NoButton so the press still falls through to
   // the pill delegate underneath -- click-to-switch and drag-reorder keep
   // working over the bots. Anchored to the STATIC root, never to `body`: the
-  // hit region must not breathe, lean, or pop with the visuals.
+  // hit region must not lean or pop with the visuals.
   MouseArea {
     anchors.fill: parent
     hoverEnabled: true
