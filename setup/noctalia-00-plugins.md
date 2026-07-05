@@ -11,3 +11,10 @@ the plugins enabled in `plugins.json`.
 Tracked exceptions (their source of truth is this repo):
 
 - `battlestation-workspaces` — homegrown.
+- `kde-connect` — **temporary**: upstream's 5s refresh loop calls the
+  daemon's `forceOnNetworkChange` DBus method, which tears down every live
+  device link — the widget caused the very connection-flapping it displayed
+  (diagnosed live 2026-07-05; the tracked copy polls `getDevices` instead).
+  **De-vendor once the fix lands upstream** (WerWolv/noctalia-kde-connect):
+  drop its `!` rules from `.gitignore`, `git rm -r --cached` the directory,
+  update via the plugin manager, delete this exception from this note.

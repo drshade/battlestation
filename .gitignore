@@ -68,6 +68,8 @@ stow/home/btop/.config/btop/themes/
 stow/home/noctalia/.config/noctalia/plugins/*
 !stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/
 !stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/**
+!stow/home/noctalia/.config/noctalia/plugins/kde-connect/
+!stow/home/noctalia/.config/noctalia/plugins/kde-connect/**
 
 # Rust build output (ctl/): cargo-generated, never tracked
 ctl/target/
