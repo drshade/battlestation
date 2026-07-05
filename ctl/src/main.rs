@@ -661,6 +661,9 @@ enum AsksCmd {
     Dismiss { id: i64 },
     /// Quick-tag an ask ("working on it"); empty text clears
     Note { id: i64, text: Vec<String> },
+    /// Nudge an idle asker's terminal to collect its answer (types a
+    /// `call get_ask` line; no-op if the asker is parked in the RPC)
+    Wake { id: i64 },
     /// Agent-side self-update: urgency and/or estimate (escalation lives here)
     Update {
         id: i64,
@@ -1005,6 +1008,7 @@ fn main() {
             AsksCmd::Reopen { id } => bsctl::asks::reopen(id),
             AsksCmd::Dismiss { id } => bsctl::asks::dismiss(id),
             AsksCmd::Note { id, text } => bsctl::asks::note(id, &text.join(" ")),
+            AsksCmd::Wake { id } => bsctl::asks::wake(id),
             AsksCmd::Update { id, fields } => {
                 bsctl::asks::update(id, fields.urgency.map(Urgency::as_str), fields.estimate_min)
             }

@@ -76,7 +76,10 @@ ask seeming small are NEVER reasons not to post: continuing without needed \
 feedback is the failure mode this queue exists to prevent. The human calls \
 this queue THE DECK — when they tell you to report, check in, flag \
 something, or let someone know \"via the Deck\" (or \"on the Deck\"), \
-they mean posting here with ask or notify.";
+they mean posting here with ask or notify. If a turn opens with a line like \
+\"[Deck] ask #N was answered — call get_ask N\", that is the Deck WAKING you: \
+an answer you were waiting on has landed and nothing else will deliver it — \
+call get_ask with that id to read it.";
 
 /// The `tools/list` payload. Schemas are deliberately plain (string/int/
 /// enum/array-of-string) — every harness's schema validator accepts them.

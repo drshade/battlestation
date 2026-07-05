@@ -23,6 +23,11 @@ Item {
   // every bar carries identical world state, so last-writer-wins is sound.
   // The asks panel (recreated on every open) binds to this for live updates.
   property var asksRows: []
+  // session id -> live status (waiting/thinking/tooling), pushed alongside
+  // asksRows by the bar's stream. The asks panel joins an ask's `session`
+  // against this to label its answer button Trigger (idle asker → a kitty
+  // wake fires) vs Enqueue (busy asker → the harness collects it later).
+  property var statusBySid: ({})
 
   // Toast NEW notify-type asks (an FYI's whole point is being seen — the
   // badge alone is too quiet for it). This singleton is the dedupe point:

@@ -396,6 +396,16 @@ pub fn get(kind: Option<&str>, session: Option<&str>, json_out: bool) -> i32 {
 /// non-idle session (mid-turn keystrokes interleave with the agent's own
 /// output) unless `--force` is given.
 pub fn send(session_id: &str, submit: bool, force: bool) -> i32 {
+    let mut text = Vec::new();
+    let _ = io::stdin().read_to_end(&mut text);
+    send_text(session_id, &text, submit, force)
+}
+
+/// The core of [`send`] with the text supplied directly rather than read from
+/// stdin — so in-process callers (the `asks wake` verb composes a fixed
+/// wakeup line) reuse the exact lookup, status gate, socket resolution and
+/// spawn without round-tripping through a pipe. `submit` appends the Enter.
+pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i32 {
     let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
     let Some(rec) = recs.iter().find(|r| proto::field(r, "sid") == session_id) else {
         eprintln!("bsctl: no live session {session_id}");
@@ -421,8 +431,7 @@ pub fn send(session_id: &str, submit: bool, force: bool) -> i32 {
         return 1;
     }
 
-    let mut text = Vec::new();
-    let _ = io::stdin().read_to_end(&mut text);
+    let mut text = text.to_vec();
     if submit {
         text.push(b'\r'); // the Enter that submits the line
     }

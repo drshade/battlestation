@@ -21,3 +21,7 @@ any answered ask of yours into your context (`[asks] ...` lines) the
 moment your next turn begins. **Before re-raising one of your asks with
 the human — mentioning it, asking for status, re-posting it — check it
 first with `get_ask`: it may already be answered.**
+
+If a turn opens with a line like `[Deck] ask #N was answered — call get_ask
+N`, that is the Deck **waking** you: an answer you were parked on has landed
+and nothing else will deliver it — call `get_ask` with that id to read it.

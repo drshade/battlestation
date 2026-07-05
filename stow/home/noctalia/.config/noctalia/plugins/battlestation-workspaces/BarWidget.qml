@@ -462,8 +462,13 @@ Item {
     // the value maps churn only when a status/title/kind actually changes.
     if (!root.sameInstances(sidsByWs, root.sidsByWs))
       root.sidsByWs = sidsByWs;
-    if (!root.sameKeySet(statusBySid, root.statusBySid))
+    if (!root.sameKeySet(statusBySid, root.statusBySid)) {
       root.statusBySid = statusBySid;
+      // Mirror to the singleton so the asks panel can label its answer
+      // button by the asker's live status (last-writer-wins, like asksRows).
+      if (pluginApi && pluginApi.mainInstance)
+        pluginApi.mainInstance.statusBySid = statusBySid;
+    }
     if (!root.sameKeySet(titleBySid, root.titleBySid))
       root.titleBySid = titleBySid;
     if (!root.sameKeySet(kindBySid, root.kindBySid))

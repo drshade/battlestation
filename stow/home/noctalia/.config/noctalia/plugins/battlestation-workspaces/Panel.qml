@@ -354,10 +354,42 @@ Item {
     askProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl"].concat(args);
     askProc.running = true;
   }
-  function answerAsk(id, text) {
+  // The asker's live status (waiting/thinking/tooling), joined from the bar's
+  // stream via the singleton; "" when unknown. Drives the answer button's
+  // label and the wake decision.
+  function sessionStatus(session) {
+    if (!main || !main.statusBySid || !session)
+      return "";
+    return main.statusBySid[String(session)] || "";
+  }
+  // Will answering this ask poke the asker's terminal? Only when it is parked
+  // IDLE (waiting) and NOT blocking — a blocking asker's `ask` RPC returns the
+  // answer directly (no prompt to type into), and a busy asker collects it at
+  // its next turn. Everything else just enqueues. This is the Trigger/Enqueue
+  // discriminator (contract in ctl/src/lib.rs, "DELIVERY vs WAKE").
+  function willWake(ask) {
+    return !!ask && ask.blocking !== true && sessionStatus(ask.session) === "waiting";
+  }
+  // The answer path shared by the option buttons, the answer button and the
+  // input's Enter. Always stores the answer (the queue is the source of
+  // truth); when the asker is idle, also fires `asks wake` — a TRIGGER, not a
+  // delivery: it types "call get_ask N" so the asker fetches the answer
+  // itself. The two are separate Processes fired back to back; ordering at the
+  // agent is causal (get_ask runs a whole turn later, long after the ms-scale
+  // answer write lands), so no explicit sequencing is needed. `asks wake`
+  // self-guards (blocking → no-op, busy/socket-less → the harness collects
+  // later), so a status race between label and click degrades to an enqueue.
+  function submitAnswer(id, text) {
     cancelPendingDraft(); // the answer supersedes any in-flight draft write
+    var wake = willWake(root.askById[String(id)]);
     if (text.length > 0)
       bsctl(["asks", "answer", String(id), text]);
+    else
+      bsctl(["asks", "complete", String(id)]);
+    if (wake) {
+      wakeProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "asks", "wake", String(id)];
+      wakeProc.running = true;
+    }
     root.expandedId = -1;
   }
   // The auto-save write: update the reply WITHOUT completing — a draft
@@ -366,18 +398,6 @@ Item {
   // text clears.
   function replyAsk(id, text) {
     bsctl(["asks", "reply", String(id), text]);
-  }
-  // Done: reply + complete when there's text; a bare completion (an
-  // ack-only answer is legitimate) when there isn't. The pending debounce
-  // is cancelled, not flushed — Done carries the input's current text
-  // itself, and a trailing draft write would overwrite the final answer.
-  function doneAsk(id, text) {
-    cancelPendingDraft();
-    if (text.length > 0)
-      bsctl(["asks", "answer", String(id), text]);
-    else
-      bsctl(["asks", "complete", String(id)]);
-    root.expandedId = -1;
   }
   function reopenAsk(id) {
     bsctl(["asks", "reopen", String(id)]);
@@ -431,6 +451,11 @@ Item {
   }
   Process {
     id: askProc
+  }
+  // Separate from askProc so the answer write and the wake nudge never clobber
+  // each other's command mid-run (they fire back to back in submitAnswer).
+  Process {
+    id: wakeProc
   }
 
   Item {
@@ -741,7 +766,7 @@ Item {
                   text: modelData
                   backgroundColor: Color.mPrimary
                   textColor: Color.mOnPrimary
-                  onClicked: root.answerAsk(askRow.askId, modelData)
+                  onClicked: root.submitAnswer(askRow.askId, modelData)
                 }
               }
             }
@@ -793,20 +818,23 @@ Item {
                 }
                 // Blur persists (editingFinished fires on focus loss and on
                 // Enter; the dedupe in persistDraft makes the Enter case a
-                // no-op after doneAsk's cancel).
+                // no-op after submitAnswer's cancel).
                 onEditingFinished: if (askRow.replying && askRow.open)
                   root.persistDraft()
                 onAccepted: if (askRow.open)
-                  root.doneAsk(askRow.askId, text)
+                  root.submitAnswer(askRow.askId, text)
               }
               NButton {
-                // Reply AND complete (empty text = ack-only completion).
-                // The draft needs no button: it auto-saves.
+                // Reply AND complete (empty text = ack-only completion); the
+                // draft needs no button: it auto-saves. The label is the
+                // outcome: "Trigger" when the idle asker will be woken to
+                // collect the answer, "Enqueue" when a busy/blocking asker
+                // collects it on its own (contract: lib.rs "DELIVERY vs WAKE").
                 visible: askRow.open
-                text: "Done"
+                text: root.willWake(askRow.ask) ? "Trigger" : "Enqueue"
                 backgroundColor: Color.mPrimary
                 textColor: Color.mOnPrimary
-                onClicked: root.doneAsk(askRow.askId, replyInput.text)
+                onClicked: root.submitAnswer(askRow.askId, replyInput.text)
               }
             }
 

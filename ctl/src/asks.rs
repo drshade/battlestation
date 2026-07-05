@@ -513,6 +513,37 @@ pub fn reopen(id: i64) -> i32 {
     })
 }
 
+/// `asks wake <id>` — nudge the asking session's terminal to collect an
+/// answer. The Deck is a read-only queue: an answer sits until the asker
+/// picks it up (its blocking `ask` RPC returns, a Claude/Codex turn-boundary
+/// `inbox` injection, or an explicit `get_ask`). A session PARKED IDLE at its
+/// prompt starts no turn, so nothing consumes the answer until the human pokes
+/// it — this is that poke. It is a TRIGGER, not a delivery: it types a fixed
+/// `[Deck] …call get_ask N` line (submitted) so the asker fetches the answer
+/// itself, which is the one path every harness has (agy has no turn injection)
+/// and which stamps `delivered_at` on its own via [`mark_delivered`] — so wake
+/// never carries answer content and never marks delivery. No-op (exit 0) when
+/// the ask is `blocking`: the parked RPC returns the answer directly, and
+/// there is no prompt to type into. Routing + the idle status gate live in
+/// [`crate::agents::send_text`]; a busy or socket-less session is its loud
+/// refusal (the answer is already stored — the harness collects it later).
+pub fn wake(id: i64) -> i32 {
+    let Some(r) = record(id) else {
+        eprintln!("bsctl asks: no ask #{id}");
+        return 1;
+    };
+    if blocking(&r) {
+        return 0; // parked in the RPC — answering already delivered it
+    }
+    let session = proto::field(&r, "session");
+    if session.is_empty() {
+        eprintln!("bsctl asks: ask #{id} has no session to wake");
+        return 1;
+    }
+    let text = format!("[Deck] ask #{id} was answered — call get_ask {id} to read the answer.");
+    crate::agents::send_text(&session, text.as_bytes(), true, false)
+}
+
 /// Stamp `delivered_at` — the answer actually REACHED its asker. Exactly
 /// two callers, both MCP-side (the blocking `ask` return and an
 /// own-session `get_ask` collection); CLI reads and the panel never stamp

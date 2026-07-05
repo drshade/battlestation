@@ -148,6 +148,21 @@
 //! still open" and the answer lands here to be collected later — an
 //! in-flight RPC is state in the wrong place over hour-scale waits).
 //!
+//! DELIVERY vs WAKE. An answer is delivered when the asker collects it: its
+//! blocking RPC returns, a Claude/Codex turn-boundary `inbox` injection, or an
+//! explicit `get_ask` (`get_ask` and the RPC both stamp `delivered_at`). A
+//! session PARKED IDLE at its prompt starts no turn, so nothing consumes the
+//! answer until it is poked — `asks wake <id>` is that poke. It is a TRIGGER,
+//! not a second delivery path: it types a fixed `[Deck] …call get_ask N` line
+//! (via [`agents::send_text`], submitted) so the asker fetches the answer
+//! itself — the one collection path every harness has (agy has no injection),
+//! which stamps delivery on its own. So wake carries no answer content and
+//! never touches `delivered_at`; it no-ops on a `blocking` ask (the RPC
+//! delivers, and there is no prompt to type into) and defers to the send
+//! status gate for a busy/socket-less session. The bar's answer button reads
+//! the asker's live status to label itself "Trigger" (idle → will wake) vs
+//! "Enqueue" (busy/blocking → the harness collects it later).
+//!
 //! State lives in `${XDG_RUNTIME_DIR:-/tmp}/battlestation-asks/` — its own
 //! dir, a SIBLING of battlestation-ws (the session scan owns that dir's
 //! non-dot namespace, and the stream engine's trigger filter serves whole
