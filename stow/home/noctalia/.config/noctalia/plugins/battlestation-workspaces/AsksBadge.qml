@@ -1,8 +1,12 @@
 // Open-asks badge: the count of asks awaiting the human, colored by the
-// queue's highest open urgency (any high -> error, else secondary). Click
-// toggles the asks panel (the triage surface). Pure presentation: the data
-// arrives through BarWidget's stream subscription and is handed in as plain
-// properties, so this stays a dumb capsule like UsageIndicator next door.
+// LIVE signal (the panel dot's language, one level up): green = at least
+// one agent is parked on an ask right now, holding its turn open; red =
+// the open items sit with nobody waiting live — a backlog going stale.
+// High-urgency presence is a panel-text concern, not a badge concern.
+// Click toggles the asks panel (the triage surface). Pure presentation:
+// the data arrives through BarWidget's stream subscription and is handed
+// in as plain properties, so this stays a dumb capsule like
+// UsageIndicator next door.
 import QtQuick
 import qs.Commons
 import qs.Widgets
@@ -14,7 +18,7 @@ Item {
   property var cfg: null
   property string screenName: ""
   property int count: 0
-  property bool anyHigh: false
+  property bool anyBlocking: false
   property int estMin: 0
   signal activated
 
@@ -35,7 +39,8 @@ Item {
     width: Math.max(height, label.implicitWidth + Style.marginS * 2)
     height: cfg.d
     radius: height / 2
-    color: badge.anyHigh ? Color.mError : Color.mSecondary
+    // mTertiary = the scheme's green (the dot's ground truth); mError = red.
+    color: badge.anyBlocking ? Color.mTertiary : Color.mError
 
     NText {
       id: label
@@ -44,7 +49,7 @@ Item {
       pointSize: cfg.d * cfg.textRatio
       applyUiScale: false
       font.weight: Style.fontWeightBold
-      color: badge.anyHigh ? Color.mOnError : Color.mOnSecondary
+      color: badge.anyBlocking ? Color.mOnTertiary : Color.mOnError
     }
   }
 

@@ -126,7 +126,7 @@ Item {
   property var asksRows: []
   property string asksKey: ""
   readonly property int asksOpen: countOpen(asksRows)
-  readonly property bool asksAnyHigh: anyHighOpen(asksRows)
+  readonly property bool asksAnyBlocking: anyBlockingOpen(asksRows)
   readonly property int asksEstMin: sumEstOpen(asksRows)
   function countOpen(rows) {
     var n = 0;
@@ -135,9 +135,11 @@ Item {
         n++;
     return n;
   }
-  function anyHighOpen(rows) {
+  // The badge's color feed: is any open ask holding an agent's turn open
+  // right now (`blocking` — the read-time-sanitized live signal)?
+  function anyBlockingOpen(rows) {
     for (var i = 0; i < rows.length; i++)
-      if (rows[i].state === "open" && rows[i].urgency === "high")
+      if (rows[i].state === "open" && rows[i].blocking === true)
         return true;
     return false;
   }
@@ -585,7 +587,7 @@ Item {
       cfg: config
       screenName: config.screenName
       count: root.asksOpen
-      anyHigh: root.asksAnyHigh
+      anyBlocking: root.asksAnyBlocking
       estMin: root.asksEstMin
       onActivated: root.toggleAsksPanel()
     }
