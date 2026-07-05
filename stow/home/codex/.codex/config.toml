@@ -73,3 +73,12 @@ approval_mode = "approve"
 
 [mcp_servers.battlestation.tools.list_asks]
 approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.ask]
+approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.get_ask]
+approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.notify]
+approval_mode = "approve"
