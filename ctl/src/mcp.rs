@@ -74,8 +74,8 @@ a judgment call you cannot defend making alone — you MUST post an ask rather \
 than proceed on an assumption. Queue depth, the human seeming busy, or your \
 ask seeming small are NEVER reasons not to post: continuing without needed \
 feedback is the failure mode this queue exists to prevent. The human calls \
-this queue THE BRIDGE — when they tell you to report, check in, flag \
-something, or let someone know \"via the Bridge\" (or \"on the Bridge\"), \
+this queue THE DECK — when they tell you to report, check in, flag \
+something, or let someone know \"via the Deck\" (or \"on the Deck\"), \
 they mean posting here with ask or notify.";
 
 /// The `tools/list` payload. Schemas are deliberately plain (string/int/
@@ -118,9 +118,9 @@ pub fn tools_json() -> Value {
         },
         {
             "name": "notify",
-            "description": "Post a non-blocking item to the human's attention queue — THE BRIDGE (see \
+            "description": "Post a non-blocking item to the human's attention queue — THE DECK (see \
                             ask): a review request, a completion report, anything the human should see \
-                            even though you need no answer. This is what \"let them know via the Bridge \
+                            even though you need no answer. This is what \"let them know via the Deck \
                             once done\" means. Post these liberally — silent completion is almost as bad \
                             as a silent assumption. Returns the ask id immediately. If the human replies, \
                             the reply reaches you like any answer: injected at your next turn (where \
@@ -738,7 +738,7 @@ fn handle_line(line: &str, srv: &mut Srv, out: &mut impl Write) -> Flow {
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "bsctl", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": format!(
-                        "This server is the Bridge — the desktop's shared attention queue. {NORM} \
+                        "This server is the Deck — the desktop's shared attention queue. {NORM} \
                          Use notify for anything the human should see without needing an answer.{ident}"),
                 }),
             ))

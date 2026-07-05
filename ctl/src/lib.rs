@@ -125,8 +125,8 @@
 //! surface. NAMING: the CLI domain and MCP verbs stay `asks`/`ask`/
 //! `notify` (the verb is the strongest possible tool-discovery signal for
 //! an agent); the human-facing surface — the bar panel/badge — is branded
-//! "the Bridge", and the MCP tool descriptions + harness norms teach that
-//! name so "report via the Bridge" maps to posting here. The store is the
+//! "the Deck", and the MCP tool descriptions + harness norms teach that
+//! name so "report via the Deck" maps to posting here. The store is the
 //! SOURCE OF TRUTH and RPCs are ephemeral: an
 //! ask outlives any connection (the stage-2 MCP `ask` tool may block
 //! briefly on a fresh ask as a fast path, but a timeout returns "ask #N
