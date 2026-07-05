@@ -444,7 +444,11 @@ QtObject {
       id: proc
       property string deviceId: ""
       property string filePath: ""
-      command: busctlCall("/modules/kdeconnect/devices/" + deviceId + "/share", "org.kde.kdeconnect.device.share", "shareUrl", [ "file://" + filePath ])
+      // `busctl call` needs the D-Bus type signature before the argument:
+      // shareUrl takes one string, so params are ["s", value] — the "s" was
+      // missing, so busctl misread the file path as the signature and the
+      // send silently no-op'd (verified live 2026-07-05).
+      command: busctlCall("/modules/kdeconnect/devices/" + deviceId + "/share", "org.kde.kdeconnect.device.share", "shareUrl", [ "s", "file://" + filePath ])
       stdout: StdioCollector {
         onStreamFinished: {
           proc.destroy()
