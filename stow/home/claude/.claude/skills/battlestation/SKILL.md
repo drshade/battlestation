@@ -3,14 +3,20 @@ name: battlestation
 description: >-
   Context for "battlestation" — The User's personal machine: a CachyOS +
   Hyprland + Noctalia (Quickshell) desktop whose configuration lives in the
-  dotfiles repo at ~/dev/battlestation. Load this whenever the user asks about
-  THIS machine — its desktop, environment, tools, apps, keybinds, theming,
-  services, or how anything on the system is set up, behaves, or should be
-  changed. The set of configured tools grows over time, so load it for any
-  machine/desktop/config question even if the topic doesn't obviously map to a
-  known tool — the answer very likely lives in this repo, and if it doesn't
-  yet, this is where it would be added. Applies even from outside the repo
-  directory.
+  dotfiles repo at ~/dev/battlestation. Load this BEFORE touching anything
+  about THIS machine, whether the user is ASKING how something works or
+  TELLING you to change/fix/configure it — displays and monitors (scale,
+  resolution, refresh, DPMS, arrangement, multi-monitor), workspaces and
+  keybinds, the bar/widgets/wallpaper/theming, audio, packages, services,
+  the shell, the agent harnesses, or the `bsctl` tool that drives much of
+  it. Reach for it on imperative hardware/desktop requests too ("bump eDP-1
+  to 1.75 scale", "rebind X", "restart the bar") — those are exactly what
+  it covers, and there is usually a purpose-built command (e.g.
+  `bsctl display set scale`) rather than raw hyprctl. The configured set
+  grows over time, so load it for ANY machine/desktop/config task even if
+  the topic doesn't obviously map to a known tool — the answer very likely
+  lives in this repo, and if it doesn't yet, this is where it would be
+  added. Applies even from outside the repo directory.
 ---
 
 # battlestation
