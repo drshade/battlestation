@@ -3,7 +3,7 @@ name: battlestation
 description: >-
   Context for "battlestation" — The User's personal machine: a CachyOS +
   Hyprland + Noctalia (Quickshell) desktop whose configuration lives in the
-  dotfiles repo at ~/dev/battlestation. Load this BEFORE touching anything
+  dotfiles repo at ~/repos/cachyos-dotfiles. Load this BEFORE touching anything
   about THIS machine, whether the user is ASKING how something works or
   TELLING you to change/fix/configure it — displays and monitors (scale,
   resolution, refresh, DPMS, arrangement, multi-monitor), workspaces and
@@ -24,11 +24,11 @@ description: >-
 **battlestation** is The User's personal desktop configuration for this machine.
 It is a single git repository — the source of truth for how the system is set up.
 
-- **Repo:** `~/dev/battlestation` (remote: `git@github.com:drshade/battlestation.git`)
+- **Repo:** `~/repos/cachyos-dotfiles` (remote: `git@github.com:drshade/cachyos-dotfiles.git`)
 - **OS:** CachyOS (Arch-based)
 - **Compositor:** Hyprland (Wayland)
 - **Shell/UI:** Noctalia — a Quickshell-based desktop shell
-- **Login shell:** fish
+- **Login shell:** zsh (oh-my-zsh; see setup/deps-00-zsh.md)
 - **Dotfile management:** GNU Stow, grouped by target root: `stow/<group>/<pkg>/`
   (`home/` → `$HOME`, `root/` → `/` for system configs like `/etc`)
 
@@ -37,10 +37,10 @@ It is a single git repository — the source of truth for how the system is set 
 This skill is deliberately thin. The repo documents itself and is the single
 source of truth — read it rather than answering from memory:
 
-1. `~/dev/battlestation/AGENTS.md` — **read this first.** Engineering principles
+1. `~/repos/cachyos-dotfiles/AGENTS.md` — **read this first.** Engineering principles
    and conventions for working in the repo.
-2. `~/dev/battlestation/README.md` — layout, the stow model, common commands.
-3. `~/dev/battlestation/setup/` — per-topic runbook notes on how this machine
+2. `~/repos/cachyos-dotfiles/README.md` — layout, the stow model, common commands.
+3. `~/repos/cachyos-dotfiles/setup/` — per-topic runbook notes on how this machine
    was configured (useful for "why is X set up this way?").
 4. The relevant package under `stow/<group>/<pkg>/` for the actual config files.
 
@@ -53,7 +53,7 @@ customised**, and groups come and go, so never assume a fixed list: check what
 exists now with
 
 ```sh
-ls ~/dev/battlestation/stow/*/
+ls ~/repos/cachyos-dotfiles/stow/*/
 ```
 
 Each directory holds that tool's config, mirroring its target
@@ -66,8 +66,8 @@ configured here yet, this repo is where it would be added.
 - Config files are **symlinked into place**, so editing a file under
   `stow/<group>/<pkg>/…` changes the live config immediately — no copy step.
 - After **adding new files** to a package, re-stow it:
-  `cd ~/dev/battlestation/stow/home && stow --restow --target="$HOME" <pkg>`
-  (or run `~/dev/battlestation/stow/stow-home.sh` to restow everything).
+  `cd ~/repos/cachyos-dotfiles/stow/home && stow --restow --target="$HOME" <pkg>`
+  (or run `~/repos/cachyos-dotfiles/stow/stow-home.sh` to restow everything).
 - Follow AGENTS.md's principles: correct-by-construction, one source of truth,
   and update the docs/runbook in the same change when structure changes.
 

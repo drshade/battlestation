@@ -9,4 +9,32 @@ hl.on("hyprland.start", function ()
     -- update on idle/resume transitions (contract in ctl/src/lib.rs).
     hl.exec_cmd("$HOME/.local/bin/bsctl presence set active")
     hl.exec_cmd("xhost +SI:localuser:root")
+
+    -- Chrome checks for a system notification server on D-Bus once at
+    -- browser-process startup; if Noctalia hasn't registered
+    -- org.freedesktop.Notifications yet, Chrome permanently falls back to
+    -- its own built-in notification windows (which get tiled full-size
+    -- instead of popping up as small toasts). exec_cmd is async, so the
+    -- wait and the launches must live in the same shell command to
+    -- actually gate the browser start.
+    hl.exec_cmd([[bash -c '
+        for i in $(seq 1 100); do
+            busctl --user status org.freedesktop.Notifications &>/dev/null && break
+            sleep 0.2
+        done
+        sleep 1
+
+        chrome_app() { /opt/google/chrome/google-chrome --profile-directory=Default "$@" & }
+
+        # Comms (workspace 1): Teams, WhatsApp, Outlook
+        chrome_app --app-id=ompifgpmddkgmclendfeacglnodjjndh --enable-features=WebRTCPipeWireCapturer --ozone-platform=wayland
+        chrome_app --app-id=hnpfjngllnobngcgfapefoaidbinmjnm
+        chrome_app --app-id=faolnafnngnfdaknnbpnkhgohbobgegn
+
+        # YouTube Music (scratchpad)
+        chrome_app --app-id=cinhimbnkkaeohfgghhklpknlkffjgod
+
+        # Board Game Arena (workspace 9 "BGA")
+        chrome_app --app-id=pogkokppkghfaeboimdkfifmcmlhngnl
+    ']])
 end)

@@ -38,3 +38,7 @@ typst                          # document typesetting
 tree
 shelly                         # modern pacman/AUR wrapper (config: ~/.config/shelly, unmanaged)
 sshfs                 # kde-connect plugin: browse phone files (SFTP mount)
+
+# --- shell (zsh) --------------------------------------------------------------
+zsh                            # login shell — setup/deps-00-zsh.md (config: stow/home/zsh)
+fzf                            # fuzzy finder; .zshrc keybindings + fzf-zsh-plugin

@@ -51,6 +51,17 @@ local primaryWorkspace = 1
 
 hl.window_rule({ match = { class = "^(.*\\.exe)$", float = true }, primaryWorkspace, center = true, fullscreen_state = 0 })
 hl.window_rule({ match = { class = "^(vesktop|discord)$" }, primaryWorkspace })
+
+-- Comms (workspace 1 "Comms"): Teams, WhatsApp, Outlook
+hl.window_rule({ match = { class = "^(chrome-ompifgpmddkgmclendfeacglnodjjndh-Default)$" }, workspace = primaryWorkspace }) -- Microsoft Teams (PWA)
+hl.window_rule({ match = { class = "^(chrome-hnpfjngllnobngcgfapefoaidbinmjnm-Default)$" }, workspace = primaryWorkspace }) -- WhatsApp Web (PWA)
+hl.window_rule({ match = { class = "^(chrome-faolnafnngnfdaknnbpnkhgohbobgegn-Default)$" }, workspace = primaryWorkspace }) -- Outlook (PWA)
+
+-- YouTube Music (PWA) -> scratchpad
+hl.window_rule({ match = { class = "^(chrome-cinhimbnkkaeohfgghhklpknlkffjgod-Default)$" }, workspace = "special" })
+
+-- Board Game Arena (PWA) -> workspace 9 "BGA"
+hl.window_rule({ match = { class = "^(chrome-pogkokppkghfaeboimdkfifmcmlhngnl-Default)$" }, workspace = 9 })
 hl.window_rule({ match = { class = "^(.*[Cc]alculator.*)$" }, float = true, size = "380 616" })
 hl.window_rule({ match = { class = "^(org.kde.keditfiletype)$" }, float = true })
 hl.window_rule({ match = { class = "^(org.kde.ark)$" }, size = "(monitor_w*0.40) (monitor_h*0.40)" })

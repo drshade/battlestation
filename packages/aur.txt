@@ -5,6 +5,7 @@
 # `make install-packages` applies it with an AUR helper (paru/yay) if one
 # is installed.
 #
-# Deliberately empty: nothing is installed from the AUR. If a foreign
-# package shows up in `make drift`, either declare it here (with a why) or
-# remove it.
+# If a foreign package shows up in `make drift`, either declare it here
+# (with a why) or remove it.
+
+google-chrome                  # default browser (hypr defaults.lua) + PWA apps (autostart.lua)

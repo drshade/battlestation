@@ -10,6 +10,7 @@ hl.config({
         -- sane bounds; raise delay if you get accidental doubled keystrokes.
         repeat_rate = 60,
         repeat_delay = 220,
+        numlock_by_default = true,
     },
 })
 
