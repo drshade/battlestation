@@ -19,6 +19,7 @@ github-cli                     # gh — setup/sshkeys-02-install-gh.md
 shellcheck                     # bin/doctor shell linting
 rustup                         # rust toolchain manager — builds ctl/ (bsctl); setup/deps-00-rust.md
 gitleaks                       # pre-commit secret scan (.githooks/pre-commit)
+yay                            # AUR helper — make install-packages applies packages/aur.txt
 
 # --- documented in setup/ notes ------------------------------------------
 code                           # setup/deps-00-vscode.md
@@ -38,3 +39,4 @@ typst                          # document typesetting
 tree
 shelly                         # modern pacman/AUR wrapper (config: ~/.config/shelly, unmanaged)
 sshfs                 # kde-connect plugin: browse phone files (SFTP mount)
+stress-ng                      # system / thermal stress testing
