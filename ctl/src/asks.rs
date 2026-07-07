@@ -862,22 +862,36 @@ fn set_inject(on: bool) -> i32 {
 }
 
 /// The nudge block one UserPromptSubmit injects when the checkbox is on — pure
-/// for the tests. `presence` is [`crate::presence::brief`]'s output; `open` is
-/// the count of open asks on the queue. Text is expected to evolve.
-pub fn inject_text(presence: &str, open: usize) -> String {
-    format!(
-        "[deck] The Deck IS the human's primary interface — the surface they watch and \
-         the channel through which they see you and answer you. It is not an escalation \
-         path of last resort; it is how you talk to them. Human presence: {presence}. \
-         Open items on the queue: {open}.\n\
-         [deck] Engage the human THROUGH the Deck as your default means of reaching them, \
-         not this terminal: post questions and decisions with the `ask` tool and wait for \
-         the answer; report progress, findings, reviews, and completions with `notify`. \
-         Inline chat is secondary — the human may not be reading this session, and the Deck \
-         is where your messages actually land. Anything that needs their attention or input \
-         belongs on the Deck: deciding an unsure point without asking, or reporting only \
-         inline, means it never reaches them."
-    )
+/// for the tests. `watched` is whether the human is at this session's terminal
+/// right now (active AND focused on its workspace); when false the terminal
+/// cannot reach them and only the Deck can. `presence` is
+/// [`crate::presence::brief`]'s output, `open` the queue depth, `posted` this
+/// session's own Deck posts (the behavioural stat). Text is expected to evolve.
+pub fn inject_text(watched: bool, presence: &str, open: usize, posted: usize) -> String {
+    let stats = format!("Posted this session: {posted}. Open on the queue: {open}.");
+    if watched {
+        format!(
+            "[deck] The human is at this terminal right now ({presence}, with this session's \
+             workspace on screen), so answering inline reaches them — reply here. {stats}\n\
+             [deck] Still use the Deck for anything that outlives their glance: `notify` \
+             decisions, findings, reviews, and completions they'll want after they look away, \
+             and `ask` (don't silently decide) anything you cannot defend. The instant they \
+             switch workspace or go idle, inline stops reaching them and the Deck is all that \
+             is left."
+        )
+    } else {
+        format!(
+            "[deck] The human is NOT at this terminal right now ({presence}; this session's \
+             workspace is not on screen). Nothing you write here reaches them — only the Deck \
+             does. {stats}\n\
+             [deck] Reach them through the Deck: `ask` for questions and decisions (then wait \
+             for the answer), `notify` for progress, findings, reviews, and completions. Cheap \
+             trigger — about to end this turn, ask something, or write a paragraph they need to \
+             read? It goes to the Deck, not just here.\n\
+             [deck] Anti-pattern (the exact failure this is fixing): answering a question only \
+             in the terminal while they are away — it never reached them."
+        )
+    }
 }
 
 /// `bsctl asks inject [on|off|toggle|status]` — control the checkbox, or (bare)
@@ -897,19 +911,68 @@ pub fn inject(args: &[String]) -> i32 {
     if !inject_enabled() {
         return 0; // checkbox off: inject nothing, silently (hook discipline)
     }
-    // Read-only: load() reads the store lock-free (writes land by atomic rename).
+    // Session identity from the hook payload (like inbox): lets us tell whether
+    // the human is looking at THIS session's workspace.
+    let mut input = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut input);
+    let session = proto::session_key(&proto::parse_payload(&input));
+
     let now = sys::now_f64();
-    let presence = crate::presence::brief(crate::presence::read().as_ref(), now);
+    let rec = crate::presence::read();
+    let presence = crate::presence::brief(rec.as_ref(), now);
+    let active = rec.as_ref().and_then(|r| r.get("state").and_then(Value::as_str)) == Some("active");
+
+    // Read-only: load() reads the store lock-free (writes land by atomic rename).
     let (_next, asks) = load();
     let open = asks.iter().filter(|r| proto::field(r, "state") == "open").count();
+    let posted = if session.is_empty() {
+        0
+    } else {
+        asks.iter().filter(|r| proto::field(r, "session") == session).count()
+    };
+
+    // Watched = human active AND this session's workspace on screen (visible on
+    // ANY monitor, not just the keyboard-focused one — a two-monitor human reads
+    // both). Either side unresolvable -> NOT watched: assume unreachable and steer
+    // to the Deck (the checkbox's whole point), never the reverse.
+    let agent_ws = ws_for_session(&session);
+    let watched = active && agent_ws.is_some_and(|w| visible_wss().contains(&w));
+
     println!(
         "{}",
         json!({"hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": inject_text(&presence, open),
+            "additionalContext": inject_text(watched, &presence, open, posted),
         }})
     );
     0
+}
+
+/// This session's workspace, read straight from its state file (no `scan`, so no
+/// GC side effects on a per-turn hook). None when unknown -> the caller treats
+/// the human as unreachable inline. Rejects a key with a path separator.
+fn ws_for_session(key: &str) -> Option<i64> {
+    if key.is_empty() || key.contains('/') {
+        return None;
+    }
+    let rec: Value = fs::read(sys::state_dir().join(key))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())?;
+    rec.get("ws").and_then(proto::py_int)
+}
+
+/// Every workspace currently ON SCREEN: the active workspace of each enabled
+/// display. A two-monitor human sees all of them, so this is "can they read
+/// inline", not keyboard focus. Empty when IPC is unavailable.
+fn visible_wss() -> Vec<i64> {
+    crate::ipc::json("monitors")
+        .map(|m| {
+            crate::ws::displays_from(&m)
+                .into_iter()
+                .filter_map(|d| d.active_ws)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -917,14 +980,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inject_text_carries_presence_count_and_the_ask_directive() {
-        let t = inject_text("idle 5m", 3);
+    fn inject_text_unwatched_is_deck_only_with_trigger_and_antipattern() {
+        let t = inject_text(false, "idle 5m", 2, 0);
         assert!(t.starts_with("[deck]"));
-        assert!(t.contains("Human presence: idle 5m"));
-        assert!(t.contains("Open items on the queue: 3"));
-        assert!(t.contains("`ask` tool"));
-        // Two [deck] lines: the status line and the directive line.
-        assert_eq!(t.matches("[deck]").count(), 2);
+        assert!(t.contains("NOT at this terminal"));
+        assert!(t.contains("`ask`") && t.contains("`notify`"));
+        assert!(t.contains("trigger"));
+        assert!(t.contains("Anti-pattern"));
+        assert!(t.contains("Posted this session: 0"));
+        assert!(t.contains("Open on the queue: 2"));
+    }
+
+    #[test]
+    fn inject_text_watched_permits_inline_but_routes_away_items() {
+        let t = inject_text(true, "active", 0, 3);
+        assert!(t.contains("at this terminal right now"));
+        assert!(t.contains("reply here"));
+        assert!(t.contains("`notify`"));
+        assert!(t.contains("Posted this session: 3"));
+        assert!(!t.contains("Anti-pattern")); // the hard warning is unwatched-only
     }
 
     fn ask(id: i64, state: &str, created: f64) -> Value {
