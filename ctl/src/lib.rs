@@ -220,6 +220,15 @@
 //! runtime flag (`asks inject on|off|toggle|status`; off by default and on
 //! every degraded case), when on it injects human presence + open-ask count
 //! + the post-an-ask directive under the same envelope, else prints nothing.
+//! `asks inject` is also context-aware: it resolves this session's workspace
+//! and only softens to "answer inline" when the human is active AND that
+//! workspace is on screen; otherwise it says the terminal cannot reach them.
+//! The "Background retrigger" checkbox adds a THIRD hook, `asks retrigger`,
+//! split across two events: `retrigger mark` stamps turn-start at
+//! UserPromptSubmit, and bare `asks retrigger` is a Stop hook that (gated on
+//! the flag, only when unwatched, once per stop via `stop_hook_active`)
+//! re-prompts a turn ending in a question with no ask/notify posted — the
+//! deterministic backstop behind the prose nudge. Both are off by default.
 //! WIRING NOTE for this and every future prompt-time hook referencing bsctl:
 //! the command
 //! is called DIRECTLY, no shell armor — a synchronous UserPromptSubmit

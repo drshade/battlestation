@@ -975,6 +975,170 @@ fn visible_wss() -> Vec<i64> {
         .unwrap_or_default()
 }
 
+// ---- retrigger (the "Background retrigger" checkbox: Stop-hook backstop) ------
+//
+// When on, a Stop hook re-prompts the agent if it ended a turn with a question
+// while the human was NOT watching and posted nothing to the Deck — the "I saw
+// the nudge but skipped it" path, caught deterministically instead of by prose.
+
+/// `<dir>/.retrigger` — the "Background retrigger" checkbox flag (see
+/// [`inject_file`] for the dot-prefix / ephemeral rationale).
+fn retrigger_file() -> PathBuf {
+    asks_dir().join(".retrigger")
+}
+
+fn retrigger_enabled() -> bool {
+    fs::read_to_string(retrigger_file()).map(|s| s.trim() == "on").unwrap_or(false)
+}
+
+fn set_retrigger(on: bool) -> i32 {
+    let dir = asks_dir();
+    if let Err(e) = fs::create_dir_all(&dir) {
+        eprintln!("bsctl asks retrigger: {}: {e}", dir.display());
+        return 1;
+    }
+    if let Err(e) = fs::write(retrigger_file(), if on { "on\n" } else { "off\n" }) {
+        eprintln!("bsctl asks retrigger: {}: {e}", retrigger_file().display());
+        return 1;
+    }
+    println!("{}", if on { "on" } else { "off" });
+    0
+}
+
+/// `<dir>/.turn-<session>` — per-session turn-start timestamp, stamped at
+/// UserPromptSubmit (`retrigger mark`) so the Stop backstop can tell whether a
+/// Deck item was posted during the turn that just ended.
+fn turn_file(session: &str) -> PathBuf {
+    asks_dir().join(format!(".turn-{session}"))
+}
+
+/// Whether the last assistant TEXT message in a Claude transcript (JSONL) ends
+/// with '?'. Pure for tests. Skips metadata lines and text-less (tool-only)
+/// assistant turns; unparseable input -> false.
+pub fn transcript_ends_with_question(transcript: &str) -> bool {
+    for line in transcript.lines().rev() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let text: String = v
+            .pointer("/message/content")
+            .and_then(Value::as_array)
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        if text.trim().is_empty() {
+            continue; // tool-only assistant turn — not the visible response
+        }
+        return text.trim_end().ends_with('?');
+    }
+    false
+}
+
+/// The backstop rule, isolated for the truth-table test. All four already
+/// gated (enabled, session known) before this is reached.
+fn should_retrigger(unwatched: bool, ended_with_q: bool, posted_this_turn: bool, already: bool) -> bool {
+    unwatched && ended_with_q && !posted_this_turn && !already
+}
+
+const RETRIGGER_REASON: &str = "You ended your turn with a question, but the human is not \
+    looking at this terminal right now (idle, or on another workspace) — they will not see it \
+    here. Post the question to the Deck with the `ask` tool so it reaches them. If it does not \
+    truly need the human, you may stop without asking.";
+
+/// `bsctl asks retrigger [on|off|toggle|status|mark]` — control the checkbox;
+/// `mark` stamps turn-start (UserPromptSubmit); bare is the Stop-hook backstop
+/// that emits a block decision to re-prompt. Hook surface: always exits 0.
+pub fn retrigger(args: &[String]) -> i32 {
+    match args.first().map(String::as_str) {
+        Some("on") => return set_retrigger(true),
+        Some("off") => return set_retrigger(false),
+        Some("toggle") => return set_retrigger(!retrigger_enabled()),
+        Some("status") => {
+            println!("{}", if retrigger_enabled() { "on" } else { "off" });
+            return 0;
+        }
+        Some("mark") => {
+            if !retrigger_enabled() {
+                return 0;
+            }
+            let session = read_session_from_stdin();
+            if session.is_empty() || session.contains('/') {
+                return 0;
+            }
+            let _ = fs::create_dir_all(asks_dir());
+            let _ = fs::write(turn_file(&session), format!("{}", sys::now_f64()));
+            return 0;
+        }
+        _ => {}
+    }
+
+    // Bare: the Stop-hook backstop.
+    if !retrigger_enabled() {
+        return 0;
+    }
+    let mut input = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut input);
+    let payload = proto::parse_payload(&input);
+    // Never loop: if we already re-prompted this stop, let it end.
+    if payload.get("stop_hook_active").and_then(Value::as_bool).unwrap_or(false) {
+        return 0;
+    }
+    let session = proto::session_key(&payload);
+    if session.is_empty() {
+        return 0;
+    }
+
+    // Watched? (same rule as inject) — if the human can see this terminal, inline
+    // was fine; never nag.
+    let rec = crate::presence::read();
+    let active = rec.as_ref().and_then(|r| r.get("state").and_then(Value::as_str)) == Some("active");
+    let agent_ws = ws_for_session(&session);
+    let unwatched = !(active && agent_ws.is_some_and(|w| visible_wss().contains(&w)));
+
+    let transcript = payload
+        .get("transcript_path")
+        .and_then(Value::as_str)
+        .and_then(|p| fs::read_to_string(p).ok())
+        .unwrap_or_default();
+    let ended_q = transcript_ends_with_question(&transcript);
+
+    // Did this session post to the Deck since turn-start? No baseline stamp ->
+    // treat as "posted" (can't prove otherwise; never nag on doubt).
+    let posted_this_turn = match fs::read_to_string(turn_file(&session))
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+    {
+        Some(ts) => {
+            let (_next, asks) = load();
+            asks.iter().any(|r| {
+                proto::field(r, "session") == session
+                    && r.get("created").and_then(Value::as_f64).unwrap_or(0.0) > ts
+            })
+        }
+        None => true,
+    };
+
+    if should_retrigger(unwatched, ended_q, posted_this_turn, false) {
+        println!("{}", json!({"decision": "block", "reason": RETRIGGER_REASON}));
+    }
+    0
+}
+
+/// Read the hook payload from stdin and return its session key ("" if none).
+fn read_session_from_stdin() -> String {
+    let mut input = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut input);
+    proto::session_key(&proto::parse_payload(&input))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -999,6 +1163,32 @@ mod tests {
         assert!(t.contains("`notify`"));
         assert!(t.contains("Posted this session: 3"));
         assert!(!t.contains("Anti-pattern")); // the hard warning is unwatched-only
+    }
+
+    #[test]
+    fn transcript_question_detection_skips_metadata_and_tool_turns() {
+        let q = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Which one do you want?"}]}}
+{"type":"permissionMode","permissionMode":"default"}"#;
+        assert!(transcript_ends_with_question(q));
+
+        // Last assistant TEXT ends with a period, even though a later tool_use
+        // turn and metadata follow.
+        let statement = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done — committed."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash"}]}}
+{"type":"mode","mode":"x"}"#;
+        assert!(!transcript_ends_with_question(statement));
+
+        assert!(!transcript_ends_with_question("")); // empty -> false
+        assert!(!transcript_ends_with_question("not json")); // junk -> false
+    }
+
+    #[test]
+    fn should_retrigger_only_when_unwatched_unposted_question_first_time() {
+        assert!(should_retrigger(true, true, false, false)); // the one case
+        assert!(!should_retrigger(false, true, false, false)); // watched -> no
+        assert!(!should_retrigger(true, false, false, false)); // no question -> no
+        assert!(!should_retrigger(true, true, true, false)); // already posted -> no
+        assert!(!should_retrigger(true, true, false, true)); // re-prompt loop -> no
     }
 
     fn ask(id: i64, state: &str, created: f64) -> Value {

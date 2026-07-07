@@ -691,6 +691,14 @@ enum AsksCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// The "Background retrigger" checkbox: `on|off|toggle|status` control it;
+    /// `mark` stamps turn-start (UserPromptSubmit); bare is the Stop-hook
+    /// backstop that re-prompts an unwatched turn that ended with a question
+    Retrigger {
+        /// Raw tokens (hook surface like `inbox`): a control word, `mark`, or none.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 /// asks get's optional narrowing: one ask or one session's asks.
@@ -1025,6 +1033,7 @@ fn main() {
             },
             AsksCmd::Inbox { args } => bsctl::asks::inbox(&args),
             AsksCmd::Inject { args } => bsctl::asks::inject(&args),
+            AsksCmd::Retrigger { args } => bsctl::asks::retrigger(&args),
         },
         Cmd::Presence { cmd } => match cmd {
             PresenceCmd::Set { state, already } => bsctl::presence::set(

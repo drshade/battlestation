@@ -83,6 +83,10 @@
             "async": true,
             "command": "$HOME/.local/bin/bsctl agents set --kind claude waiting",
             "type": "command"
+          },
+          {
+            "command": "$HOME/.local/bin/bsctl asks retrigger",
+            "type": "command"
           }
         ]
       }
@@ -123,6 +127,10 @@
           },
           {
             "command": "$HOME/.local/bin/bsctl asks inject",
+            "type": "command"
+          },
+          {
+            "command": "$HOME/.local/bin/bsctl asks retrigger mark",
             "type": "command"
           }
         ]

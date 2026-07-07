@@ -118,6 +118,7 @@ Item {
   onPluginApiChanged: {
     loadHideDelivered();
     loadInject();
+    loadRetrigger();
   }
   function setHideDelivered(on) {
     hideDelivered = on;
@@ -151,6 +152,30 @@ Item {
       pluginApi.saveSettings();
     }
     pushInject(on);
+  }
+
+  // ---- "Background retrigger" checkbox: Stop-hook backstop -------------------
+  // On: when a turn ends with a question while the human isn't looking at this
+  // session, bsctl's Stop hook re-prompts the agent to post it to the Deck.
+  // Same persistence model as Inject (pluginSettings truth, pushed to bsctl's
+  // ephemeral flag on load and on toggle).
+  property bool retriggerOn: false
+  function pushRetrigger(on) {
+    retriggerProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "asks", "retrigger", on ? "on" : "off"];
+    retriggerProc.running = true;
+  }
+  function loadRetrigger() {
+    if (pluginApi && pluginApi.pluginSettings)
+      retriggerOn = pluginApi.pluginSettings.asksRetrigger === true;
+    pushRetrigger(retriggerOn);
+  }
+  function setRetrigger(on) {
+    retriggerOn = on;
+    if (pluginApi && pluginApi.pluginSettings) {
+      pluginApi.pluginSettings.asksRetrigger = on;
+      pluginApi.saveSettings();
+    }
+    pushRetrigger(on);
   }
   function sameIdList(a, b) {
     if (!a || !b || a.length !== b.length)
@@ -491,6 +516,10 @@ Item {
   Process {
     id: injectProc
   }
+  // Likewise for the background-retrigger flag sync.
+  Process {
+    id: retriggerProc
+  }
 
   Item {
     id: panelContainer
@@ -566,6 +595,15 @@ Item {
           checked: root.injectOn
           onToggled: checked => root.setInject(checked)
           // Standing per-turn nudge to agents to USE the Deck (see setInject).
+          Layout.fillWidth: false
+        }
+        NCheckbox {
+          label: "Background retrigger"
+          labelSize: Style.fontSizeS
+          checked: root.retriggerOn
+          onToggled: checked => root.setRetrigger(checked)
+          // Stop-hook backstop: re-prompt an unwatched turn that ended with an
+          // unposted question (see setRetrigger).
           Layout.fillWidth: false
         }
         NCheckbox {
