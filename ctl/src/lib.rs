@@ -214,8 +214,14 @@
 //! that hands the session's answered, undelivered asks to the agent as
 //! injected context the moment its next turn starts, collect-and-stamp
 //! under one lock (the printed text IS the delivery; a failed stamp write
-//! prints anyway — re-delivering beats losing an answer). WIRING NOTE for
-//! this and every future prompt-time hook referencing bsctl: the command
+//! prints anyway — re-delivering beats losing an answer). A SECOND
+//! synchronous UserPromptSubmit hook, `asks inject`, is the "Inject"
+//! checkbox's standing nudge (NOT delivery — it never stamps): gated on a
+//! runtime flag (`asks inject on|off|toggle|status`; off by default and on
+//! every degraded case), when on it injects human presence + open-ask count
+//! + the post-an-ask directive under the same envelope, else prints nothing.
+//! WIRING NOTE for this and every future prompt-time hook referencing bsctl:
+//! the command
 //! is called DIRECTLY, no shell armor — a synchronous UserPromptSubmit
 //! hook that exits non-zero BLOCKS the human's prompt (seen live: a stale
 //! binary without the verb turned a clap usage error into a blocked

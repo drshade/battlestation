@@ -833,9 +833,99 @@ pub fn inbox(args: &[String]) -> i32 {
     0
 }
 
+// ---- inject (the "Inject" checkbox: standing turn-start nudge) ----------------
+
+/// `<dir>/.inject` — the "Inject" checkbox flag: contents `on` enable the
+/// UserPromptSubmit nudge block, anything else (or absent) is off. DOT-prefixed
+/// so writing it never trips the stream engine's non-dot trigger. Runtime
+/// lifetime like the rest of the Deck: a fresh boot starts with it off.
+fn inject_file() -> PathBuf {
+    asks_dir().join(".inject")
+}
+
+fn inject_enabled() -> bool {
+    fs::read_to_string(inject_file()).map(|s| s.trim() == "on").unwrap_or(false)
+}
+
+fn set_inject(on: bool) -> i32 {
+    let dir = asks_dir();
+    if let Err(e) = fs::create_dir_all(&dir) {
+        eprintln!("bsctl asks inject: {}: {e}", dir.display());
+        return 1;
+    }
+    if let Err(e) = fs::write(inject_file(), if on { "on\n" } else { "off\n" }) {
+        eprintln!("bsctl asks inject: {}: {e}", inject_file().display());
+        return 1;
+    }
+    println!("{}", if on { "on" } else { "off" });
+    0
+}
+
+/// The nudge block one UserPromptSubmit injects when the checkbox is on — pure
+/// for the tests. `presence` is [`crate::presence::brief`]'s output; `open` is
+/// the count of open asks on the queue. Text is expected to evolve.
+pub fn inject_text(presence: &str, open: usize) -> String {
+    format!(
+        "[deck] The Deck IS the human's primary interface — the surface they watch and \
+         the channel through which they see you and answer you. It is not an escalation \
+         path of last resort; it is how you talk to them. Human presence: {presence}. \
+         Open items on the queue: {open}.\n\
+         [deck] Engage the human THROUGH the Deck as your default means of reaching them, \
+         not this terminal: post questions and decisions with the `ask` tool and wait for \
+         the answer; report progress, findings, reviews, and completions with `notify`. \
+         Inline chat is secondary — the human may not be reading this session, and the Deck \
+         is where your messages actually land. Anything that needs their attention or input \
+         belongs on the Deck: deciding an unsure point without asking, or reporting only \
+         inline, means it never reaches them."
+    )
+}
+
+/// `bsctl asks inject [on|off|toggle|status]` — control the checkbox, or (bare)
+/// the UserPromptSubmit emit path. Hook surface: the emit path always exits 0,
+/// is silent unless the checkbox is on, and never clap-errors (raw args).
+pub fn inject(args: &[String]) -> i32 {
+    match args.first().map(String::as_str) {
+        Some("on") => return set_inject(true),
+        Some("off") => return set_inject(false),
+        Some("toggle") => return set_inject(!inject_enabled()),
+        Some("status") => {
+            println!("{}", if inject_enabled() { "on" } else { "off" });
+            return 0;
+        }
+        _ => {} // bare / unknown -> emit path
+    }
+    if !inject_enabled() {
+        return 0; // checkbox off: inject nothing, silently (hook discipline)
+    }
+    // Read-only: load() reads the store lock-free (writes land by atomic rename).
+    let now = sys::now_f64();
+    let presence = crate::presence::brief(crate::presence::read().as_ref(), now);
+    let (_next, asks) = load();
+    let open = asks.iter().filter(|r| proto::field(r, "state") == "open").count();
+    println!(
+        "{}",
+        json!({"hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": inject_text(&presence, open),
+        }})
+    );
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inject_text_carries_presence_count_and_the_ask_directive() {
+        let t = inject_text("idle 5m", 3);
+        assert!(t.starts_with("[deck]"));
+        assert!(t.contains("Human presence: idle 5m"));
+        assert!(t.contains("Open items on the queue: 3"));
+        assert!(t.contains("`ask` tool"));
+        // Two [deck] lines: the status line and the directive line.
+        assert_eq!(t.matches("[deck]").count(), 2);
+    }
 
     fn ask(id: i64, state: &str, created: f64) -> Value {
         json!({

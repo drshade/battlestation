@@ -684,6 +684,13 @@ enum AsksCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// The "Inject" checkbox: `on|off|toggle|status` control it; bare is the
+    /// UserPromptSubmit nudge emit (presence + open count + the ask directive)
+    Inject {
+        /// Raw tokens (hook surface like `inbox`): a control word or nothing.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 /// asks get's optional narrowing: one ask or one session's asks.
@@ -1017,6 +1024,7 @@ fn main() {
                 AsksOrderCmd::Get => bsctl::asks::order_get(),
             },
             AsksCmd::Inbox { args } => bsctl::asks::inbox(&args),
+            AsksCmd::Inject { args } => bsctl::asks::inject(&args),
         },
         Cmd::Presence { cmd } => match cmd {
             PresenceCmd::Set { state, already } => bsctl::presence::set(

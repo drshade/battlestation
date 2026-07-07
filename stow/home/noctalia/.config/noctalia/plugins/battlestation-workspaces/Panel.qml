@@ -115,13 +115,42 @@ Item {
     if (pluginApi && pluginApi.pluginSettings)
       hideDelivered = pluginApi.pluginSettings.asksHideDelivered !== false;
   }
-  onPluginApiChanged: loadHideDelivered()
+  onPluginApiChanged: {
+    loadHideDelivered();
+    loadInject();
+  }
   function setHideDelivered(on) {
     hideDelivered = on;
     if (pluginApi && pluginApi.pluginSettings) {
       pluginApi.pluginSettings.asksHideDelivered = on;
       pluginApi.saveSettings();
     }
+  }
+
+  // ---- "Inject" checkbox: gate the per-turn UserPromptSubmit nudge -----------
+  // On: bsctl's UserPromptSubmit hook (`asks inject`) injects the Deck reminder
+  // + presence + open-count into every agent turn. pluginSettings is the
+  // PERSISTENT truth; bsctl's runtime flag (what the hook reads) is ephemeral —
+  // cleared on reboot — so we PUSH the preference to it on load and on every
+  // toggle. injectProc is separate from askProc so the sync never clobbers an
+  // in-flight asks action (same reasoning as wakeProc).
+  property bool injectOn: false
+  function pushInject(on) {
+    injectProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "asks", "inject", on ? "on" : "off"];
+    injectProc.running = true;
+  }
+  function loadInject() {
+    if (pluginApi && pluginApi.pluginSettings)
+      injectOn = pluginApi.pluginSettings.asksInject === true;
+    pushInject(injectOn);
+  }
+  function setInject(on) {
+    injectOn = on;
+    if (pluginApi && pluginApi.pluginSettings) {
+      pluginApi.pluginSettings.asksInject = on;
+      pluginApi.saveSettings();
+    }
+    pushInject(on);
   }
   function sameIdList(a, b) {
     if (!a || !b || a.length !== b.length)
@@ -457,6 +486,11 @@ Item {
   Process {
     id: wakeProc
   }
+  // Separate from askProc (see wakeProc): the inject-flag sync fires on panel
+  // load and on checkbox toggle, independent of any asks action in flight.
+  Process {
+    id: injectProc
+  }
 
   Item {
     id: panelContainer
@@ -525,6 +559,14 @@ Item {
           font.weight: Style.fontWeightBold
           color: Color.mOnSurface
           Layout.fillWidth: true
+        }
+        NCheckbox {
+          label: "Inject"
+          labelSize: Style.fontSizeS
+          checked: root.injectOn
+          onToggled: checked => root.setInject(checked)
+          // Standing per-turn nudge to agents to USE the Deck (see setInject).
+          Layout.fillWidth: false
         }
         NCheckbox {
           label: "Hide delivered"
