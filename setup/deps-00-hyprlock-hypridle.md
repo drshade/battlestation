@@ -16,6 +16,14 @@ presence to `bsctl presence` (for the agent desk — contract in `ctl/src/lib.rs
 the second blanks the displays 10s after the session locks. There is still no
 idle-lock and no screen-off during normal use.
 
+`after_sleep_cmd` runs `displays-on.sh`, which DPMS-on's every enabled output —
+but a plain DPMS toggle can only act on *enabled* outputs. Suspend docked-and-shut,
+unplug the external, and resume with zero enabled outputs (internal panel disabled
+by clamshell, external gone, and the lid-open edge that would re-enable eDP is lost
+across sleep) and the screen stays black with nothing to toggle. `displays-on.sh`
+detects that no-output case and escalates itself to `reset` (reload re-enables
+outputs, `clamshell.sh auto` reconciles the real lid state), so resume self-heals.
+
 ## Blank-on-lock
 
 hyprlock only paints the lock surface (the clock); it does no DPMS. The screen

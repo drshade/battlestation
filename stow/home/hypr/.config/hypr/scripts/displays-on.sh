@@ -11,7 +11,9 @@
 #
 # Usage:
 #   displays-on.sh          DPMS-on every ENABLED output (fast, idempotent).
-#                           Used as hypridle's after_sleep_cmd.
+#                           Used as hypridle's after_sleep_cmd. Auto-escalates to
+#                           `reset` if it finds ZERO enabled outputs (a DPMS
+#                           toggle can't recover that -- see the guard below).
 #   displays-on.sh reset    Full recovery: reload config (re-applies monitors.lua
 #                           -- native modes, re-enables outputs wrongly disabled,
 #                           fixes invalid stored modes), reconcile the lid, then
@@ -45,7 +47,22 @@ dpms_on_all() {
     done
 }
 
-case "${1:-}" in
+mode="${1:-}"
+
+# Self-heal a no-output resume. A DPMS toggle can only turn ENABLED outputs back
+# on; if resume left us with zero enabled outputs it has nothing to act on and
+# the screen stays black forever. That happens after suspending docked-and-shut:
+# clamshell disabled the internal panel (lid closed), the external is unplugged
+# while asleep, and the lid-open edge that would re-enable eDP is lost across
+# sleep (lid state is a level, not an edge). Escalate the default path to a full
+# reset -- reload re-enables outputs, clamshell auto reconciles the actual lid.
+if [ "$mode" = "" ] || [ "$mode" = "dpms" ]; then
+    if [ -z "$(hyprctl monitors -j | jq -r '.[].name' 2>/dev/null)" ]; then
+        mode=reset
+    fi
+fi
+
+case "$mode" in
     reset)
         hyprctl reload >/dev/null
         # reload re-enables the internal panel regardless of lid; put it back in
