@@ -130,28 +130,6 @@
                     "id": "Clock",
                     "tooltipFormat": "HH:mm ddd, MMM dd",
                     "useCustomFont": false
-                },
-                {
-                    "compactMode": true,
-                    "diskPath": "/",
-                    "iconColor": "none",
-                    "id": "SystemMonitor",
-                    "showCpuCores": false,
-                    "showCpuFreq": true,
-                    "showCpuTemp": true,
-                    "showCpuUsage": true,
-                    "showDiskAvailable": false,
-                    "showDiskUsage": false,
-                    "showDiskUsageAsPercent": false,
-                    "showGpuTemp": false,
-                    "showLoadAverage": true,
-                    "showMemoryAsPercent": false,
-                    "showMemoryUsage": true,
-                    "showNetworkStats": false,
-                    "showSwapUsage": false,
-                    "textColor": "none",
-                    "useMonospaceFont": true,
-                    "usePadding": true
                 }
             ],
             "right": [

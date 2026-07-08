@@ -14,7 +14,7 @@ battlestation/
 │   ├── root/              #   packages stowed into /     (system configs, e.g. /etc)
 │   ├── stow-home.sh       #   stow home/ into $HOME      (run as you)
 │   └── stow-root.sh       #   stow root/ into /          (run with sudo)
-├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + aur/flatpak
+├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + *-ignore.txt (per-machine hardware to exclude) + aur/flatpak
 ├── ctl/                   # bsctl (Rust): the desktop's stateful protocols — `make build` → ~/.local/bin/bsctl
 ├── setup/                 # reproducible per-topic setup notes (never stowed)
 ├── AGENTS.md              # how to work in this repo (read this first)
@@ -46,7 +46,10 @@ See [`setup/`](setup/) for reproducible per-topic notes on how this machine was
 configured — a runbook for rebuilds. The *package list* is declared in
 [`packages/`](packages/) — `make install-packages` applies it, `make drift`
 diffs it against what is actually installed; setup notes carry the reasoning
-and the non-package steps.
+and the non-package steps. Because this config is shared across machines with
+different hardware, per-machine packages (GPU / CPU microcode / vendor accel)
+go in `*-ignore.txt` (e.g. `pacman-ignore.txt`): drift stays quiet about them
+wherever they're present, and never reports them missing where they aren't.
 
 ## Setup on a new machine
 

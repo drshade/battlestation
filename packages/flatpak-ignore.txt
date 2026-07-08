@@ -1,0 +1,15 @@
+# packages/flatpak-ignore.txt — EXCLUDE list for flatpak apps: installed here,
+# but NOT core to battlestation — say nothing about them, never install.
+#
+# The flatpak counterpart of packages/pacman-ignore.txt / aur-ignore.txt (read
+# the pacman-ignore.txt header for the three-category model). For personal /
+# machine-local apps that happen to be installed but aren't part of the shared
+# config: putting them in flatpak.txt would make every other machine report
+# them "in manifest but not installed".
+#
+# Format: one application ID per line; `#` starts a comment. Shell globs
+# allowed; prefer exact IDs. bin/drift says nothing about excluded apps — no
+# name, no count. install-packages doesn't read this file — an app absent from
+# flatpak.txt is never installed regardless.
+
+com.bambulab.BambuStudio       # 3D print slicer (Bambu Lab) — personal

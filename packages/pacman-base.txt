@@ -97,7 +97,6 @@ linux-cachyos-headers
 linux-cachyos-lts              # fallback kernel
 linux-cachyos-lts-headers
 linux-firmware
-intel-ucode
 mkinitcpio
 limine                         # bootloader
 limine-mkinitcpio-hook
@@ -131,20 +130,17 @@ poppler-glib                   # PDF previews
 libgsf                         # office-file previews
 libopenraw                     # RAW image previews
 
-# --- graphics (Intel GPU) -----------------------------------------------
-intel-media-driver
-vulkan-intel
-vpl-gpu-rt                     # oneVPL hardware video runtime
+# --- graphics (vendor-neutral open stack) -------------------------------
+# Vendor-specific bits (intel-*/vulkan-radeon/nvidia*) live in
+# packages/pacman-ignore.txt — they vary per machine across the fleet.
 opencl-mesa
 mesa-utils
 lib32-mesa                     # 32-bit GL/Vulkan (games etc.)
-lib32-vulkan-intel
 lib32-opencl-mesa
 
 # --- power management ------------------------------------------------------
 power-profiles-daemon
 cpupower
-intel-lpmd                     # Intel low-power daemon
 
 # --- bluetooth ---------------------------------------------------------------
 bluez

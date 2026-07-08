@@ -41,6 +41,26 @@ of this one reframe.
   PermissionRequest vs PostToolUseFailure). Distinct semantic statuses →
   distinct faces/colors/urgency. The Cfg.qml registry and asset model
   already support new statuses; the contract change is one lib.rs section.
+- **The Deck as a Kanban / Scrum board.** Today an ask has a thin, fixed
+  lifecycle (open → answered → delivered) that the *agent* mostly drives.
+  Let the human drive a richer one: items flow through **configurable
+  states** — e.g. `backlog → WIP → needs review → done` — that the human
+  moves them between (drag between columns, same gesture the reorder handle
+  already uses), while editing/annotating details in place. The queue stops
+  being just a triage inbox and becomes a lightweight board for the whole
+  desk's work — agent-filed asks and human-added cards side by side, agents
+  reading state to know what's been picked up vs still cold. States are a
+  per-desk config, not hardcoded (the sparse-by-design guardrail applies:
+  ship a sane default set, let it grow only on demand). Mechanics land as a
+  `state` field on the ask contract in lib.rs + a `bsctl asks move` verb;
+  the Panel gains a column view alongside today's list. Further out: each
+  **workspace carries its own customisable set of swimlanes** — the board's
+  states are scoped per battlespace, so a project workspace and a
+  brand-new-experiment workspace need not share columns — and the full Deck
+  view stacks all of them together, one swimlane band per workspace, for a
+  desk-wide read of every project's board at once. (Ties to the prefs /
+  project-registry concept: swimlanes are per-workspace config that lives
+  where the workspace's other prefs do.) *Rough — refine later.*
 
 ## Signals and escalation
 
@@ -177,8 +197,30 @@ The stream already delivers more than the widget renders:
 
 ## Out there
 
+- **System-wide voice dictation (voxtype-style).** A hotkey → speak →
+  transcribed text is spooled into whatever window is focused, anywhere on
+  the desk — a terminal, a browser field, an agent's prompt. Omarchy ships
+  this integrated; the pieces are all local-friendly: whisper (or
+  whisper.cpp / a small local model) for transcription, `wtype`/`ydotool`
+  to inject keystrokes into the active Wayland window, a keyd or Hypr
+  push-to-talk bind to gate it. Scouted — **voxtype** (the Omarchy 3.3 tool)
+  drops in with little glue; full analysis + plan in **DICTATION-PLAN.md**.
+  This is the general input
+  channel that **Voice answers** (below) is just one consumer of: once
+  dictation lands in the focused window, answering an ask by voice is "focus
+  the ask, talk." Likely cheap, high daily-use payoff.
 - **Voice answers.** Push-to-talk → whisper → the focused agent (or the
-  ask queue's head). Answering a yes/no ask while making coffee.
+  ask queue's head). Answering a yes/no ask while making coffee. (A
+  specialization of system-wide dictation above, routed to the Deck.)
+- **Local meeting/call capture → the everything repo.** Distinct from
+  dictation (whole call, not mic-into-focused-field): a self-triggered
+  toggle records both sides of a video call via a PipeWire monitor+mic
+  loopback, whisper.cpp emits VTT, and it drops into
+  `../everything/.inbox/transcripts/` — the stream that repo *already*
+  curates into its meetings ontology. Bypasses the Teams/Graph transcript
+  dependency (and covers Google Meet / Zoom, which Graph can't). Shares the
+  whisper+PipeWire stack with dictation. Full design in
+  **MEETING-CAPTURE-PLAN.md**.
 - **Drag a bot to a pill = move that session there.** The session's
   terminal window follows (pid → client → movetoworkspacesilent). The
   bots stop being decoration and become handles on the sessions.

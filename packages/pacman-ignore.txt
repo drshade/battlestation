@@ -1,0 +1,55 @@
+# packages/pacman-ignore.txt — EXCLUDE list: native packages whose PRESENCE is
+# never drift, and which install-packages must never install.
+#
+# The third package category, for a config shared across machines with
+# different hardware:
+#   pacman-base.txt + pacman.txt  = "should be installed EVERYWHERE"
+#                                    (drift warns if MISSING on any machine)
+#   pacman-ignore.txt (this file) = "if installed, it's fine — say nothing;
+#                                    and never install it"
+#
+# Per-machine hardware (GPU / CPU microcode / vendor accel) belongs HERE, not
+# in the base manifest: putting intel-* in pacman-base.txt makes every AMD or
+# Nvidia machine report it "in manifest but not installed". Listing the whole
+# fleet's vendor families here keeps EVERY machine's drift quiet — the Intel box
+# suppresses its intel-* packages, the AMD box its amd-*/radeon, and neither
+# reports the other's as missing.
+#
+# Format: one name per line; `#` starts a comment (same parse as the other
+# manifests). Shell globs are allowed (e.g. `nvidia*`) — prefer exact names for
+# clarity, reach for a glob only for a genuinely open-ended family. `make drift`
+# says nothing about excluded packages at all — no name, no count (this list is
+# the whole fleet's tail; reporting it is the noise the exclude removes). This
+# file is the record of what's excluded; a too-broad glob just silently hides
+# more, so keep patterns tight.
+#
+# This file only affects bin/drift's report. install-packages doesn't read it:
+# it only ever installs the declared set, so a package absent from every
+# manifest is never installed regardless — the "never install" half is free.
+
+# --- CPU microcode (one per vendor) --------------------------------------
+intel-ucode
+amd-ucode
+
+# --- GPU: Intel ----------------------------------------------------------
+intel-media-driver
+vulkan-intel
+lib32-vulkan-intel
+vpl-gpu-rt                     # oneVPL hardware video runtime
+intel-lpmd                     # Intel low-power daemon
+
+# --- GPU: AMD ------------------------------------------------------------
+vulkan-radeon
+lib32-vulkan-radeon
+libva-mesa-driver
+lib32-libva-mesa-driver
+xf86-video-amdgpu
+amdvlk
+lib32-amdvlk
+
+# --- GPU: Nvidia ---------------------------------------------------------
+nvidia*                        # nvidia, nvidia-lts, nvidia-dkms, nvidia-open, …
+lib32-nvidia*
+opencl-nvidia
+lib32-opencl-nvidia
+egl-wayland

@@ -6,6 +6,5 @@
 # is installed.
 #
 # If a foreign package shows up in `make drift`, either declare it here
-# (with a why) or remove it.
-
-riptide                        # terminal Tidal music player (Rust TUI)
+# (with a why, if it's core to every machine), exclude it in
+# packages/aur-ignore.txt (personal / machine-local), or remove it.

@@ -1,0 +1,15 @@
+# packages/aur-ignore.txt — EXCLUDE list for AUR / foreign packages: installed
+# here, but NOT core to battlestation — say nothing about them, never install.
+#
+# The AUR counterpart of packages/pacman-ignore.txt (read its header for the
+# three-category model). Where pacman-ignore.txt is mostly per-machine HARDWARE,
+# this is for personal / machine-local apps that happen to be installed but
+# aren't part of the shared config: putting them in aur.txt would make every
+# other machine report them "in manifest but not installed".
+#
+# Format: one name per line; `#` starts a comment. Shell globs allowed; prefer
+# exact names. bin/drift says nothing about excluded packages — no name, no count.
+# install-packages doesn't read this file — a package absent from aur.txt is
+# never installed regardless.
+
+riptide                        # terminal Tidal music player (Rust TUI) — personal

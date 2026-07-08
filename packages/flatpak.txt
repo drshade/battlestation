@@ -5,7 +5,7 @@
 # `flatpak list --app --columns=application`; `make install-packages`
 # applies it with `flatpak install`.
 #
-# If an app shows up in `make drift`, either declare it here (with a why)
-# or uninstall it. (flatpak itself is declared in pacman.txt.)
-
-com.bambulab.BambuStudio       # 3D print slicer (Bambu Lab)
+# If an app shows up in `make drift`, either declare it here (with a why, if
+# it's core to every machine), exclude it in packages/flatpak-ignore.txt
+# (personal / machine-local), or uninstall it. (flatpak itself is declared in
+# pacman.txt.)

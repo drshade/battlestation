@@ -34,7 +34,7 @@ NOISE=(pulse dconf session mozilla gh ghc uv nautilus
   discord teams-for-linux shelly cachyos cachyos-hello.json
   gtk-3.0 gtk-4.0 qt5ct qt6ct kdeglobals
   user-dirs.dirs user-dirs.locale
-  kdeconnect)
+  kdeconnect riptide)
 # Same idea for ~/.local/share/applications: entries written by tools about
 # themselves, not configuration to adopt.
 APP_NOISE=(claude-code-url-handler.desktop)
@@ -115,11 +115,18 @@ fi
 # --- 3. installed packages vs manifest (needs P3.8) -------------------------
 hdr "Package manifest drift"
 pkg_diff() {
-  # pkg_diff <label> <listcmd> <manifest>... — the declared set is the UNION
-  # of every manifest file that exists (pacman splits into the accepted
+  # pkg_diff <label> <listcmd> <ignore_file> <manifest>... — the declared set is
+  # the UNION of every manifest file that exists (pacman splits into the accepted
   # installer baseline pacman-base.txt + deliberate additions pacman.txt).
-  local label listcmd
-  label=$1; listcmd=$2; shift 2
+  #
+  # <ignore_file> ("" or a missing path for none) is the EXCLUDE list: package
+  # names/globs whose PRESENCE is never drift — per-machine hardware (GPU / CPU
+  # microcode / vendor accel) in a config shared across machines. Matches are
+  # filtered out of "installed but not in manifest" silently — no line, no count.
+  # install-packages ignores this file: it only installs the declared set, so an
+  # excluded package is never installed regardless.
+  local label listcmd ignore_file
+  label=$1; listcmd=$2; ignore_file=$3; shift 3
   local f files=()
   for f in "$@"; do [ -f "$f" ] && files+=("$f"); done
   if [ "${#files[@]}" -eq 0 ]; then info "$label: no manifest ($*) — skipping"; return; fi
@@ -132,20 +139,47 @@ pkg_diff() {
   local only_inst only_man
   only_inst=$(comm -23 <(printf '%s\n' "$installed") <(printf '%s\n' "$manifest"))
   only_man=$(comm -13 <(printf '%s\n' "$installed") <(printf '%s\n' "$manifest"))
-  if [ -z "$only_inst" ] && [ -z "$only_man" ]; then ok "$label: in sync"; return; fi
+
+  # Drop "installed but undeclared" packages that match the exclude patterns —
+  # silently, no line and no count: they're the fleet's expected hardware/personal
+  # tail, and reporting them at all is the noise this exclude mechanism removes.
+  # What survives the filter is the real "installed but not in manifest" drift.
+  local ignore_pats=() undeclared=()
+  if [ -n "$ignore_file" ] && [ -f "$ignore_file" ]; then
+    mapfile -t ignore_pats < <(grep -vE '^\s*(#|$)' "$ignore_file" | awk '{print $1}')
+  fi
+  if [ -n "$only_inst" ]; then
+    local p pat matched
+    while IFS= read -r p; do
+      [ -z "$p" ] && continue
+      matched=0
+      if [ "${#ignore_pats[@]}" -gt 0 ]; then
+        for pat in "${ignore_pats[@]}"; do
+          # shellcheck disable=SC2254  # $pat is an intentional glob pattern
+          case "$p" in $pat) matched=1; break ;; esac
+        done
+      fi
+      [ "$matched" -eq 1 ] || undeclared+=("$p")
+    done <<<"$only_inst"
+  fi
+
   # if, not `[ … ] && { … }`: a false final test would fail the function under -e.
-  if [ -n "$only_inst" ]; then warn "$label: installed but not in manifest"; while IFS= read -r p; do note "$p"; done <<<"$only_inst"; fi
-  if [ -n "$only_man" ];  then warn "$label: in manifest but not installed";  while IFS= read -r p; do note "$p"; done <<<"$only_man"; fi
+  if [ "${#undeclared[@]}" -eq 0 ] && [ -z "$only_man" ]; then
+    ok "$label: in sync"
+  else
+    if [ "${#undeclared[@]}" -gt 0 ]; then warn "$label: installed but not in manifest"; for p in "${undeclared[@]}"; do note "$p"; done; fi
+    if [ -n "$only_man" ]; then warn "$label: in manifest but not installed"; while IFS= read -r p; do note "$p"; done <<<"$only_man"; fi
+  fi
 }
 if have pacman; then
   pkg_diff "pacman (explicit)" "pacman -Qqe --native 2>/dev/null || pacman -Qqe" \
-    packages/pacman-base.txt packages/pacman.txt
-  pkg_diff "AUR/foreign"       "pacman -Qqm" packages/aur.txt
+    packages/pacman-ignore.txt packages/pacman-base.txt packages/pacman.txt
+  pkg_diff "AUR/foreign"       "pacman -Qqm" packages/aur-ignore.txt packages/aur.txt
 else
   info "pacman not found — skipping"
 fi
 if have flatpak; then
-  pkg_diff "flatpak" "flatpak list --app --columns=application" packages/flatpak.txt
+  pkg_diff "flatpak" "flatpak list --app --columns=application" packages/flatpak-ignore.txt packages/flatpak.txt
 fi
 
 printf '\n%s——%s drift is informational; adopt configs / update manifests deliberately.\n' "$C_DIM" "$C_RST"
