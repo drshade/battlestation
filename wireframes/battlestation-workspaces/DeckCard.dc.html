@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  .dck-input::placeholder, .dck-ta::placeholder { color: #6b6459; }
+  .dck-ta { resize: vertical; }
+  @keyframes dckpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  @keyframes dckblink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+  .dck-term::-webkit-scrollbar { width: 7px; }
+  .dck-term::-webkit-scrollbar-thumb { background: rgba(217,160,74,0.2); border-radius: 8px; }
+</style>
+</helmet>
+<sc-if value="{{ notDismissed }}" hint-placeholder-val="{{ true }}">
+<div style="font-family:'Geist',system-ui,sans-serif;">
+  <div style="background:#1e1a15; border:1px solid {{ cardBorder }}; border-left:3px solid {{ urgencyColor }}; border-radius:11px; cursor:pointer; overflow:hidden; transition:background .13s,border-color .13s;" style-hover="background:#231e18; border-color:rgba(217,160,74,0.24);">
+
+    <!-- FULL header -->
+    <sc-if value="{{ notCompact }}" hint-placeholder-val="{{ true }}">
+    <div onClick="{{ toggle }}" style="display:flex; align-items:flex-start; gap:12px; padding:13px 13px 13px 12px;">
+      <div style="color:#4d473d; font-size:14px; line-height:1; margin-top:4px; cursor:grab; flex-shrink:0; letter-spacing:-1px;">⠿</div>
+      <div style="width:23px; height:23px; border-radius:50%; border:1.5px solid {{ urgencyColor }}; color:{{ urgencyColor }}; display:grid; place-items:center; font-size:12px; font-weight:700; flex-shrink:0; margin-top:1px;">{{ typeGlyph }}</div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:14.5px; font-weight:600; color:#f2ede2; line-height:1.34; letter-spacing:-0.1px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">{{ title }}</div>
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
+          <span style="display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:5px; background:{{ projFill }}; color:{{ projColor }}; font-family:'JetBrains Mono',monospace; font-size:10.5px; font-weight:600; letter-spacing:0.1px;"><span style="opacity:0.6;">{{ wsLabel }}</span>{{ projName }}</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; color:{{ agentColor }}; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:500;" title="{{ hstatusTitle }}"><svg viewBox="{{ iconVb }}" width="13" height="13" style="display:block; flex-shrink:0; animation:{{ iconAnim }};"><path d="{{ iconD }}" fill="{{ iconColor }}" fill-rule="{{ iconFr }}" clip-rule="{{ iconFr }}"></path></svg>{{ agentName }}</span>
+          <span style="color:#6f685c; font-family:'JetBrains Mono',monospace; font-size:11px;">{{ idLabel }}</span>
+          <span style="color:#6f685c; font-family:'JetBrains Mono',monospace; font-size:11px;">{{ age }}</span>
+          <sc-if value="{{ blocking }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex; align-items:center; gap:4px; padding:1px 7px; border-radius:4px; background:rgba(224,118,95,0.13); border:1px solid rgba(224,118,95,0.35); color:#e88a72; font-family:'JetBrains Mono',monospace; font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">▹ blocking</span></sc-if>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
+        <button onClick="{{ jump }}" style="font-family:'Geist',sans-serif; font-size:12px; font-weight:600; color:#e8b877; background:transparent; border:1px solid rgba(217,160,74,0.38); border-radius:8px; padding:6px 12px; cursor:pointer; transition:background .12s;" style-hover="background:rgba(217,160,74,0.14);">Jump ↵</button>
+        <div style="color:#6b6459; font-size:11px; transform:rotate({{ chevron }}); transition:transform .15s; margin:0 2px;">▾</div>
+        <button onClick="{{ dismiss }}" style="width:26px; height:26px; display:grid; place-items:center; color:#6b6459; background:transparent; border:none; border-radius:7px; font-size:16px; cursor:pointer; transition:background .12s,color .12s;" style-hover="background:rgba(224,118,95,0.12); color:#e0765f;">×</button>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- COMPACT header (board) -->
+    <sc-if value="{{ compact }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ toggle }}" style="padding:10px 11px;">
+      <div style="display:flex; align-items:flex-start; gap:8px;">
+        <div style="color:{{ urgencyColor }}; font-size:11px; font-weight:700; line-height:1.5; flex-shrink:0;">{{ typeGlyph }}</div>
+        <div style="flex:1; min-width:0; font-size:12.5px; font-weight:600; color:#eee7db; line-height:1.35; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">{{ title }}</div>
+        <div style="color:#6b6459; font-size:10px; transform:rotate({{ chevron }}); transition:transform .15s; flex-shrink:0; margin-top:2px;">▾</div>
+      </div>
+      <div style="display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin-top:9px;">
+        <span style="display:inline-flex; align-items:center; padding:1px 7px; border-radius:4px; background:{{ projFill }}; color:{{ projColor }}; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600;">{{ projName }}</span>
+        <span style="display:inline-flex; align-items:center; gap:5px; color:{{ agentColor }}; font-family:'JetBrains Mono',monospace; font-size:10px;" title="{{ hstatusTitle }}"><svg viewBox="{{ iconVb }}" width="11" height="11" style="display:block; flex-shrink:0; animation:{{ iconAnim }};"><path d="{{ iconD }}" fill="{{ iconColor }}" fill-rule="{{ iconFr }}" clip-rule="{{ iconFr }}"></path></svg>{{ agentName }}</span>
+        <span style="color:#6f685c; font-family:'JetBrains Mono',monospace; font-size:10px; margin-left:auto;">{{ age }}</span>
+        <sc-if value="{{ blocking }}" hint-placeholder-val="{{ false }}"><span style="color:#e88a72; font-size:10px;">▹</span></sc-if>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- SHARED detail (terminal) -->
+    <sc-if value="{{ open }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ stop }}" style="cursor:default; padding:0 12px 13px;">
+      <!-- terminal transcript -->
+      <div style="background:#0c0a06; border:1px solid rgba(217,160,74,0.15); border-radius:9px; overflow:hidden; margin-bottom:11px;">
+        <div style="display:flex; align-items:center; gap:8px; padding:7px 11px; border-bottom:1px solid rgba(217,160,74,0.10); background:rgba(255,255,255,0.02);">
+          <svg viewBox="{{ iconVb }}" width="12" height="12" style="display:block; flex-shrink:0;"><path d="{{ iconD }}" fill="{{ iconColor }}" fill-rule="{{ iconFr }}" clip-rule="{{ iconFr }}"></path></svg>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#8a8272; letter-spacing:0.1px;">{{ termPrompt }}</span>
+          <span style="flex:1;"></span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:{{ iconColor }};">{{ hstatusLabel }}</span>
+        </div>
+        <div class="dck-term" style="padding:12px 13px; max-height:300px; overflow:auto;">
+          <div style="white-space:pre-wrap; word-break:break-word; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.62; color:#cec7b8;">{{ termBody }}</div>
+          <span style="display:inline-block; width:7px; height:14px; background:{{ iconColor }}; vertical-align:-2px; margin-left:2px; animation:dckblink 1.1s step-end infinite;"></span>
+        </div>
+      </div>
+
+      <sc-if value="{{ hasActions }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6f685c;">answer</span>
+          <sc-for list="{{ actions }}" as="act" hint-placeholder-count="2">
+            <button onClick="{{ stop }}" style="background:rgba(217,160,74,0.15); color:#eabc82; border:1px solid rgba(217,160,74,0.32); border-radius:8px; padding:6px 13px; font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; cursor:pointer; transition:background .12s;" style-hover="background:rgba(217,160,74,0.26);">{{ act }}</button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <div style="display:flex; gap:8px; margin-bottom:10px; align-items:flex-end;">
+        <textarea class="dck-ta" rows="1" value="{{ replyVal }}" onInput="{{ onReply }}" placeholder="› reply…  (auto-saved, sent to harness stdin)" style="flex:1; min-width:0; min-height:38px; max-height:120px; background:#14110d; border:1px solid rgba(255,255,255,0.09); border-radius:9px; padding:9px 12px; color:#e8e0d4; font-family:'JetBrains Mono',monospace; font-size:12.5px; line-height:1.5; outline:none;"></textarea>
+        <button onClick="{{ stop }}" style="background:#d9a04a; color:#1c1408; border:none; border-radius:9px; padding:9px 16px; font-family:'Geist',sans-serif; font-size:12.5px; font-weight:700; cursor:pointer; white-space:nowrap;">Trigger ↵</button>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6f685c;">tag</span>
+        <button onClick="{{ tagWorking }}" style="border-radius:20px; padding:5px 13px; font-family:'Geist',sans-serif; font-size:12px; font-weight:600; cursor:pointer; background:{{ workingBg }}; color:{{ workingFg }}; border:1px solid {{ workingBd }};">working on it</button>
+        <button onClick="{{ tagLater }}" style="border-radius:20px; padding:5px 13px; font-family:'Geist',sans-serif; font-size:12px; font-weight:600; cursor:pointer; background:{{ laterBg }}; color:{{ laterFg }}; border:1px solid {{ laterBd }};">later</button>
+        <sc-if value="{{ compact }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ jump }}" style="margin-left:auto; font-family:'Geist',sans-serif; font-size:12px; font-weight:600; color:#e8b877; background:transparent; border:1px solid rgba(217,160,74,0.38); border-radius:8px; padding:5px 12px; cursor:pointer;">Jump ↵</button>
+        </sc-if>
+      </div>
+    </div>
+    </sc-if>
+
+  </div>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:520,&quot;height&quot;:150},&quot;ask&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;object&quot;},&quot;compact&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;defaultOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;open&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;boolean&quot;},&quot;onToggle&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;function&quot;}}">
+class Component extends DCLogic {
+  state = { open: false, dismissed: false, tag: null, reply: "" };
+  componentDidMount() { if (this.props.defaultOpen && this.props.open == null) this.setState({ open: true }); }
+  hexToRgba(hex, a) {
+    const h = hex.replace("#", "");
+    const n = parseInt(h, 16);
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+  }
+  shapeFor(key) {
+    const S = {
+      claude: { vb: "0 0 24 24", fr: "evenodd", d: "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" },
+      agy: { vb: "0 0 24 24", fr: "evenodd", d: "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" },
+      codex: { vb: "0 0 512 509.639", fr: "nonzero", d: "M412.037 221.764a90.834 90.834 0 004.648-28.67 90.79 90.79 0 00-12.443-45.87c-16.37-28.496-46.738-46.089-79.605-46.089-6.466 0-12.943.683-19.264 2.04a90.765 90.765 0 00-67.881-30.515h-.576c-.059.002-.149.002-.216.002-39.807 0-75.108 25.686-87.346 63.554-25.626 5.239-47.748 21.31-60.682 44.03a91.873 91.873 0 00-12.407 46.077 91.833 91.833 0 0023.694 61.553 90.802 90.802 0 00-4.649 28.67 90.804 90.804 0 0012.442 45.87c16.369 28.504 46.74 46.087 79.61 46.087a91.81 91.81 0 0019.253-2.04 90.783 90.783 0 0067.887 30.516h.576l.234-.001c39.829 0 75.119-25.686 87.357-63.588 25.626-5.242 47.748-21.312 60.682-44.033a91.718 91.718 0 0012.383-46.035 91.83 91.83 0 00-23.693-61.553l-.004-.005zM275.102 413.161h-.094a68.146 68.146 0 01-43.611-15.8 56.936 56.936 0 002.155-1.221l72.54-41.901a11.799 11.799 0 005.962-10.251V241.651l30.661 17.704c.326.163.55.479.596.84v84.693c-.042 37.653-30.554 68.198-68.21 68.273h.001zm-146.689-62.649a68.128 68.128 0 01-9.152-34.085c0-3.904.341-7.817 1.005-11.663.539.323 1.48.897 2.155 1.285l72.54 41.901a11.832 11.832 0 0011.918-.002l88.563-51.137v35.408a1.1 1.1 0 01-.438.94l-73.33 42.339a68.43 68.43 0 01-34.11 9.12 68.359 68.359 0 01-59.15-34.11l-.001.004zm-19.083-158.36a68.044 68.044 0 0135.538-29.934c0 .625-.036 1.731-.036 2.5v83.801l-.001.07a11.79 11.79 0 005.954 10.242l88.564 51.13-30.661 17.704a1.096 1.096 0 01-1.034.093l-73.337-42.375a68.36 68.36 0 01-34.095-59.143 68.412 68.412 0 019.112-34.085l-.004-.003zm251.907 58.621l-88.563-51.137 30.661-17.697a1.097 1.097 0 011.034-.094l73.337 42.339c21.109 12.195 34.132 34.746 34.132 59.132 0 28.604-17.849 54.199-44.686 64.078v-86.308c.004-.032.004-.065.004-.096 0-4.219-2.261-8.119-5.919-10.217zm30.518-45.93c-.539-.331-1.48-.898-2.155-1.286l-72.54-41.901a11.842 11.842 0 00-5.958-1.611c-2.092 0-4.15.558-5.957 1.611l-88.564 51.137v-35.408l-.001-.061a1.1 1.1 0 01.44-.88l73.33-42.303a68.301 68.301 0 0134.108-9.129c37.704 0 68.281 30.577 68.281 68.281a68.69 68.69 0 01-.984 11.545v.005zm-191.843 63.109l-30.668-17.704a1.09 1.09 0 01-.596-.84v-84.692c.016-37.685 30.593-68.236 68.281-68.236a68.332 68.332 0 0143.689 15.804 63.09 63.09 0 00-2.155 1.222l-72.54 41.9a11.794 11.794 0 00-5.961 10.248v.068l-.05 102.23zm16.655-35.91l39.445-22.782 39.444 22.767v45.55l-39.444 22.767-39.445-22.767v-45.535z" },
+    };
+    return S[key] || S.claude;
+  }
+  renderVals() {
+    const A = {
+      claude: { name: "claude", color: "#e0a856", shape: "claude" },
+      codex:  { name: "codex",  color: "#86b06a", shape: "codex" },
+      gemini: { name: "antigravity", color: "#7aa2d6", shape: "agy" },
+    };
+    const P = {
+      1: { name: "comms",               color: "#6ea8c9" },
+      4: { name: "enterprise reporting", color: "#b58ac9" },
+      5: { name: "battlestation voice",  color: "#d9a04a" },
+      6: { name: "exclude packages",     color: "#7bb47a" },
+      7: { name: "deck design",          color: "#e0855f" },
+    };
+    const U = { high: { c: "#e0765f", l: "HIGH" }, med: { c: "#d9a04a", l: "MED" }, low: { c: "#9a8f7d", l: "LOW" } };
+    const T = { question: "?", review: "⇄", notify: "ℹ" };
+    const a = this.props.ask || { title: "Untitled ask", agent: "claude", ws: 5, urgency: "med", type: "question", age: "1m", id: 0 };
+    const ag = A[a.agent] || { name: a.agent, color: "#9a8f7d", shape: "claude" };
+    const pr = P[a.ws] || { name: "workspace", color: "#9a8f7d" };
+    const u = U[a.urgency] || U.low;
+    const HS = {
+      thinking:  { c: "#3fb950", l: "thinking",  busy: 1 },
+      tool:      { c: "#a371f7", l: "tool use",  busy: 1 },
+      waiting:   { c: "#d9895f", l: "waiting on you", busy: 0 },
+      idle:      { c: "#6f685c", l: "idle",      busy: 0 },
+    };
+    const hs = HS[a.hstatus] || null;
+    const sh = this.shapeFor(ag.shape);
+    const iconColor = hs ? hs.c : ag.color;
+    const tag = this.state.tag;
+    const stop = (e) => { if (e && e.stopPropagation) e.stopPropagation(); };
+    const controlled = this.props.open != null;
+    const open = controlled ? !!this.props.open : this.state.open;
+    return {
+      title: a.title,
+      termBody: a.body || a.title,
+      termPrompt: ag.name + " · ws" + a.ws + "/" + pr.name,
+      hstatusLabel: hs ? hs.l : "idle",
+      idLabel: "#" + a.id, age: a.age,
+      agentName: ag.name, agentColor: ag.color,
+      iconVb: sh.vb, iconD: sh.d, iconFr: sh.fr, iconColor: iconColor,
+      iconAnim: hs && hs.busy ? "dckpulse 1.8s ease-in-out infinite" : "none",
+      hstatusTitle: hs ? (ag.name + " — " + hs.l) : ag.name,
+      projName: pr.name, projColor: pr.color, projFill: this.hexToRgba(pr.color, 0.14), wsLabel: a.ws + "·",
+      urgencyColor: u.c,
+      typeGlyph: T[a.type] || "•",
+      blocking: !!a.blocking,
+      actions: a.actions || [], hasActions: !!(a.actions && a.actions.length),
+      compact: !!this.props.compact, notCompact: !this.props.compact,
+      open, notDismissed: !this.state.dismissed,
+      chevron: open ? "180deg" : "0deg",
+      cardBorder: open ? "rgba(217,160,74,0.28)" : "rgba(217,160,74,0.10)",
+      replyVal: this.state.reply,
+      workingBg: tag === "working" ? "rgba(217,160,74,0.18)" : "transparent",
+      workingFg: tag === "working" ? "#e8b877" : "#a89e8f",
+      workingBd: tag === "working" ? "rgba(217,160,74,0.5)" : "rgba(255,255,255,0.12)",
+      laterBg: tag === "later" ? "rgba(217,160,74,0.18)" : "transparent",
+      laterFg: tag === "later" ? "#e8b877" : "#a89e8f",
+      laterBd: tag === "later" ? "rgba(217,160,74,0.5)" : "rgba(255,255,255,0.12)",
+      toggle: () => { if (this.props.onToggle) this.props.onToggle(); else this.setState((s) => ({ open: !s.open })); },
+      dismiss: (e) => { stop(e); this.setState({ dismissed: true }); },
+      jump: (e) => { stop(e); },
+      stop,
+      onReply: (e) => this.setState({ reply: e.target.value }),
+      tagWorking: (e) => { stop(e); this.setState((s) => ({ tag: s.tag === "working" ? null : "working" })); },
+      tagLater: (e) => { stop(e); this.setState((s) => ({ tag: s.tag === "later" ? null : "later" })); },
+    };
+  }
+}
+</script>
+</body>
+</html>

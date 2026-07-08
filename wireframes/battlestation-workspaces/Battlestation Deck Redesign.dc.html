@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0c0a08; }
+  @keyframes dckpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  a { color: #e0a856; text-decoration: none; }
+  a:hover { color: #f0c07e; }
+</style>
+</helmet>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" fill="#16130f"/>
+    <rect x="18" y="22" width="64" height="9" rx="2.5" fill="#d9a04a"/>
+    <rect x="18" y="38" width="64" height="9" rx="2.5" fill="#7aa2d6" opacity="0.85"/>
+    <rect x="18" y="54" width="64" height="9" rx="2.5" fill="#e0765f" opacity="0.85"/>
+    <rect x="18" y="70" width="64" height="9" rx="2.5" fill="#7bb47a" opacity="0.85"/>
+  </svg>
+</template>
+
+<section style="padding:52px; font-family:'Geist',system-ui,sans-serif; background:radial-gradient(1200px 600px at 30% -10%, #1a1611 0%, #0c0a08 60%); min-height:100vh;">
+
+  <!-- intro -->
+  <div style="max-width:760px; margin-bottom:34px;">
+    <div style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:#d9a04a; margin-bottom:14px;">Battlestation · The Deck — redesign</div>
+    <h1 style="margin:0 0 14px; font-size:34px; font-weight:700; color:#f4efe4; letter-spacing:-0.6px; line-height:1.1;">A calmer, legible work-queue for you and your agents</h1>
+    <p style="margin:0; font-size:15.5px; line-height:1.6; color:#a89e8f;">One Deck, two interchangeable views — a fast triage <b style="color:#e9e2d5;">Queue</b> and a kanban <b style="color:#e9e2d5;">Board</b> (toggle top-right). Both prioritise <b style="color:#e9e2d5;">globally across all projects</b> by default, and both can filter down to a single workspace with the project chips. Metadata is typed chips, urgency reads as a left accent bar, and every running harness keeps its own personality icon that changes colour with its live status — <span style="color:#3fb950;">thinking</span>, <span style="color:#a371f7;">tool use</span>, <span style="color:#d9895f;">waiting</span>. Global <b style="color:#e9e2d5;">Inject</b> and <b style="color:#e9e2d5;">Auto-retrigger</b> live in the header. Everything below is live.</p>
+  </div>
+
+  <!-- Noctalia bar mock -->
+  <div style="margin-bottom:14px; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:#6f685c;">The bar — workspaces as projects · each running harness shows as its own animated pip</div>
+  <div style="display:flex; align-items:center; gap:14px; background:linear-gradient(180deg,#17140f,#131009); border:1px solid rgba(217,160,74,0.14); border-radius:12px; padding:9px 14px; margin-bottom:10px; overflow-x:auto; font-family:'JetBrains Mono',monospace;">
+    <span style="color:#cdbfa6; font-size:12px; font-weight:600; white-space:nowrap;">10:01 Wed, Jul 08</span>
+    <span style="width:1px; height:20px; background:rgba(217,160,74,0.16);"></span>
+    <div style="display:flex; align-items:center; gap:7px;">
+      <sc-for list="{{ pills }}" as="p" hint-placeholder-count="10">
+        <span style="display:inline-flex; align-items:center; gap:7px; padding:4px 9px 4px 10px; border-radius:8px; white-space:nowrap; font-size:11.5px; font-weight:600; background:{{ p.bg }}; color:{{ p.fg }}; border:1px solid {{ p.bd }};">{{ p.label }}<sc-for list="{{ p.harnesses }}" as="h" hint-placeholder-count="1"><span title="{{ h.title }}" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:5px; background:{{ h.tint }}; animation:{{ h.anim }}; box-shadow:{{ h.glow }};"><svg viewBox="{{ h.vb }}" width="11" height="11" style="display:block;"><path d="{{ h.d }}" fill="{{ h.color }}" fill-rule="{{ h.fr }}" clip-rule="{{ h.fr }}"></path></svg></span></sc-for></span>
+      </sc-for>
+    </div>
+    <span style="flex:1;"></span>
+    <div style="display:flex; align-items:center; gap:11px; white-space:nowrap;">
+      <sc-for list="{{ legend }}" as="l" hint-placeholder-count="4">
+        <span style="display:inline-flex; align-items:center; gap:6px; font-size:10.5px; color:#8f8676;"><span style="width:8px; height:8px; border-radius:2px; background:{{ l.color }};"></span>{{ l.label }}</span>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- directions -->
+  <div style="display:flex; gap:34px; align-items:flex-start; flex-wrap:wrap;">
+
+    <div id="1a" style="width:900px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:#1c1408; background:#d9a04a; border-radius:6px; padding:3px 9px;">1a</span>
+        <span style="font-size:17px; font-weight:700; color:#f4efe4;">Queue · global priority triage</span>
+      </div>
+      <p style="margin:0 0 14px; font-size:13.5px; line-height:1.55; color:#8f8676; max-width:820px;">One ranked list across every project — blocking items float to the top, then urgency, so you always work the single most important thing next. Tap a project chip to narrow to that workspace. Expand a card for one-tap answers, reply, tag or dismiss.</p>
+      <div style="height:680px;"><dc-import name="DeckPanel" layout="queue" style="width:900px; height:680px;" hint-size="900px,680px"></dc-import></div>
+    </div>
+
+    <div id="1b" style="width:900px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:#1c1408; background:#7aa2d6; border-radius:6px; padding:3px 9px;">1b</span>
+        <span style="font-size:17px; font-weight:700; color:#f4efe4;">Board · flow across statuses</span>
+      </div>
+      <p style="margin:0 0 14px; font-size:13.5px; line-height:1.55; color:#8f8676; max-width:820px;">The same items as columns — Inbox → Working → Blocked → Done — with "blocking" kept as an orthogonal ▹ flag rather than a lane. Global by default; use the same project chips to focus one workspace. Agents move their own cards; you drag to reprioritise.</p>
+      <div style="height:680px;"><dc-import name="DeckPanel" layout="board" style="width:900px; height:680px;" hint-size="900px,680px"></dc-import></div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  hexToRgba(hex, a) {
+    const h = hex.replace("#", ""); const n = parseInt(h, 16);
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+  }
+  harnessView(h) {
+    const S = {
+      claude: { vb: "0 0 24 24", fr: "evenodd", d: "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" },
+      agy: { vb: "0 0 24 24", fr: "evenodd", d: "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" },
+      codex: { vb: "0 0 512 509.639", fr: "nonzero", d: "M412.037 221.764a90.834 90.834 0 004.648-28.67 90.79 90.79 0 00-12.443-45.87c-16.37-28.496-46.738-46.089-79.605-46.089-6.466 0-12.943.683-19.264 2.04a90.765 90.765 0 00-67.881-30.515h-.576c-.059.002-.149.002-.216.002-39.807 0-75.108 25.686-87.346 63.554-25.626 5.239-47.748 21.31-60.682 44.03a91.873 91.873 0 00-12.407 46.077 91.833 91.833 0 0023.694 61.553 90.802 90.802 0 00-4.649 28.67 90.804 90.804 0 0012.442 45.87c16.369 28.504 46.74 46.087 79.61 46.087a91.81 91.81 0 0019.253-2.04 90.783 90.783 0 0067.887 30.516h.576l.234-.001c39.829 0 75.119-25.686 87.357-63.588 25.626-5.242 47.748-21.312 60.682-44.033a91.718 91.718 0 0012.383-46.035 91.83 91.83 0 00-23.693-61.553l-.004-.005zM275.102 413.161h-.094a68.146 68.146 0 01-43.611-15.8 56.936 56.936 0 002.155-1.221l72.54-41.901a11.799 11.799 0 005.962-10.251V241.651l30.661 17.704c.326.163.55.479.596.84v84.693c-.042 37.653-30.554 68.198-68.21 68.273h.001zm-146.689-62.649a68.128 68.128 0 01-9.152-34.085c0-3.904.341-7.817 1.005-11.663.539.323 1.48.897 2.155 1.285l72.54 41.901a11.832 11.832 0 0011.918-.002l88.563-51.137v35.408a1.1 1.1 0 01-.438.94l-73.33 42.339a68.43 68.43 0 01-34.11 9.12 68.359 68.359 0 01-59.15-34.11l-.001.004zm-19.083-158.36a68.044 68.044 0 0135.538-29.934c0 .625-.036 1.731-.036 2.5v83.801l-.001.07a11.79 11.79 0 005.954 10.242l88.564 51.13-30.661 17.704a1.096 1.096 0 01-1.034.093l-73.337-42.375a68.36 68.36 0 01-34.095-59.143 68.412 68.412 0 019.112-34.085l-.004-.003zm251.907 58.621l-88.563-51.137 30.661-17.697a1.097 1.097 0 011.034-.094l73.337 42.339c21.109 12.195 34.132 34.746 34.132 59.132 0 28.604-17.849 54.199-44.686 64.078v-86.308c.004-.032.004-.065.004-.096 0-4.219-2.261-8.119-5.919-10.217zm30.518-45.93c-.539-.331-1.48-.898-2.155-1.286l-72.54-41.901a11.842 11.842 0 00-5.958-1.611c-2.092 0-4.15.558-5.957 1.611l-88.564 51.137v-35.408l-.001-.061a1.1 1.1 0 01.44-.88l73.33-42.303a68.301 68.301 0 0134.108-9.129c37.704 0 68.281 30.577 68.281 68.281a68.69 68.69 0 01-.984 11.545v.005zm-191.843 63.109l-30.668-17.704a1.09 1.09 0 01-.596-.84v-84.692c.016-37.685 30.593-68.236 68.281-68.236a68.332 68.332 0 0143.689 15.804 63.09 63.09 0 00-2.155 1.222l-72.54 41.9a11.794 11.794 0 00-5.961 10.248v.068l-.05 102.23zm16.655-35.91l39.445-22.782 39.444 22.767v45.55l-39.444 22.767-39.445-22.767v-45.535z" },
+    };
+    const HS = {
+      thinking: { c: "#3fb950", l: "thinking" },
+      tool:     { c: "#a371f7", l: "tool use" },
+      waiting:  { c: "#d9895f", l: "waiting" },
+      idle:     { c: "#6f685c", l: "idle" },
+    };
+    const HN = { claude: "claude", codex: "codex", agy: "antigravity" };
+    const sh = S[h.type] || S.claude;
+    const s = HS[h.status] || HS.idle;
+    const busy = h.status === "thinking" || h.status === "tool";
+    return {
+      vb: sh.vb, d: sh.d, fr: sh.fr, color: s.c, tint: this.hexToRgba(s.c, 0.16),
+      anim: busy ? "dckpulse 1.8s ease-in-out infinite" : "none",
+      glow: h.status === "waiting" ? "0 0 0 3px " + this.hexToRgba(s.c, 0.16) : "none",
+      title: (HN[h.type] || h.type) + " — " + s.l,
+    };
+  }
+  renderVals() {
+    const defs = [
+      { n: 1, name: "comms", active: true, h: [{ type: "agy", status: "thinking" }] },
+      { n: 2, name: "teams", active: false, h: [] },
+      { n: 3, name: "everything", active: true, h: [{ type: "claude", status: "thinking" }, { type: "claude", status: "tool" }] },
+      { n: 4, name: "enterprise reporting", active: true, h: [{ type: "codex", status: "waiting" }, { type: "agy", status: "thinking" }] },
+      { n: 5, name: "battlestation voice", active: true, h: [{ type: "claude", status: "thinking" }, { type: "claude", status: "waiting" }] },
+      { n: 6, name: "exclude packages", active: true, h: [{ type: "codex", status: "idle" }] },
+      { n: 7, name: "deck design", active: true, h: [{ type: "claude", status: "tool" }] },
+      { n: 8, name: "", active: false, h: [] },
+      { n: 9, name: "", active: false, h: [] },
+      { n: 10, name: "", active: false, h: [] },
+    ];
+    const pills = defs.map((d) => ({
+      label: d.name ? d.n + " · " + d.name : String(d.n),
+      bg: d.active ? "rgba(217,160,74,0.12)" : "transparent",
+      fg: d.active ? "#e8c98c" : "#544e44",
+      bd: d.active ? "rgba(217,160,74,0.35)" : "rgba(255,255,255,0.06)",
+      harnesses: d.h.map((x) => this.harnessView({ type: x.type, ws: d.n, status: x.status })),
+    }));
+    const legend = [
+      { label: "thinking", color: "#3fb950" },
+      { label: "tool use", color: "#a371f7" },
+      { label: "waiting", color: "#d9895f" },
+    ];
+    return { pills, legend };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  @keyframes dckpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .dp-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .dp-scroll::-webkit-scrollbar-thumb { background: rgba(217,160,74,0.18); border-radius: 8px; }
+  .dp-scroll::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+<div style="width:100%; height:100%; display:flex; flex-direction:column; background:linear-gradient(160deg,#1a1712 0%,#16130f 100%); border:1px solid rgba(217,160,74,0.14); border-radius:16px; overflow:hidden; font-family:'Geist',system-ui,sans-serif; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+
+  <!-- header -->
+  <div style="display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid rgba(217,160,74,0.10);">
+    <div style="display:flex; align-items:baseline; gap:10px;">
+      <span style="font-size:16px; font-weight:700; color:#f4efe4; letter-spacing:-0.2px;">The Deck</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#7f7768;">{{ openCount }} open · {{ blockingCount }} blocking</span>
+    </div>
+    <div style="flex:1;"></div>
+    <!-- global automation -->
+    <button onClick="{{ toggleInject }}" title="Inject: send new answers straight into the harness terminal" style="display:flex; align-items:center; gap:7px; border-radius:8px; padding:6px 10px; font-family:'Geist',sans-serif; font-size:12px; font-weight:600; cursor:pointer; background:{{ inj.bg }}; color:{{ inj.fg }}; border:1px solid {{ inj.bd }};"><span style="width:14px; height:14px; border-radius:4px; border:1.5px solid {{ inj.box }}; background:{{ inj.chk }}; display:grid; place-items:center; font-size:9px; color:#1c1408;">{{ inj.mark }}</span>Inject</button>
+    <button onClick="{{ toggleRetrigger }}" title="Auto-retrigger: continue the agent's terminal without you when an item changes" style="display:flex; align-items:center; gap:7px; border-radius:8px; padding:6px 10px; font-family:'Geist',sans-serif; font-size:12px; font-weight:600; cursor:pointer; background:{{ rtg.bg }}; color:{{ rtg.fg }}; border:1px solid {{ rtg.bd }};"><span style="width:14px; height:14px; border-radius:4px; border:1.5px solid {{ rtg.box }}; background:{{ rtg.chk }}; display:grid; place-items:center; font-size:9px; color:#1c1408;">{{ rtg.mark }}</span>Auto-retrigger</button>
+    <span style="width:1px; height:22px; background:rgba(217,160,74,0.14);"></span>
+    <div style="display:flex; align-items:center; background:#14110c; border:1px solid rgba(217,160,74,0.14); border-radius:9px; padding:3px;">
+      <button onClick="{{ setQueue }}" style="border:none; border-radius:7px; padding:6px 12px; font-family:'Geist',sans-serif; font-size:12.5px; font-weight:600; cursor:pointer; background:{{ queueBg }}; color:{{ queueFg }}; transition:all .12s;">☰ Queue</button>
+      <button onClick="{{ setBoard }}" style="border:none; border-radius:7px; padding:6px 12px; font-family:'Geist',sans-serif; font-size:12.5px; font-weight:600; cursor:pointer; background:{{ boardBg }}; color:{{ boardFg }}; transition:all .12s;">▤ Board</button>
+    </div>
+  </div>
+
+  <!-- filter chips (queue layout) -->
+  <sc-if value="{{ showFilters }}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:12px 18px; border-bottom:1px solid rgba(217,160,74,0.07);">
+    <button onClick="{{ setFilterAll }}" style="border-radius:20px; padding:5px 13px; font-family:'Geist',sans-serif; font-size:12px; font-weight:600; cursor:pointer; background:{{ allChipBg }}; color:{{ allChipFg }}; border:1px solid {{ allChipBd }};">All projects</button>
+    <sc-for list="{{ projects }}" as="p" hint-placeholder-count="5">
+      <button onClick="{{ p.onClick }}" style="display:inline-flex; align-items:center; gap:7px; border-radius:20px; padding:5px 12px; font-family:'Geist',sans-serif; font-size:12px; font-weight:600; cursor:pointer; background:{{ p.bg }}; color:{{ p.fg }}; border:1px solid {{ p.bd }};"><span style="width:8px; height:8px; border-radius:50%; background:{{ p.color }};"></span>{{ p.name }}<span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; opacity:0.65;">{{ p.count }}</span></button>
+    </sc-for>
+  </div>
+  </sc-if>
+
+  <!-- body -->
+  <div style="flex:1; min-height:0; display:flex;">
+
+    <!-- main -->
+    <div class="dp-scroll" style="flex:1; min-width:0; overflow-y:auto; overflow-x:hidden;">
+
+      <!-- queue view -->
+      <sc-if value="{{ isQueue }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex; flex-direction:column; gap:9px; padding:16px 18px;">
+        <sc-for list="{{ queueAsks }}" as="ask" hint-placeholder-count="4">
+          <dc-import name="DeckCard" ask="{{ ask }}" default-open="{{ ask.defaultOpen }}" hint-size="100%,74px"></dc-import>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <!-- board view -->
+      <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+      <sc-if value="{{ boardExpanded }}" hint-placeholder-val="{{ false }}">
+        <div onClick="{{ closeBoard }}" style="display:flex; align-items:center; gap:9px; margin:14px 18px 0; padding:8px 12px; background:rgba(0,0,0,0.2); border:1px solid rgba(217,160,74,0.12); border-radius:9px; cursor:pointer; width:fit-content;" style-hover="background:rgba(217,160,74,0.08);">
+          <span style="color:#e8b877; font-size:13px;">‹</span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:600; color:#cdbfa6;">all columns</span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6f685c;">· viewing {{ expandedColName }}</span>
+        </div>
+      </sc-if>
+      <div style="display:flex; gap:12px; padding:16px 18px; align-items:flex-start; min-width:min-content;">
+        <sc-for list="{{ columns }}" as="col" hint-placeholder-count="4">
+          <sc-if value="{{ col.show }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:{{ col.flex }}; min-width:{{ col.minw }}; background:rgba(0,0,0,0.18); border:1px solid rgba(217,160,74,0.07); border-top:2px solid {{ col.color }}; border-radius:12px; padding:11px 10px 13px;">
+            <div style="display:flex; align-items:center; gap:8px; padding:2px 4px 12px;">
+              <span style="font-size:12.5px; font-weight:700; color:#e9e2d5; letter-spacing:-0.1px;">{{ col.name }}</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; font-weight:600; color:{{ col.color }}; background:{{ col.fill }}; border-radius:20px; padding:1px 8px;">{{ col.count }}</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <sc-for list="{{ col.items }}" as="ask" hint-placeholder-count="2">
+                <dc-import name="DeckCard" ask="{{ ask }}" compact="{{ true }}" open="{{ ask.bOpen }}" on-toggle="{{ ask.bToggle }}" hint-size="100%,86px"></dc-import>
+              </sc-for>
+              <sc-if value="{{ col.empty }}" hint-placeholder-val="{{ false }}">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#544e44; text-align:center; padding:14px 0;">— empty —</div>
+              </sc-if>
+            </div>
+          </div>
+          </sc-if>
+        </sc-for>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:680},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;queue&quot;,&quot;board&quot;],&quot;default&quot;:&quot;queue&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { view: null, hideDone: true, filterWs: null, inject: true, retrigger: true, boardOpenId: null };
+
+  hexToRgba(hex, a) {
+    const h = hex.replace("#", ""); const n = parseInt(h, 16);
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+  }
+
+  shapeFor(key) {
+    const S = {
+      claude: { vb: "0 0 24 24", fr: "evenodd", d: "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" },
+      agy: { vb: "0 0 24 24", fr: "evenodd", d: "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" },
+      codex: { vb: "0 0 512 509.639", fr: "nonzero", d: "M412.037 221.764a90.834 90.834 0 004.648-28.67 90.79 90.79 0 00-12.443-45.87c-16.37-28.496-46.738-46.089-79.605-46.089-6.466 0-12.943.683-19.264 2.04a90.765 90.765 0 00-67.881-30.515h-.576c-.059.002-.149.002-.216.002-39.807 0-75.108 25.686-87.346 63.554-25.626 5.239-47.748 21.31-60.682 44.03a91.873 91.873 0 00-12.407 46.077 91.833 91.833 0 0023.694 61.553 90.802 90.802 0 00-4.649 28.67 90.804 90.804 0 0012.442 45.87c16.369 28.504 46.74 46.087 79.61 46.087a91.81 91.81 0 0019.253-2.04 90.783 90.783 0 0067.887 30.516h.576l.234-.001c39.829 0 75.119-25.686 87.357-63.588 25.626-5.242 47.748-21.312 60.682-44.033a91.718 91.718 0 0012.383-46.035 91.83 91.83 0 00-23.693-61.553l-.004-.005zM275.102 413.161h-.094a68.146 68.146 0 01-43.611-15.8 56.936 56.936 0 002.155-1.221l72.54-41.901a11.799 11.799 0 005.962-10.251V241.651l30.661 17.704c.326.163.55.479.596.84v84.693c-.042 37.653-30.554 68.198-68.21 68.273h.001zm-146.689-62.649a68.128 68.128 0 01-9.152-34.085c0-3.904.341-7.817 1.005-11.663.539.323 1.48.897 2.155 1.285l72.54 41.901a11.832 11.832 0 0011.918-.002l88.563-51.137v35.408a1.1 1.1 0 01-.438.94l-73.33 42.339a68.43 68.43 0 01-34.11 9.12 68.359 68.359 0 01-59.15-34.11l-.001.004zm-19.083-158.36a68.044 68.044 0 0135.538-29.934c0 .625-.036 1.731-.036 2.5v83.801l-.001.07a11.79 11.79 0 005.954 10.242l88.564 51.13-30.661 17.704a1.096 1.096 0 01-1.034.093l-73.337-42.375a68.36 68.36 0 01-34.095-59.143 68.412 68.412 0 019.112-34.085l-.004-.003zm251.907 58.621l-88.563-51.137 30.661-17.697a1.097 1.097 0 011.034-.094l73.337 42.339c21.109 12.195 34.132 34.746 34.132 59.132 0 28.604-17.849 54.199-44.686 64.078v-86.308c.004-.032.004-.065.004-.096 0-4.219-2.261-8.119-5.919-10.217zm30.518-45.93c-.539-.331-1.48-.898-2.155-1.286l-72.54-41.901a11.842 11.842 0 00-5.958-1.611c-2.092 0-4.15.558-5.957 1.611l-88.564 51.137v-35.408l-.001-.061a1.1 1.1 0 01.44-.88l73.33-42.303a68.301 68.301 0 0134.108-9.129c37.704 0 68.281 30.577 68.281 68.281a68.69 68.69 0 01-.984 11.545v.005zm-191.843 63.109l-30.668-17.704a1.09 1.09 0 01-.596-.84v-84.692c.016-37.685 30.593-68.236 68.281-68.236a68.332 68.332 0 0143.689 15.804 63.09 63.09 0 00-2.155 1.222l-72.54 41.9a11.794 11.794 0 00-5.961 10.248v.068l-.05 102.23zm16.655-35.91l39.445-22.782 39.444 22.767v45.55l-39.444 22.767-39.445-22.767v-45.535z" },
+    };
+    return S[key] || S.claude;
+  }
+  harnessView(h) {
+    const HN = { claude: "claude", codex: "codex", agy: "antigravity", gemini: "antigravity" };
+    const HS = {
+      thinking: { c: "#3fb950", l: "thinking", busy: 1 },
+      tool:     { c: "#a371f7", l: "tool use", busy: 1 },
+      waiting:  { c: "#d9895f", l: "waiting",  busy: 0 },
+      idle:     { c: "#6f685c", l: "idle",     busy: 0 },
+    };
+    const key = h.type === "gemini" ? "agy" : h.type;
+    const sh = this.shapeFor(key);
+    const s = HS[h.status] || HS.idle;
+    return {
+      vb: sh.vb, d: sh.d, fr: sh.fr, name: HN[h.type] || h.type, ws: h.ws, statusLabel: s.l, color: s.c,
+      tint: this.hexToRgba(s.c, 0.16),
+      anim: s.busy ? "dckpulse 1.8s ease-in-out infinite" : "none",
+      glow: h.status === "waiting" ? "0 0 0 3px " + this.hexToRgba(s.c, 0.16) : "none",
+      title: (HN[h.type] || h.type) + " on ws" + h.ws + " — " + s.l,
+    };
+  }
+
+  data() {
+    const P = {
+      1: { ws: 1, name: "comms",               color: "#6ea8c9" },
+      4: { ws: 4, name: "enterprise reporting", color: "#b58ac9" },
+      5: { ws: 5, name: "battlestation voice",  color: "#d9a04a" },
+      6: { ws: 6, name: "exclude packages",     color: "#7bb47a" },
+      7: { ws: 7, name: "deck design",          color: "#e0855f" },
+    };
+    // running harness instances (multiple per workspace, each its own live status)
+    const harnesses = [
+      { type: "agy",    ws: 1, status: "thinking" },
+      { type: "codex",  ws: 4, status: "waiting" },
+      { type: "agy",    ws: 4, status: "thinking" },
+      { type: "claude", ws: 5, status: "thinking" },
+      { type: "claude", ws: 5, status: "waiting" },
+      { type: "claude", ws: 7, status: "tool" },
+      { type: "codex",  ws: 6, status: "idle" },
+    ];
+    const asks = [
+      { id: 21, type: "question", urgency: "med",  status: "working", blocking: true, agent: "claude", ws: 5, age: "15s", hstatus: "waiting", defaultOpen: true,
+        title: "Commit the three plan docs to main, or open a branch?",
+        body: "Three docs are staged in the working tree:\n\n  M  IDEAS.md            (+4 sections)\n  A  DICTATION-PLAN.md\n  A  MEETING-CAPTURE-PLAN.md\n\nAll docs-only — no code touched, tests untouched.\nCommit straight to main, or open a branch first?\n\n  1) git commit -m \"docs: dictation + capture plans\"\n  2) git checkout -b docs/planning",
+        actions: ["Commit to main", "Open a branch"] },
+      { id: 19, type: "review", urgency: "high", status: "blocked", blocking: true, agent: "codex", ws: 4, age: "2m", hstatus: "waiting",
+        title: "PR #212 ready — refactor auth middleware, 42 files changed",
+        body: "PR #212  refactor: extract auth into middleware layer\n\n  42 files changed, +1,204 −1,733\n  ✓ unit         248 passed\n  ✓ integration   61 passed\n  ✓ lint          clean\n\nSummary:\n  • Moved session guard → middleware/auth.ts\n  • Dropped legacy requireLogin() decorator\n  • Added refresh-token rotation\n\n⚠ Blocks the deploy pipeline until reviewed.",
+        actions: ["Approve & merge", "Request changes"] },
+      { id: 18, type: "question", urgency: "high", status: "blocked", blocking: true, agent: "codex", ws: 4, age: "4m", hstatus: "waiting",
+        title: "Prod migration will drop the legacy sessions table — proceed?",
+        body: "Migration 0043_drop_sessions_legacy\n\n  DROP TABLE sessions_legacy;   -- 2.1M rows\n  last write: 84 days ago\n\n⚠ Irreversible on prod. No rollback path once run.\n  A snapshot was taken 6h ago (backup-0712).\n\nProceed with the migration on prod?",
+        actions: ["Proceed", "Hold"] },
+      { id: 23, type: "question", urgency: "med",  status: "inbox", agent: "claude", ws: 5, age: "7s", hstatus: "waiting",
+        title: "Meeting capture: build the tool in battlestation or everything/tools?",
+        actions: ["battlestation", "everything/tools"] },
+      { id: 15, type: "question", urgency: "med",  status: "working", agent: "gemini", ws: 1, age: "8m", hstatus: "thinking",
+        title: "comms digest tone — formal or casual for the weekly?",
+        actions: ["formal", "casual"] },
+      { id: 22, type: "question", urgency: "low",  status: "inbox", agent: "claude", ws: 5, age: "11s", hstatus: "waiting",
+        title: "Dictation: which push-to-talk key — hold or toggle?",
+        actions: ["hold", "toggle"] },
+      { id: 12, type: "review", urgency: "med",  status: "working", agent: "claude", ws: 7, age: "14m", hstatus: "tool",
+        title: "Kanban card spec drafted — review the status model before I wire it?",
+        body: "Proposed status model:\n\n  Inbox  →  Working  →  Blocked  →  Done\n\n• 'blocking' stays an orthogonal flag (▹), not a column\n  → a card can be Working AND blocking you\n• agents move their own cards between columns\n• you drag to reprioritise within a column\n\nLook right before I wire it into the widget?" },
+      { id: 16, type: "notify", urgency: "low",  status: "inbox", agent: "gemini", ws: 4, age: "6m", hstatus: "thinking",
+        title: "Nightly report generated — 3 anomalies flagged for your review" },
+      { id: 24, type: "notify", urgency: "low",  status: "inbox", agent: "claude", ws: 5, age: "3s", hstatus: "thinking",
+        title: "Research done: voxtype + local meeting capture — 3 plan docs written" },
+      { id: 9,  type: "notify", urgency: "low",  status: "done", agent: "codex", ws: 6, age: "22m", hstatus: "idle",
+        title: "Removed 24 unused packages, build is green" },
+      { id: 7,  type: "question", urgency: "low", status: "done", agent: "claude", ws: 7, age: "31m", hstatus: "idle",
+        title: "Deck popup width — 760 or full half-screen? (resolved: half-screen)" },
+    ];
+    return { P, asks, harnesses };
+  }
+
+  effView() { return this.state.view || (this.props.layout === "board" ? "board" : "queue"); }
+
+  renderVals() {
+    const layout = this.props.layout || "queue";
+    const { P, asks, harnesses } = this.data();
+    const uRank = { high: 0, med: 1, low: 2 };
+    const view = this.effView();
+    const hideDone = this.state.hideDone;
+    const filterWs = this.state.filterWs;
+
+    let visible = asks.filter((a) => !(hideDone && a.status === "done"));
+    let queue = visible.filter((a) => (filterWs == null || a.ws === filterWs));
+    queue = queue.slice().sort((a, b) =>
+      (b.blocking ? 1 : 0) - (a.blocking ? 1 : 0) ||
+      uRank[a.urgency] - uRank[b.urgency]);
+
+    const openCount = asks.filter((a) => a.status !== "done").length;
+    const blockingCount = asks.filter((a) => a.blocking).length;
+
+    const colDefs = [
+      { key: "inbox",   name: "Inbox",   color: "#9a8f7d" },
+      { key: "working", name: "Working", color: "#7aa2d6" },
+      { key: "blocked", name: "Blocked", color: "#e0765f" },
+      { key: "done",    name: "Done",    color: "#7bb47a" },
+    ];
+    const boardSource = asks.filter((a) => !(hideDone && a.status === "done") && (filterWs == null || a.ws === filterWs));
+    const openId = this.state.boardOpenId;
+    const bToggle = (id) => () => this.setState((s) => ({ boardOpenId: s.boardOpenId === id ? null : id }));
+    let expandedKey = null;
+    colDefs.forEach((c) => { if (boardSource.some((a) => a.status === c.key && a.id === openId)) expandedKey = c.key; });
+    const columns = colDefs.map((c) => {
+      const items = boardSource.filter((a) => a.status === c.key)
+        .sort((a, b) => (b.blocking ? 1 : 0) - (a.blocking ? 1 : 0) || uRank[a.urgency] - uRank[b.urgency])
+        .map((a) => Object.assign({}, a, { bOpen: a.id === openId, bToggle: bToggle(a.id) }));
+      const isExp = c.key === expandedKey;
+      return {
+        name: c.name, color: c.color, fill: this.hexToRgba(c.color, 0.15), count: items.length, items, empty: items.length === 0,
+        show: expandedKey == null || isExp,
+        flex: isExp ? "1 1 100%" : "1",
+        minw: expandedKey == null ? "224px" : (isExp ? "100%" : "0"),
+      };
+    });
+    const expandedColName = expandedKey ? (colDefs.find((c) => c.key === expandedKey) || {}).name : "";
+
+    const projects = Object.values(P).map((p) => {
+      const pAsks = asks.filter((a) => a.ws === p.ws && a.status !== "done");
+      const hOn = harnesses.filter((h) => h.ws === p.ws);
+      const hasBlock = pAsks.some((a) => a.blocking);
+      const hasQ = pAsks.some((a) => a.type === "question" || a.type === "review");
+      const health = hasBlock ? "#e0765f" : hasQ ? "#d9a04a" : "#7bb47a";
+      const active = filterWs === p.ws;
+      return {
+        ws: p.ws, name: p.name, color: p.color, count: pAsks.length,
+        healthColor: pAsks.length ? health : "#6f685c",
+        glow: this.hexToRgba(health, 0.16),
+        harnesses: hOn.map((h) => this.harnessView(h)), noHarness: hOn.length === 0,
+        railBg: active ? "rgba(217,160,74,0.12)" : "transparent",
+        bg: active ? this.hexToRgba(p.color, 0.16) : "rgba(255,255,255,0.02)",
+        fg: active ? "#f2ede2" : "#b3a99a",
+        bd: active ? this.hexToRgba(p.color, 0.5) : "rgba(255,255,255,0.09)",
+        onClick: () => this.setState((s) => ({ filterWs: s.filterWs === p.ws ? null : p.ws })),
+      };
+    });
+
+    const legend = [
+      { label: "thinking", color: "#3fb950" },
+      { label: "tool use", color: "#a371f7" },
+      { label: "waiting", color: "#d9895f" },
+    ];
+
+    const chk = (on, hue) => ({
+      bg: on ? this.hexToRgba(hue, 0.12) : "transparent",
+      fg: on ? "#e8c98c" : "#7a7264",
+      bd: on ? this.hexToRgba(hue, 0.4) : "rgba(255,255,255,0.1)",
+      box: on ? hue : "rgba(255,255,255,0.25)",
+      chk: on ? hue : "transparent",
+      mark: on ? "✓" : "",
+    });
+
+    const allActive = filterWs == null;
+    return {
+      openCount, blockingCount,
+      isQueue: view === "queue", isBoard: view === "board",
+      showFilters: true,
+      hasBlocking: queue.some((a) => a.blocking),
+      queueAsks: queue, columns, projects, legend,
+      boardExpanded: expandedKey != null, expandedColName,
+      closeBoard: () => this.setState({ boardOpenId: null }),
+      inj: chk(this.state.inject, "#d9a04a"),
+      rtg: chk(this.state.retrigger, "#d9a04a"),
+      queueBg: view === "queue" ? "#d9a04a" : "transparent",
+      queueFg: view === "queue" ? "#1c1408" : "#a89e8f",
+      boardBg: view === "board" ? "#d9a04a" : "transparent",
+      boardFg: view === "board" ? "#1c1408" : "#a89e8f",
+      allChipBg: allActive ? "rgba(217,160,74,0.16)" : "rgba(255,255,255,0.02)",
+      allChipFg: allActive ? "#eabc82" : "#b3a99a",
+      allChipBd: allActive ? "rgba(217,160,74,0.45)" : "rgba(255,255,255,0.09)",
+      setQueue: () => this.setState({ view: "queue" }),
+      setBoard: () => this.setState({ view: "board" }),
+      toggleInject: () => this.setState((s) => ({ inject: !s.inject })),
+      toggleRetrigger: () => this.setState((s) => ({ retrigger: !s.retrigger })),
+      setFilterAll: () => this.setState({ filterWs: null }),
+    };
+  }
+}
+</script>
+</body>
+</html>
