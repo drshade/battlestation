@@ -53,7 +53,7 @@ hl.bind(mainMod .. " + Down",  hl.dsp.focus({ direction = "down" }),  { descript
 hl.bind(mainMod .. " + SHIFT + Down", hl.dsp.focus({ workspace = "empty" }), { description = "Go to next empty workspace" })
 hl.bind(mainMod .. " + Tab",          hl.dsp.window.cycle_next(),            { description = "Cycle windows" })
 hl.bind(mainMod .. " + S",            hl.dsp.workspace.toggle_special(),     { description = "Toggle scratchpad" })
-hl.bind(mainMod .. " + A",            hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces asks"), { description = "Asks queue (agent questions)" })
+hl.bind(mainMod .. " + A",            hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces asks"), { description = "The Deck (agent asks queue)" })
 hl.bind(mainMod .. " + N",            hl.dsp.exec_cmd(noctCall .. "notifications toggleHistory"), { description = "Notification history" })
 
 -- 2. Launch · Hyper

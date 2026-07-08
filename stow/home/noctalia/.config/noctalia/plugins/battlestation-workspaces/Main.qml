@@ -84,7 +84,7 @@ Item {
       pluginApi.openPanel(screen, buttonItem);
   }
 
-  // Toggle the asks panel (badge click + the HYPER+A keybind). Exact toggle
+  // Toggle the asks panel (badge click + the SUPER+A keybind). Exact toggle
   // semantics built from openPanel/closePanel rather than togglePanel: the
   // mode must be staged BEFORE an open, and a toggle of a panel currently
   // showing another mode should just close it.

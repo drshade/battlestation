@@ -81,7 +81,8 @@ Item {
     anchors.centerIn: parent
     width: parent.width
     height: cfg.d
-    radius: Style.radiusM
+    // Squarer pill to match the Deck's button language (Style.radiusXS).
+    radius: Style.radiusXS
     color: cfg.outline ? "transparent" : cell.bg()
     border.width: cfg.outline ? Math.max(2, Math.round(cfg.d * 0.1)) : 0
     border.color: cfg.outline ? cell.bg() : "transparent"
