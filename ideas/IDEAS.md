@@ -212,15 +212,6 @@ The stream already delivers more than the widget renders:
 - **Voice answers.** Push-to-talk → whisper → the focused agent (or the
   ask queue's head). Answering a yes/no ask while making coffee. (A
   specialization of system-wide dictation above, routed to the Deck.)
-- **Local meeting/call capture → the everything repo.** Distinct from
-  dictation (whole call, not mic-into-focused-field): a self-triggered
-  toggle records both sides of a video call via a PipeWire monitor+mic
-  loopback, whisper.cpp emits VTT, and it drops into
-  `../everything/.inbox/transcripts/` — the stream that repo *already*
-  curates into its meetings ontology. Bypasses the Teams/Graph transcript
-  dependency (and covers Google Meet / Zoom, which Graph can't). Shares the
-  whisper+PipeWire stack with dictation. Full design in
-  **MEETING-CAPTURE-PLAN.md**.
 - **Drag a bot to a pill = move that session there.** The session's
   terminal window follows (pid → client → movetoworkspacesilent). The
   bots stop being decoration and become handles on the sessions.

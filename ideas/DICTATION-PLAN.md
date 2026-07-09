@@ -1,134 +1,146 @@
-# DICTATION-PLAN — system-wide voice-to-text on the battlestation
+# DICTATION-PLAN — push-to-talk dictation via a Noctalia plugin
 
-Scratch analysis for the "voxtype-style dictation" idea in IDEAS.md. Goal:
-a push-to-talk hotkey → speak → transcribed text spooled into whatever
-window is focused (terminal, browser field, an agent's prompt), fully
-local. This file is the scouting + plan; IDEAS.md keeps only the one-line
-pointer.
+Goal: hold a key → speak → transcribed text typed into whatever window is
+focused, fully local. Refined from the earlier "adopt voxtype" draft: the
+orchestrator is now a **new Noctalia plugin** — dictation is a totally
+isolated concern, and the widget solves the two things a bare keybind
+can't: **visual status** (recording / transcribing / error at a glance)
+and **audio device selection** (a settings surface for picking the mic).
 
-Status: **research done, not started.** Decisions still open (see bottom).
+Status: **design settled, not started.** The focus-race (window focus
+changing between key-release and injection) is accepted, mitigated by the
+widget's busy state rather than engineered away.
 
 ## The machine reality (recon 2026-07-07)
 
-What's already here vs. what a dictation stack needs:
+| Need                | State on this box                                            |
+|---------------------|--------------------------------------------------------------|
+| Audio capture       | ✅ PipeWire (`pw-record`), Pulse-compat, ffmpeg              |
+| Clipboard (Wayland) | ✅ `wl-copy` / `wl-paste`                                    |
+| Text injection      | ❌ none — `wtype` / `ydotool` / `dotool` all missing         |
+| STT engine / model  | ❌ none — no whisper.cpp, no models                          |
+| Microphone          | ⚠️ **UNVERIFIED** — recon never checked a working mic exists |
+| GPU                 | Intel Arc B390 (Panther Lake). No CUDA — Vulkan/SYCL or CPU  |
 
-| Need                | State on this box                                              |
-|---------------------|---------------------------------------------------------------|
-| Audio capture       | ✅ PipeWire (`pw-record`), Pulse-compat (`parecord`), ffmpeg   |
-| Clipboard (Wayland) | ✅ `wl-copy` / `wl-paste` (wl-clipboard)                       |
-| Text injection tool | ❌ none — `wtype`, `ydotool`, `dotool` all MISSING             |
-| STT engine / model  | ❌ none — no whisper / whisper.cpp / vosk                      |
-| GPU                 | Intel Arc B390 (Panther Lake iGPU). **No CUDA** — Vulkan/SYCL or CPU only |
+**Step 0 of implementation: the mic check.** `wpctl status` to list
+sources, a 5-second `pw-record` + playback. Mic quality drives whisper
+accuracy more than model size; nothing else matters if this fails.
 
-Two consequences that shape everything below:
+## Why a plugin instead of adopting voxtype
 
-1. **We must install an injection path.** Cheapest is `wtype` (uses the
-   Wayland virtual-keyboard protocol Hyprland already speaks — no daemon,
-   no root, no uinput group). `ydotool` works too but needs a systemd user
-   daemon + uinput permissions. Every candidate tool also has a
-   **clipboard-paste fallback**, which needs only the `wl-clipboard` we
-   already have — so a zero-new-typing-tool path exists if wtype is fiddly.
-2. **No CUDA.** Anything leaning on `faster-whisper`/Parakeet-on-CUDA is
-   CPU-only here unless it has a Vulkan backend. whisper.cpp has Vulkan
-   (and SYCL) for Intel; on a modern CPU, quantized whisper/Cohere models
-   also run well above realtime, so CPU-only is a viable v1.
+The earlier draft picked **voxtype** (the Omarchy 3.3 tool) as the whole
+solution. The refinement: what we actually want — live status in the bar,
+device picking, a place for future polish — needs the orchestrator to
+**own the pipeline**, not shell out to a black box. Wrapping voxtype would
+leave the plugin guessing at state ("is it recording? transcribing?");
+driving the primitives directly makes every transition observable because
+the plugin *is* the thing running them. And the pipeline is genuinely
+small: record a wav, run whisper on it, type the result.
 
-## The landscape (all offline-capable, Wayland-native, AUR-installable)
+The landscape research stands as reference (voxtype, hyprvoice, hyprwhspr
+— see git history of this file for the full survey). voxtype remains the
+**escape hatch**: if our glue disappoints, it's the proven packaged
+alternative, and its engine variety (Parakeet, Moonshine, …) is there if
+plain whisper.cpp underwhelms. Everything web-sourced carries the usual
+caveat: **verify flags against the installed binaries, not the README.**
 
-The space moved fast in late 2025 — several Hyprland-first tools now exist.
-Ranked by fit for this machine:
+## Architecture: the `dictation` plugin
 
-- **voxtype** (`peteonrails/voxtype`, Rust) — **the one Omarchy 3.3 shipped**,
-  which is the tool the human saw. AUR: `voxtype` / `voxtype-bin`. Deps we
-  need: PipeWire (have) + `wtype` (install). Injection fallback chain
-  `wtype → dotool → ydotool → clipboard`. Push-to-talk maps *directly* to
-  Hyprland press/release binds:
-  ```
-  bind  = SUPER, V, exec, voxtype record start
-  bindr = SUPER, V, exec, voxtype record stop
-  ```
-  (or `voxtype record toggle`). Engines: Whisper (99 langs, default),
-  Parakeet, Moonshine, SenseVoice, Dolphin, Omnilingual, etc. **Explicit
-  Intel Vulkan support**: `sudo voxtype setup gpu --enable`. Models via
-  `voxtype setup --download`. Claims 9–11× realtime on CPU with a quantized
-  1.5 GB model. → **Best fit; recommended.**
-- **hyprvoice** (`LeonardoTrapani/hyprvoice`, Go) — native Wayland/Hyprland,
-  AUR `hyprvoice-bin` (installs a systemd user service). Same PTT bind/bindr
-  shape, `wtype`/`ydotool`/clipboard-with-restore injection, local
-  whisper.cpp (tiny → large-v3-turbo) plus many cloud providers. Clean
-  PipeWire capture. Strong runner-up; heavier (background service) than
-  voxtype's on-demand model.
-- **hyprwhspr** (`goodroot/hyprwhspr`, Python) — AUR `hyprwhspr`. Explicitly
-  mentions **Waybar/Noctalia** integration and a visualizer; `onnx-asr` for
-  fast CPU, optional Intel Vulkan. ydotool-based auto-paste, `Super+Alt+D`
-  default. Attractive *because* of the Noctalia tie-in, but Python + ydotool
-  daemon is more moving parts than voxtype.
-- Also seen: `whisrs` (Rust), `VOXD`, `vocalinux`, `MySuperWhisper`,
-  `Somnius/VoxTyper` (a shell wrapper literally named "Voxtype-style"). None
-  beat the top three for this box.
+A sibling of `battlestation-workspaces`, following its exact conventions
+(manifest entryPoints, pluginSettings persistence, direct-argv Processes —
+no shell anywhere, per the repo rule).
 
-**Verdict:** don't build the pipeline from scratch — the "whisper + wtype +
-Hypr bind" glue the IDEAS bullet imagined is exactly what voxtype already
-is, and it's the tool the human already watched work under Omarchy. Adopt
-**voxtype**; keep **hyprwhspr** in reserve if the Noctalia/Waybar visualizer
-turns out to matter.
+```
+stow/home/noctalia/.config/noctalia/plugins/dictation/
+  manifest.json     entryPoints: main, barWidget, settings
+  Main.qml          state machine + IPC functions + the pipeline Processes
+  BarWidget.qml     the status glyph (the whole reason this is a plugin)
+  Settings.qml      mic picker, model choice, max-duration, injection prefs
+```
 
-## Proposed integration into battlestation (voxtype path)
+**State machine** (owned by Main.qml, rendered by BarWidget.qml):
 
-Fits the repo's grain — a third-party binary from the AUR, its *config*
-stow-managed, its keybind in the Hypr config, its models kept out of git.
+```
+idle → recording → transcribing → injecting → idle
+                 ↘ error (glyph + toast) → idle
+```
 
-1. **Install the binary + injection tool.** `voxtype` (or `voxtype-bin`) and
-   `wtype` from the AUR. These are packages, not stow-managed files — the
-   parallel is any other installed tool. (Optionally teach `bsctl agents
-   doctor` / `bin/doctor` to assert their presence, per the "doctor for the
-   unmanaged" idea — otherwise a fresh clone silently lacks dictation.)
-2. **Download a model + enable GPU.** `voxtype setup --download` (start with
-   a small English whisper model), then try `sudo voxtype setup gpu --enable`
-   for Intel Vulkan and benchmark against CPU. Models land in a data dir
-   (`~/.local/share/...`) — **gitignored, never stowed** (big binaries; the
-   same discipline as any downloaded asset).
-3. **New stow package `stow/home/voxtype`** holding `~/.config/voxtype/`
-   (model choice, injection method = wtype, formatting prefs). One source of
-   truth, symlinked live like every other config.
-4. **Keybind in `stow/home/hypr/.config/hypr/config/keybinds.lua`**, in the
-   existing numbered-section style. A press/release pair for hold-to-talk
-   (`bind` start / `bindr` stop). Pick a key that doesn't collide — the file
-   already documents its binds; add one with a `description`. keyd stays out
-   of it: PTT needs exec-on-press *and* exec-on-release, which is Hyprland's
-   `bind`/`bindr`, not a keyd remap.
-5. **Docs.** A `setup/dictation.md` runbook note (current-state steps only,
-   per the no-history-in-runbooks rule); the *why* goes in the commit.
+- *idle*: dim mic glyph (or hidden — settings choice).
+- *recording*: unmissable — red/pulsing. Also the stuck-mic tell.
+- *transcribing/injecting*: busy spinner. This is the focus-race
+  mitigation: while the glyph is busy, you know text is still in flight.
+- *error*: glyph flash + one toast (whisper failed, wtype missing, no mic).
+  Errors surface loud, never swallowed.
 
-## Where this connects to the rest of the desk
+**IPC surface** — same grammar as the asks panel's Super+A bind:
 
-- **Voice answers / the Deck.** Once dictation types into the focused
-  window, "answer an ask by voice" is just: focus the ask's reply field,
-  hold the key, talk. The IDEAS "Voice answers" bullet becomes a thin
-  routing layer on top of this, not its own pipeline.
-- **Kitty remote-control idea.** With `allow_remote_control` on, dictation
-  aimed at a specific session's terminal (rather than merely "focused
-  window") becomes possible — voice straight into a named agent's prompt.
-- **Guardrail check.** Dictation is opt-in, local, and quiet — it costs no
-  attention until invoked, satisfying "attention features must never cost
-  attention." It does *not* route through bsctl/the stream, and shouldn't:
-  it's a system input method, not part of the agent-status grammar.
+```
+qs -c noctalia-shell ipc call plugin:dictation start   # key press
+qs -c noctalia-shell ipc call plugin:dictation stop    # key release
+qs -c noctalia-shell ipc call plugin:dictation cancel  # bail, discard audio
+```
 
-## Open decisions (the human's call)
+**The pipeline** (three Processes, run by Main.qml):
 
-1. **Injection: `wtype` vs. clipboard-paste fallback?** wtype is the clean
-   default; clipboard-paste needs nothing new but clobbers the clipboard
-   unless the tool restores it (hyprvoice does; confirm voxtype's behavior).
-2. **GPU (Intel Vulkan) vs. CPU-only for v1?** CPU is likely fine and
-   simpler; Vulkan is a `setup gpu --enable` away if latency disappoints.
-3. **Which model / size?** Small-English to start; larger if accuracy on
-   accents/jargon matters more than latency.
-4. **Which key, and hold-to-talk vs. toggle?** Hold-to-talk (walkie-talkie)
-   is the crisp default; toggle is easier one-handed. Needs a free bind.
-5. **voxtype vs. hyprwhspr?** Default to voxtype (Omarchy-proven, Rust, Intel
-   Vulkan, fewer moving parts). Revisit only if the Noctalia/Waybar
-   visualizer or a background-service model is wanted.
+1. `pw-record --target <chosen-source> /run/user/.../dictation.wav`
+   — started on `start`, killed on `stop`.
+2. `whisper-cli -m <model> -f dictation.wav --no-timestamps …` → stdout.
+3. `wtype -` with the text on stdin (stdin avoids argv quoting entirely).
 
-Effort: **small.** Realistically an evening — install, download a model,
-one config file, one keybind, test into a few windows. No new code; it's
-adoption + wiring, exactly the kind of thing the IDEAS bullet hoped.
+**Stuck-mic backstop:** a max-duration timer (default ~60s, a setting)
+auto-stops recording. This covers the known Hyprland `bindr` gotcha —
+release SUPER before V and the release bind may not fire; without a cap
+that's an open mic forever.
+
+**Device selection:** Settings.qml lists PipeWire sources (parse
+`wpctl status` / `pw-dump` via Process; check whether Noctalia's own audio
+service already exposes sources before hand-rolling). Chosen node persists
+in pluginSettings; default = system default source.
+
+## What gets installed (the non-plugin half)
+
+- **`wtype`** (AUR) — the injector. Note honestly: installing it grants
+  *every* process in the session the virtual-keyboard capability, not just
+  the plugin. On a desk full of agents with shell access that's a real
+  posture change — accepted deliberately (it's the same power the kitty
+  remote-control idea wants), recorded here so it's a decision, not a drift.
+- **`whisper.cpp`** (AUR, provides `whisper-cli`) — CPU first; Intel
+  Vulkan build only if latency disappoints.
+- **A model** — start `small.en`; ggml files live in a data dir,
+  **gitignored, never stowed**.
+- Keybind in `keybinds.lua` (numbered-section style, with description):
+  `bind` SUPER+backslash → `start`, `bindr` SUPER+backslash → `stop`.
+  (Super+V was the first proposal — it's taken by paste; Super+\ chosen
+  via Deck ask #22.) Install binaries *before* the keybind lands — the
+  symlinked config goes live instantly.
+- `setup/dictation.md` runbook note (current steps only; why → commit msg).
+- Optionally: `bin/doctor` asserts `wtype`/`whisper-cli`/model present.
+
+## Verification checklist (the acceptance test, not an afterthought)
+
+- Mic sanity: record + play back 5s, correct device selected via settings.
+- Dictate into: a kitty prompt, a browser text field, an agent's prompt.
+- The jargon test: say `bsctl`, `Noctalia`, `Hyprland`, `Quickshell`,
+  client/project names — small.en will mangle some; decide if it's livable
+  or bump the model.
+- Unicode / punctuation survives wtype.
+- Hold SUPER+\, release SUPER first, then \ — confirm the backstop catches
+  the stuck recording and the glyph shows it.
+- Switch windows mid-transcription — observe where text lands; confirm the
+  busy glyph made it predictable (accepted behaviour, not a bug).
+- Kill whisper mid-run / remove the model — error state renders, toast
+  fires, plugin returns to idle.
+
+## Open decisions (genuinely the human's)
+
+1. **Key + mode** — DECIDED (Deck #22): **Super+\ hold-to-talk**. Super+V
+   was rejected — it's paste. Toggle stays a settings flag; hold default.
+2. **Idle glyph visible or hidden?** Cosmetic, decide at first render.
+
+Everything else (model size, CPU vs Vulkan, wtype vs clipboard fallback)
+is try-the-default-and-escalate, not a decision to park on.
+
+Effort: **a weekend-ish.** The pipeline is small but BarWidget/Settings/
+state-machine QML is real code — more than the "one evening" of the
+adopt-voxtype draft, in exchange for status and device UX that draft
+couldn't give.
