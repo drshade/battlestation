@@ -1,0 +1,28 @@
+{
+  "id": "dictation",
+  "name": "Dictation",
+  "version": "0.1.0",
+  "minNoctaliaVersion": "4.4.3",
+  "author": "tom",
+  "license": "MIT",
+  "description": "Push-to-talk dictation: hold a key, speak, and the transcript is typed into the focused window (pw-record → whisper-cli → wtype, all local).",
+  "tags": [
+    "Bar"
+  ],
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "settings": "Settings.qml"
+  },
+  "dependencies": {
+    "plugins": []
+  },
+  "metadata": {
+    "defaultSettings": {
+      "micNode": "",
+      "modelPath": "",
+      "maxDurationS": 60,
+      "showWhenIdle": true
+    }
+  }
+}

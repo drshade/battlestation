@@ -138,6 +138,16 @@ hl.bind(mainMod .. " + X",           send_shortcut("CTRL", "X"),                
 hl.bind(mainMod .. " + Z",           send_shortcut("CTRL", "Z"),                        { description = "Undo" })
 hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipboard"), { description = "Clipboard history" })
 
+-- Dictation: tap to start recording, tap again to transcribe and type into
+-- the focused window (the Dictation Noctalia plugin owns the pw-record →
+-- whisper-cli → wtype pipeline). A bare, modifier-LESS key on purpose: text
+-- typed while a physical modifier is held combines with it in the compositor
+-- (digits became SUPER+N workspace jumps under the original Super+\ hold
+-- bind), and modifier-release binds proved undetectable here — so the fix is
+-- structural: with a tap-toggle on a plain key, nothing is held at injection
+-- time. (Supersedes Deck ask #22's Super+\.)
+hl.bind("F12", hl.dsp.exec_cmd(noctCall .. "plugin:dictation toggle"), { description = "Dictate (tap: start / stop)" })
+
 -- 8. Hardware
 
 -- Audio

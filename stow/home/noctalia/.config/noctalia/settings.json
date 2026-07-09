@@ -109,6 +109,15 @@
                         "waitingCustom": "#c97b47"
                     },
                     "id": "plugin:battlestation-workspaces"
+                },
+                {
+                    "defaultSettings": {
+                        "maxDurationS": 60,
+                        "micNode": "",
+                        "modelPath": "",
+                        "showWhenIdle": true
+                    },
+                    "id": "plugin:dictation"
                 }
             ],
             "left": [
@@ -130,6 +139,28 @@
                     "id": "Clock",
                     "tooltipFormat": "HH:mm ddd, MMM dd",
                     "useCustomFont": false
+                },
+                {
+                    "compactMode": true,
+                    "diskPath": "/",
+                    "iconColor": "none",
+                    "id": "SystemMonitor",
+                    "showCpuCores": true,
+                    "showCpuFreq": false,
+                    "showCpuTemp": true,
+                    "showCpuUsage": true,
+                    "showDiskAvailable": false,
+                    "showDiskUsage": false,
+                    "showDiskUsageAsPercent": false,
+                    "showGpuTemp": false,
+                    "showLoadAverage": false,
+                    "showMemoryAsPercent": false,
+                    "showMemoryUsage": true,
+                    "showNetworkStats": false,
+                    "showSwapUsage": false,
+                    "textColor": "none",
+                    "useMonospaceFont": true,
+                    "usePadding": false
                 }
             ],
             "right": [

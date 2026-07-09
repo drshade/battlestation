@@ -197,21 +197,11 @@ The stream already delivers more than the widget renders:
 
 ## Out there
 
-- **System-wide voice dictation (voxtype-style).** A hotkey → speak →
-  transcribed text is spooled into whatever window is focused, anywhere on
-  the desk — a terminal, a browser field, an agent's prompt. Omarchy ships
-  this integrated; the pieces are all local-friendly: whisper (or
-  whisper.cpp / a small local model) for transcription, `wtype`/`ydotool`
-  to inject keystrokes into the active Wayland window, a keyd or Hypr
-  push-to-talk bind to gate it. Scouted — **voxtype** (the Omarchy 3.3 tool)
-  drops in with little glue; full analysis + plan in **DICTATION-PLAN.md**.
-  This is the general input
-  channel that **Voice answers** (below) is just one consumer of: once
-  dictation lands in the focused window, answering an ask by voice is "focus
-  the ask, talk." Likely cheap, high daily-use payoff.
-- **Voice answers.** Push-to-talk → whisper → the focused agent (or the
-  ask queue's head). Answering a yes/no ask while making coffee. (A
-  specialization of system-wide dictation above, routed to the Deck.)
+- **Voice answers.** Tap F12 → speak → the focused agent (or the ask
+  queue's head). Answering a yes/no ask while making coffee. The hard half
+  is BUILT: the `dictation` plugin already types transcripts into the
+  focused window (see setup/dictation-00-setup.md); this is a thin routing
+  layer on top — focus the ask's reply field and talk.
 - **Drag a bot to a pill = move that session there.** The session's
   terminal window follows (pid → client → movetoworkspacesilent). The
   bots stop being decoration and become handles on the sessions.
