@@ -19,7 +19,7 @@
 // compositor (digits become SUPER+N workspace jumps), and modifier-release
 // binds proved undetectable on this setup — see keybinds.lua and git
 // history for the Super+\ hold-to-talk attempt this replaces.
-//   qs -c noctalia-shell ipc call plugin:dictation toggle
+//   qs -c noctalia-shell ipc call plugin:battlestation-dictation toggle
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -94,8 +94,15 @@ Item {
     dictState = "idle";
   }
 
-  // Stuck-mic backstop: bindr doesn't fire if SUPER is released before the
-  // key, so a hold that ends "wrong" would record forever without this.
+  // Right-click on the pill: open Settings in the bar-attached panel
+  // (Panel.qml hosts Settings.qml — the battlestation-workspaces pattern).
+  function openSettingsPanel(screen, buttonItem) {
+    if (pluginApi)
+      pluginApi.openPanel(screen, buttonItem);
+  }
+
+  // Stuck-mic backstop: with a tap-toggle, forgetting the second tap is the
+  // normal failure mode — without this an open mic records forever.
   Timer {
     id: maxTimer
     repeat: false
@@ -168,7 +175,7 @@ Item {
 
   // `qs -c noctalia-shell ipc call plugin:dictation <fn>` — the keybind path.
   IpcHandler {
-    target: "plugin:dictation"
+    target: "plugin:battlestation-dictation"
     function start() {
       root.start();
     }

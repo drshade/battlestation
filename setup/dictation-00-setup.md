@@ -2,7 +2,7 @@
 
 Tap **F12**, speak, tap **F12** again — the transcript is typed into the
 focused window. Fully local: `pw-record` → `whisper-cli` (Vulkan, on the
-iGPU) → `wtype`. The homegrown `dictation` Noctalia plugin (tracked in this
+iGPU) → `wtype`. The homegrown `battlestation-dictation` Noctalia plugin (tracked in this
 repo) owns the pipeline, the bar status pill, and the mic picker; the
 keybind lives in `config/keybinds.lua`.
 

@@ -199,7 +199,7 @@ The stream already delivers more than the widget renders:
 
 - **Voice answers.** Tap F12 → speak → the focused agent (or the ask
   queue's head). Answering a yes/no ask while making coffee. The hard half
-  is BUILT: the `dictation` plugin already types transcripts into the
+  is BUILT: the `battlestation-dictation` plugin already types transcripts into the
   focused window (see setup/dictation-00-setup.md); this is a thin routing
   layer on top — focus the ask's reply field and talk.
 - **Drag a bot to a pill = move that session there.** The session's

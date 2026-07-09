@@ -117,7 +117,7 @@
                         "modelPath": "",
                         "showWhenIdle": true
                     },
-                    "id": "plugin:dictation"
+                    "id": "plugin:battlestation-dictation"
                 }
             ],
             "left": [

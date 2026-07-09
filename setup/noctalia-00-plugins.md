@@ -11,7 +11,7 @@ the plugins enabled in `plugins.json`.
 Tracked exceptions (their source of truth is this repo):
 
 - `battlestation-workspaces` — homegrown.
-- `dictation` — homegrown; see `setup/dictation-00-setup.md` for its
+- `battlestation-dictation` — homegrown; see `setup/dictation-00-setup.md` for its
   out-of-band deps (whisper model, packages).
 - `kde-connect` — **temporary**: upstream's 5s refresh loop calls the
   daemon's `forceOnNetworkChange` DBus method, which tears down every live

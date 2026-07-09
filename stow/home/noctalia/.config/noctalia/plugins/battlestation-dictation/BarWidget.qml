@@ -61,8 +61,9 @@ Item {
     customIconColor: root.dictState === "recording" ? Color.mError : root.dictState === "idle" ? "transparent" : Color.mTertiary
     autoHide: false
     text: root.dictState === "recording" ? root.elapsedS + "s" : root.dictState === "transcribing" ? "…" : root.dictState === "injecting" ? "⌨" : ""
-    tooltipText: root.dictState === "recording" ? "Recording — tap F12 (or click) to transcribe" : root.dictState === "transcribing" ? "Transcribing…" : root.dictState === "injecting" ? "Typing into the focused window" : "Dictation — tap F12 (or click), speak, tap again"
+    tooltipText: root.dictState === "recording" ? "Recording — tap F12 (or click) to transcribe" : root.dictState === "transcribing" ? "Transcribing…" : root.dictState === "injecting" ? "Typing into the focused window" : "Dictation — tap F12 (or click), speak, tap again · right-click for settings"
     onClicked: root.main?.toggle()
+    onRightClicked: root.main?.openSettingsPanel(root.screen, pill)
 
     // The recording pulse: opacity breathes so a live mic can't be missed.
     SequentialAnimation on opacity {

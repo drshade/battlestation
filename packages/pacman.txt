@@ -28,6 +28,8 @@ hyprlock                       # setup/deps-00-hyprlock-hypridle.md
 hypridle                       # setup/deps-00-hyprlock-hypridle.md
 kdeconnect                     # setup/deps-00-kdeconnect.md (config: stow/home/kdeconnect)
 zenity                         # setup/deps-00-zenity.md
+whisper-cpp-vulkan             # setup/dictation-00-setup.md (local speech-to-text on the iGPU)
+wtype                          # setup/dictation-00-setup.md (types transcript into focused window)
 
 # --- apps ------------------------------------------------------------------
 discord                        # chat

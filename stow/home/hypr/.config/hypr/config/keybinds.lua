@@ -146,7 +146,7 @@ hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipb
 -- bind), and modifier-release binds proved undetectable here — so the fix is
 -- structural: with a tap-toggle on a plain key, nothing is held at injection
 -- time. (Supersedes Deck ask #22's Super+\.)
-hl.bind("F12", hl.dsp.exec_cmd(noctCall .. "plugin:dictation toggle"), { description = "Dictate (tap: start / stop)" })
+hl.bind("F12", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-dictation toggle"), { description = "Dictate (tap: start / stop)" })
 
 -- 8. Hardware
 
