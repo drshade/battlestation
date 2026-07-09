@@ -51,6 +51,8 @@ hl.bind(mainMod .. " + Up",    hl.dsp.focus({ direction = "up" }),    { descript
 hl.bind(mainMod .. " + Down",  hl.dsp.focus({ direction = "down" }),  { description = "Focus window down" })
 
 hl.bind(mainMod .. " + SHIFT + Down", hl.dsp.focus({ workspace = "empty" }), { description = "Go to next empty workspace" })
+hl.bind(mainMod .. " + SHIFT + Right", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/workspace-group.sh next"), { description = "Next workspace group (all monitors)" })
+hl.bind(mainMod .. " + SHIFT + Left",  hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/workspace-group.sh prev"), { description = "Previous workspace group (all monitors)" })
 hl.bind(mainMod .. " + Tab",          hl.dsp.window.cycle_next(),            { description = "Cycle windows" })
 hl.bind(mainMod .. " + S",            hl.dsp.workspace.toggle_special(),     { description = "Toggle scratchpad" })
 hl.bind(mainMod .. " + A",            hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces asks"), { description = "Asks queue (agent questions)" })

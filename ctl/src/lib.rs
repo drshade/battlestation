@@ -651,29 +651,42 @@
 //!
 //! # Plan usage (`bsctl agents usage`)
 //!
-//! Plan usage per harness kind, indexed for the day codex/agy grow usage
-//! endpoints: `{"<kind>": {"sessionPct": <int>, "sessionResets": "...",
+//! Plan usage per harness kind, indexed for the day agy grows a usage
+//! endpoint too: `{"<kind>": {"sessionPct": <int>, "sessionResets": "...",
 //! "weeklyPct": <int>, "weeklyResets": "..."}}` — kinds with nothing known
 //! are simply absent, so `{}` means "nothing known", never an error (text
-//! renders the house table, or nothing at all when empty). One provider
-//! exists today (claude, the OAuth usage endpoint — the same data as
-//! `/usage`); adding one is a single entry in usage.rs's provider table.
-//! `--kind` filters to one kind.
+//! renders the house table, or nothing at all when empty). Two providers
+//! exist today (claude, the OAuth usage endpoint — the same data as
+//! `/usage`; codex, `codex app-server`'s JSON-RPC stdio protocol); adding
+//! one more is a single entry in usage.rs's provider table. `--kind`
+//! filters to one kind.
 //!
-//! The claude reading is cached at `${XDG_CACHE_HOME:-$HOME/.cache}/
-//! claude-usage.json` (ttl 240s; the cache stores the bare reading — kind
+//! Each provider's reading is cached at `${XDG_CACHE_HOME:-$HOME/.cache}/
+//! <kind>-usage.json` (ttl 240s; the cache stores the bare reading — kind
 //! indexing is output shape). Refreshes are serialized with flock(2) on
 //! `<cache>.lock`, so every poller and streamer combined pays at most one
-//! fetch per TTL — losers block, then serve whatever the winner cached.
-//! Every failed refresh (non-200, malformed body, missing token) serves
-//! the STALE cache instead of nothing — stale beats absent, and the
-//! untouched mtime means the next call retries — so a rate-limited (429)
-//! or expired-token (401) request never clobbers or blanks a good value.
-//! The fetch is bounded (`curl --max-time 6`): it sits on the stream
-//! engine's tick path and must never hang a subscriber unbounded. The
-//! OAuth token comes from `~/.claude/.credentials.json`
+//! fetch per TTL per kind — losers block, then serve whatever the winner
+//! cached. Every failed refresh (non-200, malformed body, missing
+//! credentials, no app-server response) serves the STALE cache instead of
+//! nothing — stale beats absent, and the untouched mtime means the next
+//! call retries — so a rate-limited (429) or expired-token (401) request
+//! never clobbers or blanks a good value.
+//!
+//! The claude fetch is bounded (`curl --max-time 6`): it sits on the
+//! stream engine's tick path and must never hang a subscriber unbounded.
+//! The OAuth token comes from `~/.claude/.credentials.json`
 //! (`.claudeAiOauth.accessToken`; missing/unreadable -> nothing known) and
 //! is passed to curl on stdin, never in argv.
+//!
+//! The codex fetch spawns `codex app-server` (a persistent process that
+//! never exits on its own), writes an `initialize` + `account/rateLimits/
+//! read` request pair to its stdin, and reads stdout lines from a
+//! background thread until one parses as the `id:2` response or a 5s
+//! deadline passes — either way the process is killed and reaped
+//! afterward. Gated on `~/.codex/auth.json` existing (never read — codex
+//! does its own auth) so an unconfigured machine never spawns it at all.
+//! `resetsAt` comes back as epoch seconds (unlike claude's already-ISO
+//! strings) and is converted with `sys::iso8601_utc`.
 //!
 //! # Hyprland IPC (`ipc.rs`)
 //!

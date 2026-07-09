@@ -37,7 +37,8 @@
         "viewMode": "list"
     },
     "audio": {
-        "mprisBlacklist": [],
+        "mprisBlacklist": [
+        ],
         "preferredPlayer": "",
         "spectrumFrameRate": 30,
         "spectrumMirrored": true,
@@ -67,7 +68,8 @@
         "middleClickAction": "none",
         "middleClickCommand": "",
         "middleClickFollowMouse": false,
-        "monitors": [],
+        "monitors": [
+        ],
         "mouseWheelAction": "none",
         "mouseWheelWrap": true,
         "outerCorners": true,
@@ -76,7 +78,8 @@
         "rightClickAction": "controlCenter",
         "rightClickCommand": "",
         "rightClickFollowMouse": true,
-        "screenOverrides": [],
+        "screenOverrides": [
+        ],
         "showCapsule": true,
         "showOnWorkspaceSwitch": true,
         "showOutline": false,
@@ -201,14 +204,33 @@
                     "showPowerProfiles": true
                 },
                 {
-                    "defaultSettings": {},
-                    "id": "plugin:kde-connect"
+                    "defaultSettings": {
+                        "colorHistory": [
+                        ],
+                        "detectedRecorder": "",
+                        "filenameFormat": "",
+                        "gifMaxSeconds": 30,
+                        "installedLangs": [
+                            "eng"
+                        ],
+                        "paletteColors": [
+                        ],
+                        "recordCopyToClipboard": false,
+                        "recordSkipConfirmation": false,
+                        "screenshotPath": "",
+                        "selectedOcrLang": "eng",
+                        "transAvailable": false,
+                        "videoPath": ""
+                    },
+                    "id": "plugin:screen-toolkit"
                 },
                 {
                     "defaultSettings": {
                         "autoHeight": true,
-                        "bindOverrides": {},
-                        "cheatsheetData": [],
+                        "bindOverrides": {
+                        },
+                        "cheatsheetData": [
+                        ],
                         "columnCount": 3,
                         "descriptionTextColor": "",
                         "detectedCompositor": "",
@@ -218,6 +240,9 @@
                         "keyColorAlt": "#FF6B6B",
                         "keyColorCtrl": "",
                         "keyColorDefault": "#6C757D",
+                        "keyColorMod2": "",
+                        "keyColorMod3": "",
+                        "keyColorMod5": "",
                         "keyColorMouse": "#F38181",
                         "keyColorNumeric": "#A8DADC",
                         "keyColorPrint": "#95E1D3",
@@ -225,9 +250,15 @@
                         "keyColorSuper": "",
                         "keyColorXF86": "#4ECDC4",
                         "keyLabelColor": "#FFFFFF",
+                        "keyLabelMod2": "",
+                        "keyLabelMod3": "",
+                        "keyLabelMod5": "",
                         "keyTextAlt": "",
                         "keyTextCtrl": "",
                         "keyTextDefault": "",
+                        "keyTextMod2": "",
+                        "keyTextMod3": "",
+                        "keyTextMod5": "",
                         "keyTextMouse": "",
                         "keyTextNumeric": "",
                         "keyTextPrint": "",
@@ -250,7 +281,8 @@
         }
     },
     "brightness": {
-        "backlightDeviceMappings": [],
+        "backlightDeviceMappings": [
+        ],
         "brightnessStep": 5,
         "enableDdcSupport": false,
         "enforceMinimum": true
@@ -310,7 +342,7 @@
             }
         ],
         "diskPath": "/",
-        "position": "close_to_bar_button",
+        "position": "top_right",
         "shortcuts": {
             "left": [
                 {
@@ -346,7 +378,8 @@
         "enabled": false,
         "gridSnap": false,
         "gridSnapScale": false,
-        "monitorWidgets": [],
+        "monitorWidgets": [
+        ],
         "overviewEnabled": true
     },
     "dock": {
@@ -370,9 +403,11 @@
         "launcherIconColor": "none",
         "launcherPosition": "end",
         "launcherUseDistroLogo": false,
-        "monitors": [],
+        "monitors": [
+        ],
         "onlySameOutput": true,
-        "pinnedApps": [],
+        "pinnedApps": [
+        ],
         "pinnedStatic": false,
         "position": "bottom",
         "showDockIndicator": false,
@@ -427,7 +462,8 @@
         "lockScreenAnimations": false,
         "lockScreenBlur": 0,
         "lockScreenCountdownDuration": 10000,
-        "lockScreenMonitors": [],
+        "lockScreenMonitors": [
+        ],
         "lockScreenTint": 0,
         "passwordChars": false,
         "radiusRatio": 1,
@@ -521,7 +557,8 @@
         "enabled": true,
         "location": "top_right",
         "lowUrgencyDuration": 3,
-        "monitors": [],
+        "monitors": [
+        ],
         "normalUrgencyDuration": 8,
         "overlayLayer": true,
         "respectExpireTimeout": false,
@@ -550,7 +587,8 @@
             2
         ],
         "location": "top_right",
-        "monitors": [],
+        "monitors": [
+        ],
         "overlayLayer": true
     },
     "plugins": {
@@ -700,12 +738,14 @@
         "directory": "/home/kieron/Pictures/Wallpapers",
         "enableMultiMonitorDirectories": false,
         "enabled": true,
-        "favorites": [],
+        "favorites": [
+        ],
         "fillColor": "#000000",
         "fillMode": "crop",
         "hideWallpaperFilenames": false,
         "linkLightAndDarkWallpapers": true,
-        "monitorDirectories": [],
+        "monitorDirectories": [
+        ],
         "overviewBlur": 0.4,
         "overviewEnabled": false,
         "overviewTint": 0.6,
@@ -731,14 +771,14 @@
         "useWallhaven": true,
         "viewMode": "single",
         "wallhavenApiKey": "",
-        "wallhavenCategories": "111",
+        "wallhavenCategories": "100",
         "wallhavenOrder": "desc",
         "wallhavenPurity": "100",
         "wallhavenQuery": "",
         "wallhavenRatios": "",
-        "wallhavenResolutionHeight": "",
+        "wallhavenResolutionHeight": "1080",
         "wallhavenResolutionMode": "atleast",
-        "wallhavenResolutionWidth": "",
+        "wallhavenResolutionWidth": "1920",
         "wallhavenSorting": "relevance",
         "wallpaperChangeMode": "random"
     }

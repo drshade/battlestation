@@ -1,6 +1,6 @@
-// Claude plan-usage indicator: the Anthropic sunburst + usage %, with a hover
-// tooltip. Polls `bsctl agents usage` on its own (cached, ~5 min); the output
-// is indexed by harness kind and this indicator reads the claude entry.
+// Claude + Codex plan-usage indicator: icon + session% per kind, with a
+// hover tooltip. Polls `bsctl agents usage` on its own (cached, ~5 min);
+// the output is indexed by harness kind, and this indicator reads both.
 import QtQuick
 import Quickshell.Io
 import qs.Commons
@@ -13,17 +13,28 @@ Item {
   property var cfg: null
   property string screenName: ""
 
-  property int sessionPct: -1
-  property string sessionResets: ""
-  property int weeklyPct: -1
-  property string weeklyResets: ""
+  property int claudeSessionPct: -1
+  property string claudeSessionResets: ""
+  property int claudeWeeklyPct: -1
+  property string claudeWeeklyResets: ""
+
+  property int codexSessionPct: -1
+  property string codexSessionResets: ""
+  property int codexWeeklyPct: -1
+  property string codexWeeklyResets: ""
 
   visible: cfg.showUsage
   width: visible ? usageRow.implicitWidth + Style.marginS : 0
   height: cfg.barHeight
 
+  function claudeTooltip() {
+    return "Claude\nSession  " + claudeSessionPct + "%   ·   resets " + cfg.fmtTime(claudeSessionResets, "HH:mm") + "\n" + "Weekly   " + claudeWeeklyPct + "%   ·   resets " + cfg.fmtTime(claudeWeeklyResets, "ddd d MMM");
+  }
+  function codexTooltip() {
+    return "Codex\nSession  " + codexSessionPct + "%   ·   resets " + cfg.fmtTime(codexSessionResets, "HH:mm") + "\n" + "Weekly   " + codexWeeklyPct + "%   ·   resets " + cfg.fmtTime(codexWeeklyResets, "ddd d MMM");
+  }
   function tooltip() {
-    return "Session  " + sessionPct + "%   ·   resets " + cfg.fmtTime(sessionResets, "HH:mm") + "\n" + "Weekly   " + weeklyPct + "%   ·   resets " + cfg.fmtTime(weeklyResets, "ddd d MMM");
+    return claudeTooltip() + "\n\n" + codexTooltip();
   }
 
   Timer {
@@ -40,13 +51,21 @@ Item {
     stdout: StdioCollector {
       onStreamFinished: {
         try {
-          const u = JSON.parse(text).claude;
-          if (!u)
-            return; // nothing known: keep the current numbers
-          usage.sessionPct = u.sessionPct;
-          usage.sessionResets = u.sessionResets;
-          usage.weeklyPct = u.weeklyPct;
-          usage.weeklyResets = u.weeklyResets;
+          const j = JSON.parse(text);
+          const c = j.claude;
+          if (c) {
+            usage.claudeSessionPct = c.sessionPct;
+            usage.claudeSessionResets = c.sessionResets;
+            usage.claudeWeeklyPct = c.weeklyPct;
+            usage.claudeWeeklyResets = c.weeklyResets;
+          }
+          const x = j.codex;
+          if (x) {
+            usage.codexSessionPct = x.sessionPct;
+            usage.codexSessionResets = x.sessionResets;
+            usage.codexWeeklyPct = x.weeklyPct;
+            usage.codexWeeklyResets = x.weeklyResets;
+          }
         } catch (e) {}
       }
     }
@@ -55,24 +74,52 @@ Item {
   Row {
     id: usageRow
     anchors.centerIn: parent
-    spacing: Style.marginXXS
+    spacing: Style.marginS
 
-    Image {
+    // Claude
+    Row {
       anchors.verticalCenter: parent.verticalCenter
-      source: usage.cfg.kindIcon("claude") // the Anthropic mark -- this indicator is Claude-plan-specific
-      width: cfg.d
-      height: cfg.d
-      sourceSize.width: Math.round(cfg.d * 2)
-      sourceSize.height: Math.round(cfg.d * 2)
-      fillMode: Image.PreserveAspectFit
-      smooth: true
+      spacing: Style.marginXXS
+      Image {
+        anchors.verticalCenter: parent.verticalCenter
+        source: usage.cfg.kindIcon("claude")
+        width: cfg.d
+        height: cfg.d
+        sourceSize.width: Math.round(cfg.d * 2)
+        sourceSize.height: Math.round(cfg.d * 2)
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+      }
+      NText {
+        anchors.verticalCenter: parent.verticalCenter
+        text: (usage.claudeSessionPct >= 0 ? usage.claudeSessionPct : "—") + "%"
+        pointSize: cfg.d * cfg.textRatio
+        applyUiScale: false
+        color: Color.mOnSurface
+      }
     }
-    NText {
+
+    // Codex
+    Row {
       anchors.verticalCenter: parent.verticalCenter
-      text: (usage.sessionPct >= 0 ? usage.sessionPct : "—") + "% / " + (usage.weeklyPct >= 0 ? usage.weeklyPct : "—") + "%"
-      pointSize: cfg.d * cfg.textRatio
-      applyUiScale: false
-      color: Color.mOnSurface
+      spacing: Style.marginXXS
+      Image {
+        anchors.verticalCenter: parent.verticalCenter
+        source: usage.cfg.kindIcon("codex")
+        width: cfg.d
+        height: cfg.d
+        sourceSize.width: Math.round(cfg.d * 2)
+        sourceSize.height: Math.round(cfg.d * 2)
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+      }
+      NText {
+        anchors.verticalCenter: parent.verticalCenter
+        text: (usage.codexSessionPct >= 0 ? usage.codexSessionPct : "—") + "%"
+        pointSize: cfg.d * cfg.textRatio
+        applyUiScale: false
+        color: Color.mOnSurface
+      }
     }
   }
 
@@ -80,7 +127,7 @@ Item {
     anchors.fill: parent
     hoverEnabled: true
     onEntered: {
-      if (usage.sessionPct >= 0)
+      if (usage.claudeSessionPct >= 0 || usage.codexSessionPct >= 0)
         TooltipService.show(usage, usage.tooltip(), BarService.getTooltipDirection(usage.screenName));
     }
     onExited: TooltipService.hide()

@@ -1,9 +1,10 @@
 //! End-to-end tests for `bsctl agents usage` with a fake curl (captures
-//! argv and stdin, serves a canned `body\n<code>` response) and fake
+//! argv and stdin, serves a canned `body\n<code>` response), a fake
+//! `codex app-server` (serves canned JSON-RPC lines over stdio), and fake
 //! credentials — the network never enters the picture.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
@@ -60,6 +61,26 @@ impl TestEnv {
         let mut perm = fs::metadata(&stub).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
         fs::set_permissions(&stub, perm).unwrap();
+        // Fake `codex app-server`: drains stdin in the background (the real
+        // server doesn't wait for EOF before responding, so blocking on a
+        // full read here would deadlock against bsctl, which holds stdin
+        // open across the whole exchange), then — if a canned response was
+        // staged — prints it. `codex-hold` makes it linger like the real
+        // persistent server (bsctl must kill it); with neither file staged
+        // it exits immediately, which is the default for every test that
+        // never touches codex at all (auth.json absent -> never even spawned).
+        let codex_stub = fakebin.join("codex");
+        fs::write(
+            &codex_stub,
+            format!(
+                "#!/bin/sh\necho call >> '{fix}/codex-calls.log'\ncat > '{fix}/codex-stdin.log' &\n[ -f '{fix}/codex-response' ] && cat '{fix}/codex-response'\n[ -f '{fix}/codex-hold' ] && sleep 100\n",
+                fix = fix.display()
+            ),
+        )
+        .unwrap();
+        let mut perm = fs::metadata(&codex_stub).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+        fs::set_permissions(&codex_stub, perm).unwrap();
         let path = format!(
             "{}:{}",
             fakebin.display(),
@@ -72,6 +93,36 @@ impl TestEnv {
             fix,
             path,
         }
+    }
+
+    /// Stages `~/.codex/auth.json` — the signal `codex_reading` gates on
+    /// before ever spawning the fake `codex app-server`. Tests that don't
+    /// call this never invoke it at all, by design.
+    fn enable_codex(&self) {
+        fs::create_dir_all(self.home.join(".codex")).unwrap();
+        fs::write(self.home.join(".codex/auth.json"), "{}").unwrap();
+    }
+
+    /// Stages the fake app-server's canned stdout. `hold` mirrors the real
+    /// server never exiting on its own (bsctl's kill()/reap must do the
+    /// work); a response with no `id:2` line and `hold: false` is how the
+    /// "app-server answered but never got to the rate-limits request"
+    /// case is exercised without waiting out the real timeout.
+    fn codex_respond(&self, lines: &[&str], hold: bool) {
+        fs::write(self.fix.join("codex-response"), lines.join("\n") + "\n").unwrap();
+        if hold {
+            fs::write(self.fix.join("codex-hold"), "").unwrap();
+        }
+    }
+
+    fn codex_cache(&self) -> PathBuf {
+        self.cache_dir.join("codex-usage.json")
+    }
+
+    fn codex_calls(&self) -> usize {
+        fs::read_to_string(self.fix.join("codex-calls.log"))
+            .map(|s| s.lines().count())
+            .unwrap_or(0)
     }
 
     /// `agents usage --format json` — the default form the tests exercise.
@@ -107,12 +158,23 @@ impl TestEnv {
     }
 
     fn write_cache(&self, content: &str, age: Duration) {
-        fs::write(self.cache(), content).unwrap();
+        self.write_cache_at(&self.cache(), content, age);
+    }
+
+    /// A stale (> TTL) codex cache — set up so a test can assert a failed
+    /// refresh serves it back unchanged, same contract as claude's non-200
+    /// tests.
+    fn write_stale_codex_cache(&self, content: &str) {
+        self.write_cache_at(&self.codex_cache(), content, Duration::from_secs(300));
+    }
+
+    fn write_cache_at(&self, path: &Path, content: &str, age: Duration) {
+        fs::write(path, content).unwrap();
         let when = SystemTime::now() - age;
         let times = fs::FileTimes::new().set_accessed(when).set_modified(when);
         fs::File::options()
             .write(true)
-            .open(self.cache())
+            .open(path)
             .unwrap()
             .set_times(times)
             .unwrap();
@@ -310,4 +372,94 @@ fn kind_filter_and_text_table() {
     );
     let out = env.run_args(&["agents", "usage", "--kind", "codex"]);
     assert!(out.stdout.is_empty());
+}
+
+// ---- codex provider ---------------------------------------------------------
+
+fn codex_rate_limits_line() -> String {
+    json!({
+        "id": 2,
+        "result": {
+            "rateLimits": {
+                "primary": {"usedPercent": 1, "resetsAt": 1_783_385_189_i64},
+                "secondary": {"usedPercent": 4, "resetsAt": 1_783_437_715_i64},
+            }
+        }
+    })
+    .to_string()
+}
+
+fn expected_codex_reading() -> Value {
+    json!({
+        "sessionPct": 1,
+        "sessionResets": "2026-07-07T00:46:29Z",
+        "weeklyPct": 4,
+        "weeklyResets": "2026-07-07T15:21:55Z",
+    })
+}
+
+#[test]
+fn missing_codex_auth_never_spawns_the_app_server() {
+    let env = TestEnv::new("codex-no-auth");
+    // enable_codex() deliberately not called: no ~/.codex/auth.json.
+    env.codex_respond(&[&codex_rate_limits_line()], true);
+    let out = env.run_args(&["agents", "usage", "--kind", "codex", "--format", "json"]);
+    assert_eq!(out.stdout, b"{}\n");
+    assert_eq!(env.codex_calls(), 0, "no auth.json must mean no spawn at all");
+    assert!(!env.codex_cache().exists());
+}
+
+#[test]
+fn codex_happy_path_parses_ratelimits_and_caches() {
+    let env = TestEnv::new("codex-happy");
+    env.enable_codex();
+    // A realistic transcript: the id:1 initialize ack and an unsolicited
+    // notification both precede id:2, and must be skipped rather than
+    // mistaken for it.
+    env.codex_respond(
+        &[
+            r#"{"id":1,"result":{"userAgent":"bsctl/test"}}"#,
+            r#"{"method":"remoteControl/status/changed","params":{"status":"disabled"}}"#,
+            &codex_rate_limits_line(),
+        ],
+        true, // hold: mirrors the real server never exiting on its own
+    );
+    let out = env.run_args(&["agents", "usage", "--kind", "codex", "--format", "json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(printed, json!({"codex": expected_codex_reading()}));
+    let cached: Value = serde_json::from_slice(&fs::read(env.codex_cache()).unwrap()).unwrap();
+    assert_eq!(cached, expected_codex_reading());
+    assert_eq!(env.codex_calls(), 1);
+}
+
+#[test]
+fn codex_fresh_cache_is_served_without_spawning_app_server() {
+    let env = TestEnv::new("codex-fresh");
+    env.enable_codex();
+    fs::write(env.codex_cache(), "{\"sessionPct\":9}\n").unwrap();
+    let out = env.run_args(&["agents", "usage", "--kind", "codex", "--format", "json"]);
+    let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(printed, json!({"codex": {"sessionPct": 9}}));
+    assert_eq!(env.codex_calls(), 0);
+}
+
+#[test]
+fn codex_response_without_id2_serves_the_stale_cache() {
+    // The app-server answered (and this run's calls prove it was spawned)
+    // but never got to (or never sent) the rate-limits result -- same
+    // "stale beats absent" contract as a non-200 from claude's endpoint.
+    let env = TestEnv::new("codex-no-id2");
+    env.enable_codex();
+    env.write_stale_codex_cache("{\"sessionPct\":9}\n");
+    env.codex_respond(&[r#"{"id":1,"result":{"userAgent":"bsctl/test"}}"#], false);
+    let out = env.run_args(&["agents", "usage", "--kind", "codex", "--format", "json"]);
+    let printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(printed, json!({"codex": {"sessionPct": 9}}));
+    assert_eq!(
+        fs::read(env.codex_cache()).unwrap(),
+        b"{\"sessionPct\":9}\n",
+        "a failed refresh must never clobber the last good value"
+    );
+    assert_eq!(env.codex_calls(), 1);
 }

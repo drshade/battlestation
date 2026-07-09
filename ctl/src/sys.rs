@@ -144,6 +144,21 @@ pub fn debug_ts() -> String {
     )
 }
 
+/// ISO-8601 UTC timestamp for a `resetsAt` epoch-seconds value (Codex's
+/// rateLimits shape returns epoch seconds, unlike Claude's usage endpoint
+/// which already hands back ISO strings — this bridges the two so both
+/// providers emit the same `*Resets` shape).
+pub fn iso8601_utc(secs: i64) -> String {
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
 /// Days-since-epoch -> (year, month, day). Howard Hinnant's civil_from_days.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
@@ -168,6 +183,15 @@ mod tests {
         assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // date -ud @1704067200
         assert_eq!(civil_from_days(1_751_414_400 / 86_400), (2025, 7, 2));
         assert_eq!(civil_from_days(11_016), (2000, 2, 29)); // leap day
+    }
+
+    #[test]
+    fn iso8601_utc_known_timestamps() {
+        assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00Z");
+        // codex rateLimits.primary/secondary.resetsAt observed live, verified
+        // against `date -u -d @<secs>`
+        assert_eq!(iso8601_utc(1_783_381_413), "2026-07-06T23:43:33Z");
+        assert_eq!(iso8601_utc(1_783_437_715), "2026-07-07T15:21:55Z");
     }
 
     #[test]

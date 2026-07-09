@@ -71,6 +71,12 @@ stow/home/noctalia/.config/noctalia/plugins/*
 !stow/home/noctalia/.config/noctalia/plugins/kde-connect/
 !stow/home/noctalia/.config/noctalia/plugins/kde-connect/**
 
+# oh-my-zsh (~/.oh-my-zsh): default-deny — framework + custom plugins are
+# installed via git clone by the plugin manager, not authored here; tracking
+# them duplicates upstream and churns on every update. .zshrc just points
+# ZSH at this path.
+stow/home/zsh/.oh-my-zsh/
+
 # Rust build output (ctl/): cargo-generated, never tracked
 ctl/target/
 

@@ -1,8 +1,9 @@
 //! `bsctl agents usage` — plan usage per harness kind, and the `usage`
-//! section of the world. One provider exists today (claude, via the OAuth
-//! usage endpoint); adding another is one `PROVIDERS` entry. The
-//! cache/lock protocol is specified in lib.rs ("Plan usage"); one
-//! deliberate improvement over the sh reference this began as: the OAuth
+//! section of the world. Two providers exist today: claude (the OAuth
+//! usage endpoint) and codex (the `codex app-server` JSON-RPC stdio
+//! protocol); adding another is one `PROVIDERS` entry. The cache/lock
+//! protocol is specified in lib.rs ("Plan usage"); one deliberate
+//! improvement over the sh reference claude's reading began as: the OAuth
 //! token is handed to curl as a header on STDIN (`-H @-`) instead of in
 //! argv — a command-line token is exposed to every local process via
 //! /proc/*/cmdline for the duration of the request.
@@ -10,10 +11,12 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::SystemTime;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::Value;
 
@@ -21,15 +24,16 @@ use crate::sys;
 
 const TTL_SECS: u64 = 240;
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
+const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One provider: how to read a harness kind's plan usage (None = nothing
 /// known).
 type Reading = fn() -> Option<Value>;
 
 /// The provider table: kind -> how to read its plan usage. A kind with no
-/// entry simply never appears in the output; adding a provider (codex, agy
-/// — the day they grow usage endpoints) is one entry here.
-const PROVIDERS: &[(&str, Reading)] = &[("claude", claude_reading)];
+/// entry simply never appears in the output; adding a provider (agy — the
+/// day it grows a usage endpoint) is one entry here.
+const PROVIDERS: &[(&str, Reading)] = &[("claude", claude_reading), ("codex", codex_reading)];
 
 /// The kind-indexed usage object: `{"claude": {sessionPct, ...}}`. Kinds
 /// with nothing known (no provider, no cache, no token) are absent — an
@@ -84,12 +88,14 @@ pub fn cells(usage: &Value) -> Vec<Vec<String>> {
         .unwrap_or_default()
 }
 
-/// The claude provider: the cached reading, refreshed through the flock
-/// when stale. Every failure path serves whatever the cache holds — stale
-/// beats absent, the same reasoning that keeps the cache on a non-200 —
-/// and leaves the cache mtime old, so the next call retries the refresh.
-fn claude_reading() -> Option<Value> {
-    let cache = cache_path();
+/// One provider's cached reading, refreshed through the flock when stale.
+/// Every failure path (`fetch` returning None) serves whatever the cache
+/// holds — stale beats absent, the same reasoning that keeps the cache on
+/// a non-200 — and leaves the cache mtime old, so the next call retries
+/// the refresh. `fetch` does the provider-specific network/subprocess work
+/// and returns the reading as a compact JSON string on success.
+fn cached_reading(kind: &str, fetch: impl FnOnce() -> Option<String>) -> Option<Value> {
+    let cache = cache_path(kind);
 
     // Fast path: a recent reading already exists, so don't touch the network.
     if fresh(&cache) {
@@ -97,7 +103,7 @@ fn claude_reading() -> Option<Value> {
     }
 
     // Serialize refreshes across every poller and streamer — exactly one
-    // process pays the curl per TTL; a loser waits, then serves whatever
+    // process pays the fetch per TTL; a loser waits, then serves whatever
     // the winner cached.
     if let Some(d) = cache.parent() {
         let _ = fs::create_dir_all(d);
@@ -114,10 +120,7 @@ fn claude_reading() -> Option<Value> {
         return read_cached(&cache);
     }
 
-    match read_token()
-        .and_then(|tok| fetch(&tok))
-        .and_then(|body| transform(&body))
-    {
+    match fetch() {
         Some(out) => {
             // Atomic cache write; serve the reading even if caching fails.
             let tmp = with_suffix(&cache, ".tmp");
@@ -128,18 +131,26 @@ fn claude_reading() -> Option<Value> {
     }
 }
 
+/// The claude provider: the OAuth usage endpoint via curl.
+fn claude_reading() -> Option<Value> {
+    cached_reading("claude", || {
+        let body = fetch(&read_token()?)?;
+        transform(&body)
+    })
+}
+
 /// The cached reading as a value; missing/unparseable -> nothing known.
 fn read_cached(cache: &Path) -> Option<Value> {
     serde_json::from_str(&fs::read_to_string(cache).ok()?).ok()
 }
 
-/// `${XDG_CACHE_HOME:-$HOME/.cache}/claude-usage.json` (empty env = unset).
-fn cache_path() -> PathBuf {
+/// `${XDG_CACHE_HOME:-$HOME/.cache}/<kind>-usage.json` (empty env = unset).
+fn cache_path(kind: &str) -> PathBuf {
     env::var_os("XDG_CACHE_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".cache"))
-        .join("claude-usage.json")
+        .join(format!("{kind}-usage.json"))
 }
 
 /// `$cache.lock` / `$cache.tmp` — suffix appended to the full name.
@@ -266,6 +277,127 @@ fn falsy(v: &Value) -> bool {
         Value::String(s) => s.is_empty(),
         Value::Array(a) => a.is_empty(),
         Value::Object(o) => o.is_empty(),
+    }
+}
+
+/// The codex provider: `codex app-server`'s JSON-RPC stdio protocol,
+/// mirroring the OAuth-endpoint reading above but over a subprocess
+/// instead of curl. Gated on `~/.codex/auth.json` existing (mirrors
+/// `read_token`'s early exit for claude) so an unconfigured machine never
+/// spawns the app-server at all -- load-bearing for test hermeticity,
+/// since PATH here isn't scrubbed to a fakebin-only sandbox.
+fn codex_reading() -> Option<Value> {
+    cached_reading("codex", || {
+        codex_auth_present()?;
+        codex_transform(&query_app_server()?)
+    })
+}
+
+/// `~/.codex/auth.json` existing is the signal codex is configured; its
+/// contents are never read here -- `codex app-server` does its own auth.
+fn codex_auth_present() -> Option<()> {
+    let home = env::var_os("HOME").filter(|v| !v.is_empty())?;
+    Path::new(&home)
+        .join(".codex/auth.json")
+        .is_file()
+        .then_some(())
+}
+
+/// `codex app-server` boundary (faked in tests with a stub on PATH): spawns
+/// the app-server, sends `initialize` then `account/rateLimits/read` over
+/// its stdio JSON-RPC protocol (verified live against codex-cli 0.142.5,
+/// 2026-07-06), and returns the `id:2` response's `result` object. Every
+/// line the server writes before that one -- the `id:1` initialize ack, an
+/// unsolicited `remoteControl/status/changed` notification, both seen live
+/// -- is skipped rather than assumed absent. Bounded by
+/// `APP_SERVER_TIMEOUT`: the server is long-running and never exits on its
+/// own, so it is always killed once a result arrives or the deadline
+/// passes -- never leave one running per poll.
+fn query_app_server() -> Option<Value> {
+    let mut child = Command::new("codex")
+        .arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdin = child.stdin.take()?;
+    let wrote: std::io::Result<()> = (|| {
+        stdin.write_all(
+            b"{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":\
+              {\"name\":\"bsctl\",\"version\":\"1.0\"},\"capabilities\":{}}}\n",
+        )?;
+        stdin.write_all(b"{\"id\":2,\"method\":\"account/rateLimits/read\",\"params\":{}}\n")
+    })();
+    if wrote.is_err() {
+        kill(&mut child);
+        return None;
+    }
+
+    let stdout = child.stdout.take()?;
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let deadline = Instant::now() + APP_SERVER_TIMEOUT;
+    let mut result = None;
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        let Ok(line) = rx.recv_timeout(remaining) else {
+            break; // timeout, or the reader thread hung up (process died)
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if v.get("id").and_then(Value::as_i64) == Some(2) {
+            result = v.get("result").cloned();
+            break;
+        }
+    }
+    kill(&mut child);
+    result
+}
+
+/// Kill + reap a child unconditionally -- used on both the success and
+/// failure paths of [`query_app_server`], since the app-server never exits
+/// on its own.
+fn kill(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Codex's rateLimits shape -> the shared `{sessionPct, sessionResets,
+/// weeklyPct, weeklyResets}` reading, matching claude's transform output
+/// exactly so `cells()` and every downstream consumer stay kind-agnostic.
+/// `usedPercent` is already a plain percentage (no rounding needed, unlike
+/// claude's raw utilization float) but falsy/missing still defaults
+/// through [`pct`] for the same "nothing known -> 0" behavior. `resetsAt`
+/// is epoch seconds (verified live) -- converted to ISO-8601 UTC so the
+/// QML side's `new Date(iso)` keeps working unmodified for both kinds.
+fn codex_transform(result: &Value) -> Option<String> {
+    let rl = result.get("rateLimits")?;
+    let primary = rl.get("primary");
+    let secondary = rl.get("secondary");
+    let out = serde_json::json!({
+        "sessionPct": pct(primary.and_then(|p| p.get("usedPercent")))?,
+        "sessionResets": codex_resets(primary.and_then(|p| p.get("resetsAt"))),
+        "weeklyPct": pct(secondary.and_then(|p| p.get("usedPercent")))?,
+        "weeklyResets": codex_resets(secondary.and_then(|p| p.get("resetsAt"))),
+    });
+    Some(out.to_string())
+}
+
+/// `resetsAt` epoch seconds -> ISO-8601 UTC; falsy/missing/non-integer ->
+/// "" (mirrors [`resets`]'s "v or ''" semantics for claude's already-ISO
+/// strings).
+fn codex_resets(v: Option<&Value>) -> Value {
+    match v.and_then(Value::as_i64) {
+        Some(secs) if secs != 0 => Value::String(sys::iso8601_utc(secs)),
+        _ => Value::String(String::new()),
     }
 }
 

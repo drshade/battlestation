@@ -8,6 +8,13 @@ hl.on("hyprland.start", function ()
     -- Logging in IS presence: seed the state that hypridle's listeners only
     -- update on idle/resume transitions (contract in ctl/src/lib.rs).
     hl.exec_cmd("$HOME/.local/bin/bsctl presence set active")
+
+    -- Workspace->display prefs (ws prefs add) only self-apply on a live
+    -- monitoraddedv2 event, caught by an already-running `--stream`
+    -- listener (ctl/src/stream.rs). On a fresh session every output
+    -- attaches before any listener exists, so that event is always missed
+    -- here -- reconcile explicitly once Hyprland's own monitor list is up.
+    hl.exec_cmd("$HOME/.local/bin/bsctl ws prefs reconcile")
     hl.exec_cmd("xhost +SI:localuser:root")
 
     -- Chrome checks for a system notification server on D-Bus once at

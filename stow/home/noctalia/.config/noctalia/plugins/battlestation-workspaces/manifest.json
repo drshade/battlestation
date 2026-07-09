@@ -1,7 +1,7 @@
 {
   "id": "battlestation-workspaces",
   "name": "Battlestation Workspaces",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "minNoctaliaVersion": "4.4.3",
   "author": "tom",
   "license": "MIT",
