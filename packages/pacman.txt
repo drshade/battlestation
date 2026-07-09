@@ -39,6 +39,9 @@ typst                          # document typesetting
 
 # --- CLI utilities -----------------------------------------------------------
 tree
+nvtop                          # GPU process/utilisation monitor
 shelly                         # modern pacman/AUR wrapper (config: ~/.config/shelly, unmanaged)
 sshfs                 # kde-connect plugin: browse phone files (SFTP mount)
 stress-ng                      # system / thermal stress testing
+vulkan-tools                   # vulkaninfo — inspect Vulkan devices/drivers
+whois                          # domain/IP registration lookups
