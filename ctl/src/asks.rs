@@ -833,35 +833,78 @@ pub fn inbox(args: &[String]) -> i32 {
     0
 }
 
-// ---- inject (the "Inject" checkbox: standing turn-start nudge) ----------------
+// ---- deck (the "Deck" checkbox: master switch for the steering surfaces) ------
 
-/// `<dir>/.inject` — the "Inject" checkbox flag: contents `on` enable the
-/// UserPromptSubmit nudge block, anything else (or absent) is off. DOT-prefixed
-/// so writing it never trips the stream engine's non-dot trigger. Runtime
-/// lifetime like the rest of the Deck: a fresh boot starts with it off.
-fn inject_file() -> PathBuf {
-    asks_dir().join(".inject")
+/// `<dir>/.deck` — the "Deck" checkbox flag: ONE master switch for both
+/// steering surfaces (the per-turn `inject` emit and the Stop-hook `retrigger`
+/// backstop). Only explicit contents `off` disable it; absent or anything else
+/// is ON — the Deck is this machine's standing contract, so OFF is the
+/// exception the owner opts into, and a missing/corrupt flag must fail toward
+/// the contract, not silently tell agents to stop posting. DOT-prefixed so
+/// writing it never trips the stream engine's non-dot trigger. Runtime
+/// lifetime like the rest of the Deck: the panel re-pushes its persisted
+/// preference on load.
+fn deck_file() -> PathBuf {
+    asks_dir().join(".deck")
 }
 
-fn inject_enabled() -> bool {
-    fs::read_to_string(inject_file()).map(|s| s.trim() == "on").unwrap_or(false)
+fn deck_enabled() -> bool {
+    fs::read_to_string(deck_file()).map(|s| s.trim() != "off").unwrap_or(true)
 }
 
-fn set_inject(on: bool) -> i32 {
+fn set_deck(on: bool) -> i32 {
     let dir = asks_dir();
     if let Err(e) = fs::create_dir_all(&dir) {
-        eprintln!("bsctl asks inject: {}: {e}", dir.display());
+        eprintln!("bsctl asks deck: {}: {e}", dir.display());
         return 1;
     }
-    if let Err(e) = fs::write(inject_file(), if on { "on\n" } else { "off\n" }) {
-        eprintln!("bsctl asks inject: {}: {e}", inject_file().display());
+    if let Err(e) = fs::write(deck_file(), if on { "on\n" } else { "off\n" }) {
+        eprintln!("bsctl asks deck: {}: {e}", deck_file().display());
         return 1;
     }
     println!("{}", if on { "on" } else { "off" });
     0
 }
 
-/// The nudge block one UserPromptSubmit injects when the checkbox is on — pure
+/// `bsctl asks deck [on|off|toggle|status]` — control the master switch; bare
+/// prints status. The panel is the main caller (it pushes its persisted
+/// preference on load and on toggle); this is a control verb, not a hook
+/// surface, so an unknown word errors loudly.
+pub fn deck(args: &[String]) -> i32 {
+    match args.first().map(String::as_str) {
+        Some("on") => set_deck(true),
+        Some("off") => set_deck(false),
+        Some("toggle") => set_deck(!deck_enabled()),
+        Some("status") | None => {
+            println!("{}", if deck_enabled() { "on" } else { "off" });
+            0
+        }
+        Some(w) => {
+            eprintln!("bsctl asks deck: unknown word {w:?} (want on|off|toggle|status)");
+            2
+        }
+    }
+}
+
+// ---- inject (per-turn steering emit, gated on the Deck switch) ----------------
+
+/// The per-turn notice when the Deck is switched OFF — pure for the tests. It
+/// has to override the standing "you MUST ask via the Deck" instructions every
+/// session carries, without implying the tools are broken: posting still
+/// WORKS, the owner has just disabled it, so honouring the switch is on the
+/// agent. Reading stays legitimate — answers to earlier asks must still land.
+pub fn deck_off_text() -> &'static str {
+    "[deck] The Deck is OFF: the owner has explicitly disabled it for now. Do NOT create \
+     new items — no `ask`, no `notify` — even though your standing instructions say to \
+     post there; this switch overrides them. The tools still work (nothing will error), \
+     so honouring this is on you.\n\
+     [deck] Reading is still fine: `get_ask` and `list_asks` work, and answers to asks \
+     you posted earlier still arrive at your turn starts. If you need the human's input, \
+     ask inline here in the terminal and wait — while the Deck is off they are watching \
+     terminals, not the queue."
+}
+
+/// The nudge block one UserPromptSubmit injects when the Deck is on — pure
 /// for the tests. `watched` is whether the human is at this session's terminal
 /// right now (active AND focused on its workspace); when false the terminal
 /// cannot reach them and only the Deck can. `presence` is
@@ -894,22 +937,22 @@ pub fn inject_text(watched: bool, presence: &str, open: usize, posted: usize) ->
     }
 }
 
-/// `bsctl asks inject [on|off|toggle|status]` — control the checkbox, or (bare)
-/// the UserPromptSubmit emit path. Hook surface: the emit path always exits 0,
-/// is silent unless the checkbox is on, and never clap-errors (raw args).
-pub fn inject(args: &[String]) -> i32 {
-    match args.first().map(String::as_str) {
-        Some("on") => return set_inject(true),
-        Some("off") => return set_inject(false),
-        Some("toggle") => return set_inject(!inject_enabled()),
-        Some("status") => {
-            println!("{}", if inject_enabled() { "on" } else { "off" });
-            return 0;
-        }
-        _ => {} // bare / unknown -> emit path
-    }
-    if !inject_enabled() {
-        return 0; // checkbox off: inject nothing, silently (hook discipline)
+/// `bsctl asks inject` — the per-turn UserPromptSubmit steering emit, gated on
+/// the Deck switch: ON emits the presence nudge, OFF emits the disabled
+/// notice (a state statement either way — never silence, so agents always
+/// know which regime they are in). Control moved to `asks deck`; args are
+/// ignored raw tokens. Hook surface: always exits 0, never clap-errors.
+pub fn inject(_args: &[String]) -> i32 {
+    if !deck_enabled() {
+        // OFF is session-independent: no presence or stats needed to say "don't".
+        println!(
+            "{}",
+            json!({"hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": deck_off_text(),
+            }})
+        );
+        return 0;
     }
     // Session identity from the hook payload (like inbox): lets us tell whether
     // the human is looking at THIS session's workspace.
@@ -975,35 +1018,13 @@ fn visible_wss() -> Vec<i64> {
         .unwrap_or_default()
 }
 
-// ---- retrigger (the "Background retrigger" checkbox: Stop-hook backstop) ------
+// ---- retrigger (Stop-hook backstop, gated on the Deck switch) -----------------
 //
-// When on, a Stop hook re-prompts the agent if it ended a turn with a question
-// while the human was NOT watching and posted nothing to the Deck — the "I saw
-// the nudge but skipped it" path, caught deterministically instead of by prose.
-
-/// `<dir>/.retrigger` — the "Background retrigger" checkbox flag (see
-/// [`inject_file`] for the dot-prefix / ephemeral rationale).
-fn retrigger_file() -> PathBuf {
-    asks_dir().join(".retrigger")
-}
-
-fn retrigger_enabled() -> bool {
-    fs::read_to_string(retrigger_file()).map(|s| s.trim() == "on").unwrap_or(false)
-}
-
-fn set_retrigger(on: bool) -> i32 {
-    let dir = asks_dir();
-    if let Err(e) = fs::create_dir_all(&dir) {
-        eprintln!("bsctl asks retrigger: {}: {e}", dir.display());
-        return 1;
-    }
-    if let Err(e) = fs::write(retrigger_file(), if on { "on\n" } else { "off\n" }) {
-        eprintln!("bsctl asks retrigger: {}: {e}", retrigger_file().display());
-        return 1;
-    }
-    println!("{}", if on { "on" } else { "off" });
-    0
-}
+// When the Deck is on, a Stop hook re-prompts the agent if it ended a turn with
+// a question while the human was NOT watching and posted nothing to the Deck —
+// the "I saw the nudge but skipped it" path, caught deterministically instead
+// of by prose. Deck OFF disarms it: the same switch that says "don't post"
+// must not then nag an agent into posting.
 
 /// `<dir>/.turn-<session>` — per-session turn-start timestamp, stamped at
 /// UserPromptSubmit (`retrigger mark`) so the Stop backstop can tell whether a
@@ -1053,20 +1074,14 @@ const RETRIGGER_REASON: &str = "You ended your turn with a question, but the hum
     here. Post the question to the Deck with the `ask` tool so it reaches them. If it does not \
     truly need the human, you may stop without asking.";
 
-/// `bsctl asks retrigger [on|off|toggle|status|mark]` — control the checkbox;
-/// `mark` stamps turn-start (UserPromptSubmit); bare is the Stop-hook backstop
-/// that emits a block decision to re-prompt. Hook surface: always exits 0.
+/// `bsctl asks retrigger [mark]` — `mark` stamps turn-start (UserPromptSubmit);
+/// bare is the Stop-hook backstop that emits a block decision to re-prompt.
+/// Both gate on the Deck switch (control moved to `asks deck`). Hook surface:
+/// always exits 0.
 pub fn retrigger(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
-        Some("on") => return set_retrigger(true),
-        Some("off") => return set_retrigger(false),
-        Some("toggle") => return set_retrigger(!retrigger_enabled()),
-        Some("status") => {
-            println!("{}", if retrigger_enabled() { "on" } else { "off" });
-            return 0;
-        }
         Some("mark") => {
-            if !retrigger_enabled() {
+            if !deck_enabled() {
                 return 0;
             }
             let session = read_session_from_stdin();
@@ -1081,7 +1096,7 @@ pub fn retrigger(args: &[String]) -> i32 {
     }
 
     // Bare: the Stop-hook backstop.
-    if !retrigger_enabled() {
+    if !deck_enabled() {
         return 0;
     }
     let mut input = Vec::new();
@@ -1163,6 +1178,18 @@ mod tests {
         assert!(t.contains("`notify`"));
         assert!(t.contains("Posted this session: 3"));
         assert!(!t.contains("Anti-pattern")); // the hard warning is unwatched-only
+    }
+
+    #[test]
+    fn deck_off_text_forbids_new_items_but_keeps_reading_open() {
+        let t = deck_off_text();
+        assert!(t.starts_with("[deck]"));
+        assert!(t.contains("OFF"));
+        assert!(t.contains("explicitly disabled"));
+        assert!(t.contains("`ask`") && t.contains("`notify`")); // the forbidden verbs, named
+        assert!(t.contains("overrides")); // must beat the standing MUST-ask instructions
+        assert!(t.contains("`get_ask`") && t.contains("`list_asks`")); // reading stays legit
+        assert!(t.contains("inline")); // the sanctioned fallback channel
     }
 
     #[test]

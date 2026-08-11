@@ -41,12 +41,12 @@ Wiring:
 
 ## Settled decisions
 
-- **Inject / Retrigger — unchanged.** Keep the current behavior exactly.
-  Inject = the per-turn `UserPromptSubmit` nudge (`asks inject`). Retrigger =
-  write into the session's kitty terminal when `waiting`, else queue and flush
-  on the end-turn hook. The wireframe's tooltip wording is just doc copy to
-  correct; the toggles keep their meaning and persisted `pluginSettings` keys
-  (`asksInject`, `asksRetrigger`).
+- **Deck — one master steering switch.** The former Inject and Retrigger
+  toggles are consolidated into a single "Deck" pill (`asks deck on|off`,
+  persisted `pluginSettings` key `asksDeck`, default on). ON: the per-turn
+  `UserPromptSubmit` nudge (`asks inject`) plus the Stop-hook retrigger
+  backstop. OFF: turns get the owner-disabled notice instead ("no new items;
+  reading stays fine") and the backstop disarms.
 - **Blocking → a status flag, not the loud channel.** Render it as the small
   `▹ blocking` tag (wireframe). **Urgency owns the left accent bar.** (Departs
   from today's `dotColor()`, where the dot is the live blocking signal — the

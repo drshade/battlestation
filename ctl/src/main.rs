@@ -684,18 +684,24 @@ enum AsksCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// The "Inject" checkbox: `on|off|toggle|status` control it; bare is the
-    /// UserPromptSubmit nudge emit (presence + open count + the ask directive)
-    Inject {
-        /// Raw tokens (hook surface like `inbox`): a control word or nothing.
+    /// The "Deck" checkbox: `on|off|toggle|status` (bare = status) — ONE master
+    /// switch for the steering surfaces (`inject` emit + `retrigger` backstop)
+    Deck {
+        /// A control word, or nothing for status.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// The "Background retrigger" checkbox: `on|off|toggle|status` control it;
-    /// `mark` stamps turn-start (UserPromptSubmit); bare is the Stop-hook
-    /// backstop that re-prompts an unwatched turn that ended with a question
+    /// UserPromptSubmit steering emit, gated on the Deck switch: ON emits the
+    /// presence nudge, OFF emits the owner-disabled notice
+    Inject {
+        /// Raw tokens (hook surface like `inbox`): ignored.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Stop-hook backstop, gated on the Deck switch: `mark` stamps turn-start
+    /// (UserPromptSubmit); bare re-prompts an unwatched turn ending in a question
     Retrigger {
-        /// Raw tokens (hook surface like `inbox`): a control word, `mark`, or none.
+        /// Raw tokens (hook surface like `inbox`): `mark` or nothing.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -1032,6 +1038,7 @@ fn main() {
                 AsksOrderCmd::Get => bsctl::asks::order_get(),
             },
             AsksCmd::Inbox { args } => bsctl::asks::inbox(&args),
+            AsksCmd::Deck { args } => bsctl::asks::deck(&args),
             AsksCmd::Inject { args } => bsctl::asks::inject(&args),
             AsksCmd::Retrigger { args } => bsctl::asks::retrigger(&args),
         },

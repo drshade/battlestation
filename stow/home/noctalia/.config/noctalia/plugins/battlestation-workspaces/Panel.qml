@@ -143,8 +143,7 @@ Item {
   }
   onPluginApiChanged: {
     loadHideDelivered();
-    loadInject();
-    loadRetrigger();
+    loadDeck();
   }
   function setHideDelivered(on) {
     hideDelivered = on;
@@ -154,54 +153,34 @@ Item {
     }
   }
 
-  // ---- "Inject" checkbox: gate the per-turn UserPromptSubmit nudge -----------
-  // On: bsctl's UserPromptSubmit hook (`asks inject`) injects the Deck reminder
-  // + presence + open-count into every agent turn. pluginSettings is the
-  // PERSISTENT truth; bsctl's runtime flag (what the hook reads) is ephemeral —
-  // cleared on reboot — so we PUSH the preference to it on load and on every
-  // toggle. injectProc is separate from askProc so the sync never clobbers an
-  // in-flight asks action (same reasoning as wakeProc).
-  property bool injectOn: false
-  function pushInject(on) {
-    injectProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "asks", "inject", on ? "on" : "off"];
-    injectProc.running = true;
+  // ---- "Deck" checkbox: master switch for the steering surfaces --------------
+  // ONE switch for both bsctl steering hooks (`asks deck on|off`). ON: every
+  // agent turn gets the presence nudge ("post to the Deck") and the Stop-hook
+  // retrigger backstop is armed. OFF: turns get the owner-disabled notice
+  // ("do not create new items; reading stays fine") and the backstop disarms.
+  // pluginSettings is the PERSISTENT truth; bsctl's runtime flag (what the
+  // hooks read) is ephemeral — cleared on reboot — so we PUSH the preference
+  // to it on load and on every toggle. Default ON: the Deck is this machine's
+  // standing contract, OFF is the exception. deckProc is separate from askProc
+  // so the sync never clobbers an in-flight asks action (same reasoning as
+  // wakeProc).
+  property bool deckOn: true
+  function pushDeck(on) {
+    deckProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "asks", "deck", on ? "on" : "off"];
+    deckProc.running = true;
   }
-  function loadInject() {
+  function loadDeck() {
     if (pluginApi && pluginApi.pluginSettings)
-      injectOn = pluginApi.pluginSettings.asksInject === true;
-    pushInject(injectOn);
+      deckOn = pluginApi.pluginSettings.asksDeck !== false;
+    pushDeck(deckOn);
   }
-  function setInject(on) {
-    injectOn = on;
+  function setDeck(on) {
+    deckOn = on;
     if (pluginApi && pluginApi.pluginSettings) {
-      pluginApi.pluginSettings.asksInject = on;
+      pluginApi.pluginSettings.asksDeck = on;
       pluginApi.saveSettings();
     }
-    pushInject(on);
-  }
-
-  // ---- "Background retrigger" checkbox: Stop-hook backstop -------------------
-  // On: when a turn ends with a question while the human isn't looking at this
-  // session, bsctl's Stop hook re-prompts the agent to post it to the Deck.
-  // Same persistence model as Inject (pluginSettings truth, pushed to bsctl's
-  // ephemeral flag on load and on toggle).
-  property bool retriggerOn: false
-  function pushRetrigger(on) {
-    retriggerProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "asks", "retrigger", on ? "on" : "off"];
-    retriggerProc.running = true;
-  }
-  function loadRetrigger() {
-    if (pluginApi && pluginApi.pluginSettings)
-      retriggerOn = pluginApi.pluginSettings.asksRetrigger === true;
-    pushRetrigger(retriggerOn);
-  }
-  function setRetrigger(on) {
-    retriggerOn = on;
-    if (pluginApi && pluginApi.pluginSettings) {
-      pluginApi.pluginSettings.asksRetrigger = on;
-      pluginApi.saveSettings();
-    }
-    pushRetrigger(on);
+    pushDeck(on);
   }
   function sameIdList(a, b) {
     if (!a || !b || a.length !== b.length)
@@ -632,14 +611,10 @@ Item {
   Process {
     id: wakeProc
   }
-  // Separate from askProc (see wakeProc): the inject-flag sync fires on panel
+  // Separate from askProc (see wakeProc): the deck-flag sync fires on panel
   // load and on checkbox toggle, independent of any asks action in flight.
   Process {
-    id: injectProc
-  }
-  // Likewise for the background-retrigger flag sync.
-  Process {
-    id: retriggerProc
+    id: deckProc
   }
 
   // Config/icon layer for the v2 skin's harness BotIcons. The bar builds its
@@ -746,14 +721,9 @@ Item {
           Repeater {
             model: [
               {
-                label: "Inject",
-                on: root.injectOn,
-                kind: "inject"
-              },
-              {
-                label: "Auto-retrigger",
-                on: root.retriggerOn,
-                kind: "retrigger"
+                label: "Deck",
+                on: root.deckOn,
+                kind: "deck"
               },
               {
                 label: "Hide delivered",
@@ -799,10 +769,8 @@ Item {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  if (modelData.kind === "inject")
-                    root.setInject(!root.injectOn);
-                  else if (modelData.kind === "retrigger")
-                    root.setRetrigger(!root.retriggerOn);
+                  if (modelData.kind === "deck")
+                    root.setDeck(!root.deckOn);
                   else
                     root.setHideDelivered(!root.hideDelivered);
                 }
