@@ -22,6 +22,12 @@ command = "$HOME/.local/bin/bsctl agents set --kind codex thinking"
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
 command = "/bin/sh -c 'exec \"$HOME/.local/bin/bsctl\" asks inbox'"
+# Per-turn Deck steering: `asks inject` states the Deck regime every turn —
+# the presence nudge when the Deck switch is ON, the owner-disabled notice
+# when OFF (same envelope as `asks inbox` above; Claude wires the same verb).
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "/bin/sh -c 'exec \"$HOME/.local/bin/bsctl\" asks inject'"
 
 [[hooks.PreToolUse]]
 matcher = "*"
