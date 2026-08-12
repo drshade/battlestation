@@ -1,0 +1,5 @@
+[Unit]
+Description=Registration and diagnostics for the Kyyn templates CI runner
+
+[Volume]
+VolumeName=kyyn-templates-ci-state
