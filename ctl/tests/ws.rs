@@ -213,16 +213,48 @@ fn focus_session_dispatches_window_or_workspace() {
 #[test]
 fn focus_ws_id_dispatches_without_resolving() {
     let env = TestEnv::new("focus-ws-id");
-    // A raw ws-id needs no map and no live workspace — Hyprland creates it.
+    // A raw POSITIVE ws-id needs no map and no live workspace — Hyprland
+    // creates it. (Negatives resolve live: see the named-workspace test.)
     assert_eq!(env.ws(&["focus", "--ws-id", "42"]).status.code(), Some(0));
-    assert_eq!(env.ws(&["focus", "--ws-id", "-3"]).status.code(), Some(0));
+    assert_eq!(env.dispatches(), vec!["hl.dsp.focus({ workspace = 42 })"]);
+}
+
+#[test]
+fn named_workspaces_dispatch_by_name_and_sort_last() {
+    let env = TestEnv::new("named-ws");
+    // gaming (-1337) added to the default fixture — named workspaces are
+    // dispatched as "name:<name>" (a negative NUMBER parses as a relative
+    // jump — probed live) and sort AFTER every numbered workspace.
+    fs::write(
+        env.fix.join("workspaces.json"),
+        r#"[{"id":2,"name":"2","monitor":"eDP-1","windows":2},{"id":1,"name":"1","monitor":"eDP-1","windows":0},{"id":-1337,"name":"gaming","monitor":"eDP-1","windows":1}]"#,
+    )
+    .unwrap();
+    // last battlespace = the named workspace
+    assert_eq!(env.ws(&["focus", "--bs-id", "3"]).status.code(), Some(0));
+    // raw ws-id resolves to the same name form
+    assert_eq!(env.ws(&["focus", "--ws-id", "-1337"]).status.code(), Some(0));
+    // send window follows the same grammar
+    assert_eq!(
+        env.ws(&["send", "window", "--bs-id", "3", "--focus"])
+            .status
+            .code(),
+        Some(0)
+    );
     assert_eq!(
         env.dispatches(),
         vec![
-            "hl.dsp.focus({ workspace = 42 })",
-            "hl.dsp.focus({ workspace = -3 })",
+            r#"hl.dsp.focus({ workspace = "name:gaming" })"#,
+            r#"hl.dsp.focus({ workspace = "name:gaming" })"#,
+            r#"hl.dsp.window.move({ workspace = "name:gaming", follow = true })"#,
         ]
     );
+    // A DEAD negative id has no dispatchable form: loud error, no dispatch
+    // (the numeric fallback would be a relative jump).
+    let out = env.ws(&["focus", "--ws-id", "-3"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!out.stderr.is_empty());
+    assert_eq!(env.dispatches().len(), 3);
 }
 
 #[test]

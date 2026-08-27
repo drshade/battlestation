@@ -75,7 +75,10 @@ pub fn live_ids(workspaces: &Value) -> Vec<i64> {
 }
 
 /// Resolved display order: preference tokens filtered to live ids (in pref
-/// order), then live ids not in the preference, ascending. Tokens match live
+/// order), then live ids not in the preference — numbered (positive) ids
+/// ascending, then NAMED workspaces (negative ids) in creation order.
+/// Named workspaces sort last so a game opening `name:gaming` doesn't
+/// steal bs-id 1 and shift every number-row key. Tokens match live
 /// ids TEXTUALLY (the script's `grep -qxF` / `case " $pref "` membership), so
 /// e.g. "07" never matches id 7, and a token repeated in the file repeats in
 /// the output. Missing/empty preference -> identity (live ascending).
@@ -90,7 +93,9 @@ pub fn resolve(pref: &str, live: &[i64]) -> Vec<i64> {
         .copied()
         .filter(|id| !toks.contains(&id.to_string().as_str()))
         .collect();
-    rest.sort_unstable();
+    // Named ids count DOWN from -1337 as created, so -id restores creation
+    // order among them.
+    rest.sort_unstable_by_key(|&id| if id >= 1 { (0, id) } else { (1, -id) });
     out.extend(rest);
     out
 }
@@ -114,9 +119,66 @@ pub fn lua_escape(s: &str) -> String {
     out
 }
 
-/// `hl.dsp.focus({ workspace = N })` — byte-identical to the script's.
-pub fn focus_cmd(id: i64) -> String {
-    format!("hl.dsp.focus({{ workspace = {id} }})")
+/// A workspace reference for the TARGET-taking dispatches (`focus`,
+/// `window.move`). Those dispatches parse their `workspace` value with the
+/// legacy target grammar, where a bare negative NUMBER means a RELATIVE
+/// jump — probed live (Hyprland 0.55.4): `hl.dsp.window.move({ workspace =
+/// -1337 })` hopped the window from ws 2 to ws 1 (clamped relative), and
+/// the same value under `focus` replied "ok" while doing nothing. So a
+/// NAMED workspace (negative id) must travel as the quoted `"name:<name>"`
+/// form, which both dispatches accept (probed live). The ID-taking
+/// dispatches (`workspace.rename`, `workspace.move`) take negative ids
+/// fine (rename probed live; move replies ok and shares the id grammar)
+/// and keep their numeric form.
+pub enum WsToken {
+    Id(i64),
+    Name(String),
+}
+
+impl WsToken {
+    /// The Lua `workspace =` value: ids bare, names quoted as
+    /// `"name:<name>"` (escaped like every embedded string).
+    pub fn lua(&self) -> String {
+        match self {
+            WsToken::Id(id) => id.to_string(),
+            WsToken::Name(n) => format!(r#""name:{}""#, lua_escape(n)),
+        }
+    }
+}
+
+/// The token for a ws-id against a `workspaces` snapshot already in hand:
+/// positive ids go numeric; a negative id resolves to its name. None for a
+/// negative id the snapshot doesn't know — there is no dispatchable form
+/// for a dead named workspace (the numeric fallback would be a relative
+/// jump, worse than failing).
+pub fn token_from(workspaces: &Value, id: i64) -> Option<WsToken> {
+    if id >= 1 {
+        return Some(WsToken::Id(id));
+    }
+    let name = name_of(workspaces, id);
+    (!name.is_empty() && name != "null").then_some(WsToken::Name(name))
+}
+
+/// [`token_from`] with the snapshot queried on demand — and only for
+/// negative ids, so the positive-id path keeps its no-query
+/// create-on-focus contract. Err carries the exit code, loudly: negative
+/// ids come from live state, so an unresolvable one is a real fault, not a
+/// keybind grazing the map's edge.
+pub fn token_of(id: i64) -> Result<WsToken, i32> {
+    if id >= 1 {
+        return Ok(WsToken::Id(id));
+    }
+    let ws = workspaces_json()?;
+    token_from(&ws, id).ok_or_else(|| {
+        eprintln!("bsctl ws: no workspace {id} (named workspaces are addressed live)");
+        1
+    })
+}
+
+/// `hl.dsp.focus({ workspace = N })` / `({ workspace = "name:..." })` —
+/// byte-identical to the script's for numeric ids.
+pub fn focus_cmd(tok: &WsToken) -> String {
+    format!("hl.dsp.focus({{ workspace = {} }})", tok.lua())
 }
 
 /// `hl.dsp.focus({ monitor = "NAME" })` — the Lua form of legacy
@@ -151,7 +213,9 @@ pub fn session_focus_cmd(rec: &Value) -> Option<String> {
     {
         return Some(focus_window_cmd(addr));
     }
-    rec.get("ws").and_then(Value::as_i64).map(focus_cmd)
+    rec.get("ws")
+        .and_then(Value::as_i64)
+        .map(|id| focus_cmd(&WsToken::Id(id)))
 }
 
 /// `hl.dsp.workspace.move({ workspace = N, monitor = "NAME" })` — the Lua
@@ -213,9 +277,14 @@ pub fn displays_from(monitors: &Value) -> Vec<Display> {
     mons.into_iter().map(|(_, _, d)| d).collect()
 }
 
-/// `hl.dsp.window.move({ workspace = N, follow = B })` — byte-identical.
-pub fn move_cmd(id: i64, follow: bool) -> String {
-    format!("hl.dsp.window.move({{ workspace = {id}, follow = {follow} }})")
+/// `hl.dsp.window.move({ workspace = N, follow = B })` — byte-identical
+/// for numeric ids; named workspaces ride the `"name:..."` form (see
+/// [`WsToken`]).
+pub fn move_cmd(tok: &WsToken, follow: bool) -> String {
+    format!(
+        "hl.dsp.window.move({{ workspace = {}, follow = {follow} }})",
+        tok.lua()
+    )
 }
 
 /// `hl.dsp.workspace.rename({ workspace = N, name = "..." })` —
@@ -358,14 +427,21 @@ pub fn restore_strays(
         return; // nothing strayed: don't churn focus for no reason
     }
     // Unfocused displays first, the focused monitor's own active last.
+    // Best-effort like the rest: an active id whose token can't resolve
+    // (a named workspace that died mid-settle) is skipped, not dispatched
+    // numerically (that would be a relative jump — see WsToken).
     for (mon, active) in before_actives.iter().filter(|(m, _)| m != focused_mon) {
-        if let Some(id) = active {
-            let _ = ipc::dispatch(&focus_cmd(*id));
+        if let Some(id) = active
+            && let Ok(tok) = token_of(*id)
+        {
+            let _ = ipc::dispatch(&focus_cmd(&tok));
         }
         let _ = mon;
     }
-    if let Some((_, Some(id))) = before_actives.iter().find(|(m, _)| m == focused_mon) {
-        let _ = ipc::dispatch(&focus_cmd(*id));
+    if let Some((_, Some(id))) = before_actives.iter().find(|(m, _)| m == focused_mon)
+        && let Ok(tok) = token_of(*id)
+    {
+        let _ = ipc::dispatch(&focus_cmd(&tok));
     }
 }
 
@@ -569,8 +645,8 @@ fn focused_index(verb: &str, ds: &[Display]) -> Result<usize, i32> {
 /// that display (its active workspace).
 pub fn focus(target: &Target) -> i32 {
     match target {
-        Target::Ws(sel) => match resolve_ws_sel(sel) {
-            Ok(id) => ipc::dispatch(&focus_cmd(id)),
+        Target::Ws(sel) => match resolve_ws_sel(sel).and_then(|id| token_of(id)) {
+            Ok(tok) => ipc::dispatch(&focus_cmd(&tok)),
             Err(c) => c,
         },
         Target::Display(sel) => {
@@ -641,7 +717,10 @@ pub fn send_window(target: &Target, focus: bool) -> i32 {
             active
         }
     };
-    ipc::dispatch(&move_cmd(id, focus))
+    match token_of(id) {
+        Ok(tok) => ipc::dispatch(&move_cmd(&tok, focus)),
+        Err(c) => c,
+    }
 }
 
 /// `ws send workspace (--display-id|--display-name) [--focus]` — move the
@@ -683,7 +762,10 @@ pub fn send_workspace(sel: &DisplaySel, focus: bool) -> i32 {
     // behavior (version-dependent): --focus lands on the moved workspace,
     // stay re-focuses the source display — both no-op when already true.
     if focus {
-        ipc::dispatch(&focus_cmd(ws_id))
+        match token_of(ws_id) {
+            Ok(tok) => ipc::dispatch(&focus_cmd(&tok)),
+            Err(c) => c,
+        }
     } else {
         ipc::dispatch(&focus_monitor_cmd(&ds[cur].name))
     }
@@ -1188,6 +1270,17 @@ mod tests {
     }
 
     #[test]
+    fn resolve_sorts_named_workspaces_last() {
+        // Named (negative-id) newcomers land after every numbered one, in
+        // creation order (ids count down from -1337 as created) — a game
+        // opening name:gaming must not steal bs-id 1.
+        assert_eq!(resolve("", &[-1337, 1, 2]), vec![1, 2, -1337]);
+        assert_eq!(resolve("", &[-1338, 2, -1337, 1]), vec![1, 2, -1337, -1338]);
+        // a pinned named id keeps its pinned position like any other token
+        assert_eq!(resolve("-1337 1", &[-1337, 1, 2]), vec![-1337, 1, 2]);
+    }
+
+    #[test]
     fn resolve_matches_tokens_textually() {
         // "07" is not the token "7" (grep -xF semantics)
         assert_eq!(resolve("07", &[7]), vec![7]); // skipped, then newcomer
@@ -1208,14 +1301,32 @@ mod tests {
 
     #[test]
     fn dispatch_strings_are_byte_identical_to_the_script() {
-        assert_eq!(focus_cmd(3), "hl.dsp.focus({ workspace = 3 })");
         assert_eq!(
-            move_cmd(1, false),
+            focus_cmd(&WsToken::Id(3)),
+            "hl.dsp.focus({ workspace = 3 })"
+        );
+        assert_eq!(
+            move_cmd(&WsToken::Id(1), false),
             "hl.dsp.window.move({ workspace = 1, follow = false })"
         );
         assert_eq!(
-            move_cmd(5, true),
+            move_cmd(&WsToken::Id(5), true),
             "hl.dsp.window.move({ workspace = 5, follow = true })"
+        );
+        // Named workspaces go by name — the numeric negative form parses
+        // as a RELATIVE jump (probed live; see WsToken).
+        assert_eq!(
+            focus_cmd(&WsToken::Name("gaming".into())),
+            r#"hl.dsp.focus({ workspace = "name:gaming" })"#
+        );
+        assert_eq!(
+            move_cmd(&WsToken::Name("gaming".into()), false),
+            r#"hl.dsp.window.move({ workspace = "name:gaming", follow = false })"#
+        );
+        // names ride through lua_escape like every embedded string
+        assert_eq!(
+            focus_cmd(&WsToken::Name(r#"ga"me"#.into())),
+            r#"hl.dsp.focus({ workspace = "name:ga\"me" })"#
         );
         assert_eq!(
             rename_cmd(3, Some("plain name")),
@@ -1392,6 +1503,24 @@ mod tests {
         assert_eq!(prefs_file().parent(), map_file().parent());
         assert!(prefs_file().ends_with("battlestation-workspaces/prefs"));
         assert!(map_file().ends_with("battlestation-workspaces/map"));
+    }
+
+    #[test]
+    fn token_from_names_negatives_ids_positives() {
+        let ws = json!([
+            {"id": 1, "name": "1"},
+            {"id": -1337, "name": "gaming"},
+            {"id": -1338, "name": null},
+        ]);
+        assert_eq!(token_from(&ws, 3).map(|t| t.lua()), Some("3".to_string()));
+        assert_eq!(
+            token_from(&ws, -1337).map(|t| t.lua()),
+            Some(r#""name:gaming""#.to_string())
+        );
+        // a dead or nameless negative id has no dispatchable form — the
+        // numeric fallback would be a relative jump
+        assert!(token_from(&ws, -99).is_none());
+        assert!(token_from(&ws, -1338).is_none());
     }
 
     #[test]

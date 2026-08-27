@@ -408,7 +408,13 @@
 //! battlestation-workspaces/map`, is ws-ids in battlespace order,
 //! space-separated with a trailing newline: `3 1 2 5 4\n`. Resolved order =
 //! the listed ids that currently exist (in list order), followed by any
-//! live workspaces not listed, ascending; missing/empty file => identity.
+//! live workspaces not listed — numbered ids ascending, then NAMED
+//! workspaces (negative ids, e.g. the `gaming` window-rule target) in
+//! creation order, so a game opening never steals bs-id 1 from the number
+//! row; missing/empty file => identity. Dispatch caveat: the target-taking
+//! dispatchers (`focus`, `window.move`) parse a negative NUMBER as a
+//! relative jump, so named workspaces are dispatched as `"name:<name>"`
+//! (`ws::WsToken`; probed live).
 //! Tokens match live ids TEXTUALLY ("07" never matches id 7, and a
 //! repeated token repeats in the output). "Live" excludes workspaces whose
 //! name starts with `special:` — matching what the bar shows.
