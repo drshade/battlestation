@@ -9,11 +9,17 @@ keybind lives in `config/keybinds.lua`.
 The stowed config handles the plugin + keybind. Out-of-band steps:
 
 ```sh
-sudo pacman -S wtype whisper-cpp-vulkan
+sudo pacman -S wtype whisper-cpp
 mkdir -p ~/.local/share/whisper-models
 curl -L -o ~/.local/share/whisper-models/ggml-small.en.bin \
   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin"
 ```
+
+Not `whisper-cpp-vulkan` — Arch folded the GPU variants into plain
+`whisper-cpp` (which `Replaces` them), so the suffixed name is now a
+`target not found`. The backend still is Vulkan: `whisper-cpp` depends on
+`ggml`, which ships `libggml-vulkan.so` next to the CPU/CUDA/HIP backends
+and picks one at runtime.
 
 Models are **gitignored** (~466 MB); the plugin defaults to
 `~/.local/share/whisper-models/ggml-small.en.bin` (override via the
