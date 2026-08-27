@@ -25,6 +25,5 @@
   "waitingCustom": "#c97b47",
   "noneColor": "none",
   "noneCustom": "#3a3a3a",
-  "asksInject": true,
-  "asksRetrigger": true
+  "asksDeck": false
 }

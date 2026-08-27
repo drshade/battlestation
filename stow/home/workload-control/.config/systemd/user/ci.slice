@@ -1,0 +1,10 @@
+[Unit]
+Description=Continuous integration workloads
+
+[Slice]
+# All runners share these limits, so concurrency cannot multiply them.
+AllowedCPUs=4-15
+CPUWeight=10
+IOWeight=20
+MemoryHigh=24G
+MemoryMax=40G

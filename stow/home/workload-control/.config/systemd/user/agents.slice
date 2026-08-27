@@ -1,0 +1,7 @@
+[Unit]
+Description=Interactive agent workloads
+
+[Slice]
+# Keep agent workloads on efficiency cores, leaving all P-cores for interactive work.
+AllowedCPUs=4-15
+CPUWeight=20

@@ -1,0 +1,5 @@
+[Unit]
+Description=Persistent Rust caches for the Kyyn templates CI runner
+
+[Volume]
+VolumeName=kyyn-templates-ci-cache
