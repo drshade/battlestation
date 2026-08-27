@@ -157,7 +157,7 @@
                     "showMemoryAsPercent": false,
                     "showMemoryUsage": true,
                     "showNetworkStats": false,
-                    "showSwapUsage": false,
+                    "showSwapUsage": true,
                     "textColor": "none",
                     "useMonospaceFont": true,
                     "usePadding": false
@@ -215,6 +215,27 @@
                 },
                 {
                     "defaultSettings": {
+                        "colorHistory": [
+                        ],
+                        "detectedRecorder": "",
+                        "filenameFormat": "",
+                        "gifMaxSeconds": 30,
+                        "installedLangs": [
+                            "eng"
+                        ],
+                        "paletteColors": [
+                        ],
+                        "recordCopyToClipboard": false,
+                        "recordSkipConfirmation": false,
+                        "screenshotPath": "",
+                        "selectedOcrLang": "eng",
+                        "transAvailable": false,
+                        "videoPath": ""
+                    },
+                    "id": "plugin:screen-toolkit"
+                },
+                {
+                    "defaultSettings": {
                         "autoHeight": true,
                         "bindOverrides": {
                         },
@@ -229,6 +250,9 @@
                         "keyColorAlt": "#FF6B6B",
                         "keyColorCtrl": "",
                         "keyColorDefault": "#6C757D",
+                        "keyColorMod2": "",
+                        "keyColorMod3": "",
+                        "keyColorMod5": "",
                         "keyColorMouse": "#F38181",
                         "keyColorNumeric": "#A8DADC",
                         "keyColorPrint": "#95E1D3",
@@ -236,9 +260,15 @@
                         "keyColorSuper": "",
                         "keyColorXF86": "#4ECDC4",
                         "keyLabelColor": "#FFFFFF",
+                        "keyLabelMod2": "",
+                        "keyLabelMod3": "",
+                        "keyLabelMod5": "",
                         "keyTextAlt": "",
                         "keyTextCtrl": "",
                         "keyTextDefault": "",
+                        "keyTextMod2": "",
+                        "keyTextMod3": "",
+                        "keyTextMod5": "",
                         "keyTextMouse": "",
                         "keyTextNumeric": "",
                         "keyTextPrint": "",
