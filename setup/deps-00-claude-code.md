@@ -10,7 +10,8 @@ CLAUDE.md carrying the asks-queue posting norm.
 Claude Code reads user-scope MCP servers only from `~/.claude.json` — a
 state file this repo must never track — and ignores an `mcpServers` key in
 `settings.json` (probed empirically on 2.1.200). So the battlestation MCP
-server (the asks queue; contract in `ctl/src/lib.rs`) is registered once,
+server (the Deck, Switchboard and world queries; contract in `ctl/src/lib.rs`)
+is registered once,
 out of band:
 
 ```sh

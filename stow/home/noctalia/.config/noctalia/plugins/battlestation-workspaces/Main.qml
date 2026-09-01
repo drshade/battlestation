@@ -13,7 +13,8 @@ Item {
   id: root
   property var pluginApi: null
 
-  // What the bar panel should show next ("rename" | "settings" | "asks"), and
+  // What the bar panel should show next
+  // ("rename" | "settings" | "asks" | "comms"), and
   // the rename target, both read by Panel.qml when it opens.
   property string panelMode: "rename"
   property int pendingRenameId: 0
@@ -28,6 +29,12 @@ Item {
   // against this to label its answer button Trigger (idle asker → a kitty
   // wake fires) vs Enqueue (busy asker → the harness collects it later).
   property var statusBySid: ({})
+
+  // Public Switchboard state from the same world stream as asks/agents.
+  // Internal session ids never cross this UI boundary: link actions address
+  // endpoints by their human-facing workspace + role name pair.
+  property var commsAgents: []
+  property var commsLinks: []
 
   // Toast NEW notify-type asks (an FYI's whole point is being seen — the
   // badge alone is too quiet for it). This singleton is the dedupe point:
@@ -99,6 +106,18 @@ Item {
     pluginApi.openPanel(screen, buttonItem || barItems[screen.name] || null);
   }
 
+  // Toggle the Switchboard's human-owned link matrix.
+  function toggleCommsPanel(screen, buttonItem) {
+    if (!pluginApi)
+      return;
+    if (pluginApi.panelOpenScreen) {
+      pluginApi.closePanel(pluginApi.panelOpenScreen);
+      return;
+    }
+    panelMode = "comms";
+    pluginApi.openPanel(screen, buttonItem || barItems[screen.name] || null);
+  }
+
   // Rename whichever workspace is currently focused (used by the keybind / IPC).
   function renameActive() {
     if (!pluginApi)
@@ -126,6 +145,13 @@ Item {
         return;
       root.pluginApi.withCurrentScreen(function (screen) {
         root.toggleAsksPanel(screen, root.barItems[screen.name] || null);
+      });
+    }
+    function comms() {
+      if (!root.pluginApi)
+        return;
+      root.pluginApi.withCurrentScreen(function (screen) {
+        root.toggleCommsPanel(screen, root.barItems[screen.name] || null);
       });
     }
   }

@@ -48,6 +48,8 @@ fn top_level_usage_errors_exit_2() {
         &["watch"],                                       // retired: --stream took over
         &["usage"],                                       // retired: agents usage took over
         &["agents"],                                      // set|get required
+        &["comms"],                                       // get/link/etc required
+        &["comms", "link", "--a-workspace", "one"],       // both public identities required
         &["ws"],                                          // subcommand required
         &["ws", "focus"],                                 // a selector is required
         &["ws", "send"],                                  // window|workspace required
@@ -69,7 +71,7 @@ fn help_lists_all_subcommands() {
     let out = bsctl(&["--help"]);
     assert_eq!(out.status.code(), Some(0));
     let help = String::from_utf8_lossy(&out.stdout);
-    for sub in ["ws", "display", "agents", "status", "completions"] {
+    for sub in ["ws", "display", "agents", "comms", "status", "completions"] {
         assert!(help.contains(sub), "--help must mention {sub}: {help}");
     }
     // plan usage lives under agents now (the top-level verb is retired, but
@@ -103,6 +105,10 @@ fn help_renders_at_every_level() {
         &["display", "set", "scale", "--help"],
         &["agents", "--help"],
         &["agents", "get", "--help"],
+        &["comms", "--help"],
+        &["comms", "get", "--help"],
+        &["comms", "link", "--help"],
+        &["comms", "unlink", "--help"],
     ] {
         let out = bsctl(args);
         assert_eq!(out.status.code(), Some(0), "{args:?} must exit 0");

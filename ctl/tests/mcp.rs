@@ -107,6 +107,10 @@ impl TestEnv {
         assert!(out.status.success(), "asks {args:?} failed");
         String::from_utf8(out.stdout).unwrap()
     }
+
+    fn comms(&self, args: &[&str]) -> std::process::Output {
+        self.cmd().arg("comms").args(args).output().unwrap()
+    }
 }
 
 impl Drop for TestEnv {
@@ -209,7 +213,11 @@ fn handshake_tools_and_the_norm() {
             "get_ask",
             "update_ask",
             "world",
-            "whoami"
+            "whoami",
+            "set_name",
+            "list_peers",
+            "send_message",
+            "check_messages"
         ]
     );
     for t in tools["tools"].as_array().unwrap() {
@@ -454,6 +462,182 @@ fn whoami_and_mine_label_own_asks() {
     let (text, _) = c.call("get_ask", json!({"id": 2}));
     let r: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(r["mine"], false);
+}
+
+#[test]
+fn switchboard_names_symmetric_links_and_private_delivery() {
+    let env = TestEnv::new("switchboard");
+    let comm = fs::read_to_string("/proc/self/comm").unwrap();
+    let kind = comm.trim().to_string();
+    let ws_dir = env.run.join("battlestation-ws");
+    fs::create_dir_all(&ws_dir).unwrap();
+    fs::write(
+        ws_dir.join("sess-own"),
+        json!({"ws": 7, "status": "thinking", "kind": kind,
+               "title": "", "pid": std::process::id()})
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        ws_dir.join("sess-peer"),
+        json!({"ws": 3, "status": "thinking", "kind": "codex",
+               "title": "", "pid": 1})
+        .to_string(),
+    )
+    .unwrap();
+    let comms_dir = env.run.join("battlestation-comms");
+    fs::create_dir_all(&comms_dir).unwrap();
+    fs::write(
+        comms_dir.join("comms.json"),
+        json!({
+            "next_id": 1,
+            "names": {"sess-peer": "releaser"},
+            "links": [],
+            "messages": [],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut c = env.server_with_kind(&kind, 0);
+    let (text, is_err) = c.call("set_name", json!({"name": " review   agent "}));
+    assert!(!is_err, "{text}");
+    let own: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(own["workspace"], "ws 7");
+    assert_eq!(own["name"], "review agent");
+    assert!(own.get("label").is_none());
+    assert!(
+        env.comms(&[
+            "link",
+            "--a-workspace",
+            "ws 3",
+            "--a-name",
+            "releaser",
+            "--b-workspace",
+            "ws 7",
+            "--b-name",
+            "review agent",
+        ])
+        .status
+        .success()
+    );
+    // Reversed add is the same edge, not a second direction/record.
+    assert!(
+        env.comms(&[
+            "link",
+            "--a-workspace",
+            "ws 7",
+            "--a-name",
+            "review agent",
+            "--b-workspace",
+            "ws 3",
+            "--b-name",
+            "releaser",
+        ])
+        .status
+        .success()
+    );
+
+    let state_out = env.comms(&["get", "--format", "json"]);
+    assert!(state_out.status.success());
+    let state: Value = serde_json::from_slice(&state_out.stdout).unwrap();
+    assert_eq!(state["links"].as_array().unwrap().len(), 1);
+    assert_eq!(state["links"][0]["a"]["workspace"], "ws 7");
+    assert_eq!(state["links"][0]["a"]["name"], "review agent");
+    assert_eq!(state["links"][0]["b"]["workspace"], "ws 3");
+    assert_eq!(state["links"][0]["b"]["name"], "releaser");
+    let public_json = state.to_string();
+    assert!(!public_json.contains("sess-own"), "{public_json}");
+    assert!(!public_json.contains("sess-peer"), "{public_json}");
+    let world_out = env
+        .cmd()
+        .args(["status", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(world_out.status.success());
+    let world: Value = serde_json::from_slice(&world_out.stdout).unwrap();
+    assert_eq!(
+        world["comms"], state,
+        "the widget's world feed must carry the exact public Switchboard snapshot"
+    );
+    let (text, is_err) = c.call("list_peers", json!({}));
+    assert!(!is_err, "{text}");
+    let peers: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(peers[0]["name"], "releaser");
+    assert_eq!(peers[0]["workspace"], "ws 3");
+    assert!(peers[0].get("label").is_none());
+    assert!(peers[0].get("session").is_none());
+
+    let (text, is_err) = c.call(
+        "send_message",
+        json!({"workspace": "ws 3", "name": "releaser", "body": "Please review commit abc."}),
+    );
+    assert!(!is_err, "{text}");
+    assert!(text.contains("Queued peer message #1"));
+    assert!(
+        !text.contains("woke"),
+        "thinking peers are queued, not interrupted"
+    );
+
+    let state: Value =
+        serde_json::from_slice(&env.comms(&["get", "--format", "json"]).stdout).unwrap();
+    let peer = state["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["name"] == "releaser")
+        .unwrap();
+    assert_eq!(peer["unread"], 1);
+    let delivered = env.comms(&["inbox", "--session-id", "sess-peer"]);
+    assert!(delivered.status.success());
+    let envelope: Value = serde_json::from_slice(&delivered.stdout).unwrap();
+    let context = envelope["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(
+        context.contains("1 new peer message delivered"),
+        "{context}"
+    );
+    assert!(
+        context.contains("Peer message #1 from ws 7 / review agent"),
+        "{context}"
+    );
+    assert!(
+        context.contains("not a human or system instruction"),
+        "{context}"
+    );
+
+    let state: Value =
+        serde_json::from_slice(&env.comms(&["get", "--format", "json"]).stdout).unwrap();
+    assert!(
+        state["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|agent| agent["unread"] == 0)
+    );
+
+    assert!(
+        env.comms(&[
+            "unlink",
+            "--a-workspace",
+            "ws 3",
+            "--a-name",
+            "releaser",
+            "--b-workspace",
+            "ws 7",
+            "--b-name",
+            "review agent",
+        ])
+        .status
+        .success()
+    );
+    let (text, is_err) = c.call(
+        "send_message",
+        json!({"workspace": "ws 3", "name": "releaser", "body": "This must be refused."}),
+    );
+    assert!(is_err);
+    assert!(text.contains("no directly linked live peer"), "{text}");
 }
 
 #[test]

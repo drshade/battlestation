@@ -126,6 +126,10 @@
             "type": "command"
           },
           {
+            "command": "$HOME/.local/bin/bsctl comms inbox",
+            "type": "command"
+          },
+          {
             "command": "$HOME/.local/bin/bsctl asks inject",
             "type": "command"
           },

@@ -9,15 +9,15 @@ replaces it in place. Install per the upstream instructions
 
 Config is the stowed `~/.codex/config.toml` (`stow/home/codex`), which
 carries the agent-session status hooks (`bsctl agents set --kind codex …`)
-and the battlestation MCP server (`[mcp_servers.battlestation]`, the asks
-queue) — protocol contracts in `ctl/src/lib.rs`. The package also stows
+and the battlestation MCP server (`[mcp_servers.battlestation]`, the Deck,
+Switchboard and world queries) — protocol contracts in `ctl/src/lib.rs`. The package also stows
 `~/.codex/AGENTS.md`, Codex's global instructions, carrying the asks-queue
 posting norm. Two out-of-band steps:
 
 - **Trust the hooks (one-time, and again per change).** Codex refuses
   non-managed command hooks until they are reviewed: open `codex` and
   approve them via `/hooks`, else the status widget never sees Codex
-  sessions. Every added or edited hook command (e.g. the `asks inbox`
+  sessions. Every added or edited hook command (e.g. an inbox delivery
   delivery hook) needs the same re-approval — an untrusted hook is
   silently skipped.
 - Codex rewrites `config.toml` at runtime (project trust tables, `[tui.*]`

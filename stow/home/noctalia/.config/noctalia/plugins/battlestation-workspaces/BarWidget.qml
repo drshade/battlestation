@@ -174,6 +174,30 @@ Item {
       pluginApi.mainInstance.toggleAsksPanel(root.screen, root);
   }
 
+  // ---- Switchboard -----------------------------------------------------------
+  // Public endpoints + symmetric links ride the world stream. Keep only the
+  // compact badge counts locally; the panel binds to the full singleton copy.
+  property var commsAgents: []
+  property var commsLinks: []
+  readonly property int commsNamed: commsAgents.filter(function (a) { return !!a.name; }).length
+  readonly property int commsUnread: commsAgents.reduce(function (n, a) { return n + (a.unread || 0); }, 0)
+  function applyComms(comms) {
+    if (!comms)
+      return;
+    var agents = comms.agents || [];
+    var links = comms.links || [];
+    commsAgents = agents;
+    commsLinks = links;
+    if (pluginApi && pluginApi.mainInstance) {
+      pluginApi.mainInstance.commsAgents = agents;
+      pluginApi.mainInstance.commsLinks = links;
+    }
+  }
+  function toggleCommsPanel() {
+    if (pluginApi && pluginApi.mainInstance)
+      pluginApi.mainInstance.toggleCommsPanel(root.screen, root);
+  }
+
   // Equality guards so stream updates only reassign
   // a reactive structure when its content actually changed -- otherwise
   // identical-but-new values churn the consumers (and rebuilding displayList
@@ -355,6 +379,8 @@ Item {
   //              delivered_at}],
   //    "agents": [{session, kind, status, ws, title,
   //                subagents: [{id, type, description, started}]}]}
+  //    "comms": {agents: [{workspace, name, kind, status, unread}],
+  //               links: [{a: {workspace, name}, b: {...}}]}}
   // `agents` is the self-cleaning session pass (dead-pid sessions, orphan
   // markers, kill-leaked stale markers via the transcript-frozen GC);
   // `displays`/`workspaces` are queried fresh per emission (JSON null when
@@ -402,6 +428,8 @@ Item {
     // section and must land even on a line without one.
     if (data.asks && data.asks.length !== undefined)
       applyAsks(data.asks);
+    if (data.comms)
+      applyComms(data.comms);
     var recs = data.agents;
     if (!recs || recs.length === undefined)
       return;
@@ -595,6 +623,15 @@ Item {
       anyBlocking: root.asksAnyBlocking
       estMin: root.asksEstMin
       onActivated: root.toggleAsksPanel()
+    }
+
+    SwitchboardBadge {
+      cfg: config
+      screenName: config.screenName
+      namedCount: root.commsNamed
+      linkCount: root.commsLinks.length
+      unreadCount: root.commsUnread
+      onActivated: root.toggleCommsPanel()
     }
 
     // Pills + a single overlay DropArea. One DropArea over the whole list (rather
