@@ -1,9 +1,10 @@
-// Bar-attached plugin panel, used for three things so all share the same
+// Bar-attached plugin panel, used for four things so all share the same
 // hang-off-the-bar blob, animation and exclusive keyboard:
 //   mode "rename"   -> a single text field to rename a workspace
 //   mode "settings" -> the widget's Settings.qml hosted with Apply/Close
 //   mode "asks"     -> the asks-queue triage surface (rows bind live to
 //                      mainInstance.asksRows, which the bar's stream pushes)
+//   mode "comms"    -> the Switchboard's symmetric agent-link table
 // The mode and the rename target are staged on the plugin's mainInstance before
 // the panel is opened (the panel content is recreated on every open). Every
 // asks action is a direct-argv bsctl Process — no shell anywhere, so human
@@ -74,14 +75,22 @@ Item {
   // The asks (Deck) mode. Every asks-only gate — geometry, the age timer, the
   // height snapshot, the row model — keys off this.
   readonly property bool asksMode: mode === "asks"
+  readonly property bool commsMode: mode === "comms"
 
   // SmartPanel contract. Asks is the widest — a triage row needs title, meta
   // and its action cluster side by side without fighting; settings is sized
   // to its full content (SmartPanel clamps to the screen, and the scroll
   // view only kicks in if it can't fit); rename hugs its content.
   readonly property var geometryPlaceholder: panelContainer
-  readonly property bool allowAttach: true
-  property real contentPreferredWidth: (mode === "settings" ? 580 : asksMode ? 980 : 320) * Style.uiScaleRatio
+  property bool commsExpanded: false
+  readonly property var commsScreen: (pluginApi && pluginApi.panelOpenScreen) ? pluginApi.panelOpenScreen : null
+  // Fill mode detaches from the bar so SmartPanel centers the available-screen
+  // surface rather than stretching an attached blob from one bar edge.
+  readonly property bool allowAttach: !(commsMode && commsExpanded)
+  property real contentPreferredWidth: (mode === "settings" ? 580
+                                        : asksMode ? 980
+                                        : commsMode ? (commsExpanded && commsScreen ? commsScreen.width : 1200)
+                                        : 320) * (commsExpanded && commsMode ? 1 : Style.uiScaleRatio)
   // Full natural height of the settings column (header + separator + 3 row gaps +
   // top/bottom margins + the settings content). No artificial cap: SmartPanel
   // clamps to the screen, and the scroll view only kicks in if it can't fit.
@@ -95,7 +104,63 @@ Item {
     var n = Math.max(1, askIds.length);
     return Math.min(760, 108 + n * 46 + 190) * Style.uiScaleRatio;
   }
-  property real contentPreferredHeight: (mode === "settings" ? _settingsHeight : asksMode ? asksPanelHeight : renameCol.implicitHeight + Style.marginL * 2)
+  property real commsPanelHeight: 680 * Style.uiScaleRatio
+  function computeCommsHeight() {
+    return Math.min(760, Math.max(680, 210 + Math.max(2, commsDisplayAgents.length) * 44)) * Style.uiScaleRatio;
+  }
+  property real contentPreferredHeight: (mode === "settings" ? _settingsHeight
+                                         : asksMode ? asksPanelHeight
+                                         : commsMode ? (commsExpanded && commsScreen ? commsScreen.height : commsPanelHeight)
+                                         : renameCol.implicitHeight + Style.marginL * 2)
+
+  // ---- Switchboard state -----------------------------------------------------
+  readonly property var commsAgents: (main && main.commsAgents) ? main.commsAgents : []
+  readonly property var commsLinks: (main && main.commsLinks) ? main.commsLinks : []
+  property var commsDisplayAgents: []
+  property var commsLinked: ({})
+  property string commsPendingKey: ""
+  readonly property int commsUnnamed: commsAgents.length - namedCommsAgents().length
+  onCommsAgentsChanged: syncComms()
+  onCommsLinksChanged: syncComms()
+
+  function endpointKey(endpoint) {
+    return JSON.stringify([endpoint.workspace || "", endpoint.name || ""]);
+  }
+  function pairKey(a, b) {
+    var ak = endpointKey(a), bk = endpointKey(b);
+    return ak < bk ? ak + "\n" + bk : bk + "\n" + ak;
+  }
+  function namedCommsAgents() {
+    var out = [];
+    for (var i = 0; i < commsAgents.length; i++)
+      if (commsAgents[i] && commsAgents[i].name)
+        out.push(commsAgents[i]);
+    out.sort(function (a, b) {
+      return endpointKey(a).localeCompare(endpointKey(b));
+    });
+    return out;
+  }
+  function syncComms() {
+    var linked = {};
+    for (var i = 0; i < commsLinks.length; i++)
+      linked[pairKey(commsLinks[i].a, commsLinks[i].b)] = true;
+    commsLinked = linked;
+    commsDisplayAgents = namedCommsAgents();
+  }
+  function isCommsLinked(a, b) {
+    return !!commsLinked[pairKey(a, b)];
+  }
+  function toggleComms(a, b) {
+    if (!a || !b || endpointKey(a) === endpointKey(b) || commsPendingKey.length > 0)
+      return;
+    var key = pairKey(a, b);
+    var linked = isCommsLinked(a, b);
+    commsPendingKey = key;
+    commsProc.command = [Quickshell.env("HOME") + "/.local/bin/bsctl", "comms", linked ? "unlink" : "link",
+                         "--a-workspace", a.workspace, "--a-name", a.name,
+                         "--b-workspace", b.workspace, "--b-name", b.name];
+    commsProc.running = true;
+  }
 
   // ---- asks state -------------------------------------------------------------
   readonly property var asksRows: (main && main.asksRows) ? main.asksRows : []
@@ -615,6 +680,14 @@ Item {
   // load and on checkbox toggle, independent of any asks action in flight.
   Process {
     id: deckProc
+  }
+  Process {
+    id: commsProc
+    onExited: (exitCode, exitStatus) => {
+      if (exitCode !== 0)
+        ToastService.showNotice("Switchboard action failed", "The live endpoints may have changed; reopen or try again.", "exclamation-triangle");
+      root.commsPendingKey = "";
+    }
   }
 
   // Config/icon layer for the v2 skin's harness BotIcons. The bar builds its
@@ -1454,6 +1527,296 @@ Item {
     }
 
 
+    // ---- comms (the Switchboard) ----
+    // A symmetric adjacency matrix: named live agents are both rows and
+    // columns, the diagonal is impossible, and either mirrored checkbox edits
+    // the same stored two-way edge. Fixed headers keep identities visible while
+    // a large matrix scrolls on both axes.
+    ColumnLayout {
+      id: commsCol
+      visible: root.mode === "comms"
+      anchors.fill: parent
+      anchors.margins: Style.marginL
+      spacing: Style.marginM
+
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginM
+        ColumnLayout {
+          spacing: Style.marginXXS
+          NText {
+            text: "Switchboard"
+            pointSize: Style.fontSizeL
+            font.weight: Style.fontWeightBold
+            color: Color.mOnSurface
+          }
+          NText {
+            text: root.namedCommsAgents().length + " named  ·  " + root.commsLinks.length + " linked"
+            font.family: "Noto Sans Mono"
+            pointSize: Style.fontSizeXS
+            color: Color.mOnSurfaceVariant
+          }
+        }
+        Item { Layout.fillWidth: true }
+        NText {
+          text: "links are private, symmetric, and non-transitive"
+          pointSize: Style.fontSizeXS
+          color: Color.mOnSurfaceVariant
+        }
+        NIconButton {
+          icon: root.commsExpanded ? "minimize" : "maximize"
+          customRadius: Style.radiusXS
+          tooltipText: root.commsExpanded ? "Restore panel size" : "Fill available screen"
+          onClicked: root.commsExpanded = !root.commsExpanded
+        }
+        NIconButton {
+          icon: "close"
+          customRadius: Style.radiusXS
+          onClicked: root.close()
+        }
+      }
+
+      Rectangle {
+        Layout.fillWidth: true
+        Layout.preferredHeight: 1
+        color: Color.mOutline
+      }
+
+      Rectangle {
+        visible: root.commsUnnamed > 0
+        Layout.fillWidth: true
+        implicitHeight: unnamedText.implicitHeight + Style.marginS * 2
+        radius: Style.radiusXS
+        color: Qt.alpha(Color.mOnSurface, 0.04)
+        border.width: 1
+        border.color: Qt.alpha(Color.mOnSurface, 0.10)
+        NText {
+          id: unnamedText
+          anchors.centerIn: parent
+          text: root.commsUnnamed + (root.commsUnnamed === 1 ? " live agent has" : " live agents have") + " not chosen a Switchboard name yet"
+          pointSize: Style.fontSizeXS
+          color: Color.mOnSurfaceVariant
+        }
+      }
+
+      Item {
+        id: commsMatrixFrame
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        readonly property real labelWidth: 210 * Style.uiScaleRatio
+        readonly property real cellWidth: 110 * Style.uiScaleRatio
+        readonly property real rowHeight: 44 * Style.uiScaleRatio
+        readonly property real headerHeight: 58 * Style.uiScaleRatio
+        readonly property int agentCount: root.commsDisplayAgents.length
+
+        NText {
+          anchors.centerIn: parent
+          visible: commsMatrixFrame.agentCount < 2
+          text: "two named live agents are needed to make a link"
+          color: Color.mOnSurfaceVariant
+        }
+
+        // Fixed corner: the axes state the relationship once. A checked cell
+        // at (row A, column B) is the same symmetric edge as (row B, column A).
+        Rectangle {
+          visible: commsMatrixFrame.agentCount >= 2
+          x: 0
+          y: 0
+          width: commsMatrixFrame.labelWidth
+          height: commsMatrixFrame.headerHeight
+          color: Qt.alpha(Color.mSurfaceVariant, 0.35)
+          border.width: 1
+          border.color: Qt.alpha(Color.mOnSurface, 0.10)
+          Column {
+            anchors.left: parent.left
+            anchors.leftMargin: Style.marginM
+            anchors.verticalCenter: parent.verticalCenter
+            NText {
+              text: "Agent"
+              font.weight: Style.fontWeightBold
+              pointSize: Style.fontSizeXS
+              color: Color.mOnSurface
+            }
+            NText {
+              text: "linked with →"
+              pointSize: Style.fontSizeXS
+              color: Color.mOnSurfaceVariant
+            }
+          }
+        }
+
+        // Horizontally-sticky column headings. Their x follows the matrix's
+        // contentX while the clip keeps them inside the table viewport.
+        Item {
+          visible: commsMatrixFrame.agentCount >= 2
+          x: commsMatrixFrame.labelWidth
+          y: 0
+          width: parent.width - x
+          height: commsMatrixFrame.headerHeight
+          clip: true
+          Row {
+            x: -commsMatrix.contentX
+            Repeater {
+              model: root.commsDisplayAgents
+              delegate: Rectangle {
+                required property var modelData
+                width: commsMatrixFrame.cellWidth
+                height: commsMatrixFrame.headerHeight
+                color: Qt.alpha(Color.mSurfaceVariant, 0.35)
+                border.width: 1
+                border.color: Qt.alpha(Color.mOnSurface, 0.10)
+                Column {
+                  anchors.fill: parent
+                  anchors.margins: Style.marginXS
+                  NText {
+                    width: parent.width
+                    text: modelData.name
+                    font.weight: Style.fontWeightBold
+                    pointSize: Style.fontSizeXS
+                    color: Color.mOnSurface
+                    elide: Text.ElideRight
+                  }
+                  NText {
+                    width: parent.width
+                    text: modelData.workspace
+                    pointSize: Style.fontSizeXS
+                    color: Color.mOnSurfaceVariant
+                    elide: Text.ElideRight
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Vertically-sticky row headings, including live status and unread.
+        Item {
+          visible: commsMatrixFrame.agentCount >= 2
+          x: 0
+          y: commsMatrixFrame.headerHeight
+          width: commsMatrixFrame.labelWidth
+          height: parent.height - y
+          clip: true
+          Column {
+            y: -commsMatrix.contentY
+            Repeater {
+              model: root.commsDisplayAgents
+              delegate: Rectangle {
+                required property var modelData
+                width: commsMatrixFrame.labelWidth
+                height: commsMatrixFrame.rowHeight
+                color: Qt.alpha(Color.mSurfaceVariant, 0.22)
+                border.width: 1
+                border.color: Qt.alpha(Color.mOnSurface, 0.09)
+                RowLayout {
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.marginM
+                  anchors.rightMargin: Style.marginS
+                  spacing: Style.marginXS
+                  Rectangle {
+                    implicitWidth: 8
+                    implicitHeight: 8
+                    radius: 4
+                    color: modelData.status === "waiting" ? Color.mTertiary : Color.mPrimary
+                  }
+                  NText {
+                    text: modelData.name
+                    font.weight: Style.fontWeightBold
+                    pointSize: Style.fontSizeXS
+                    color: Color.mOnSurface
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                  }
+                  NText {
+                    visible: (modelData.unread || 0) > 0
+                    text: modelData.unread + " unread"
+                    pointSize: Style.fontSizeXS
+                    color: Color.mTertiary
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        Flickable {
+          id: commsMatrix
+          visible: commsMatrixFrame.agentCount >= 2
+          x: commsMatrixFrame.labelWidth
+          y: commsMatrixFrame.headerHeight
+          width: parent.width - x
+          height: parent.height - y
+          contentWidth: commsMatrixFrame.agentCount * commsMatrixFrame.cellWidth
+          contentHeight: commsMatrixFrame.agentCount * commsMatrixFrame.rowHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          ScrollBar.horizontal: ScrollBar {}
+          ScrollBar.vertical: ScrollBar {}
+
+          Grid {
+            columns: commsMatrixFrame.agentCount
+            Repeater {
+              model: commsMatrixFrame.agentCount * commsMatrixFrame.agentCount
+              delegate: Rectangle {
+                id: matrixCell
+                required property int index
+                readonly property int rowIndex: Math.floor(index / commsMatrixFrame.agentCount)
+                readonly property int colIndex: index % commsMatrixFrame.agentCount
+                readonly property var rowAgent: root.commsDisplayAgents[rowIndex]
+                readonly property var colAgent: root.commsDisplayAgents[colIndex]
+                readonly property bool diagonal: rowIndex === colIndex
+                readonly property bool linked: !diagonal && root.isCommsLinked(rowAgent, colAgent)
+                readonly property string key: diagonal ? "" : root.pairKey(rowAgent, colAgent)
+                readonly property bool pending: key.length > 0 && root.commsPendingKey === key
+
+                width: commsMatrixFrame.cellWidth
+                height: commsMatrixFrame.rowHeight
+                color: diagonal ? Qt.alpha(Color.mOnSurface, 0.035)
+                                : linked ? Qt.alpha(Color.mPrimary, 0.12)
+                                         : cellArea.containsMouse ? Qt.alpha(Color.mOnSurface, 0.07) : "transparent"
+                border.width: 1
+                border.color: linked ? Qt.alpha(Color.mPrimary, 0.32) : Qt.alpha(Color.mOnSurface, 0.08)
+
+                Rectangle {
+                  anchors.centerIn: parent
+                  width: 20 * Style.uiScaleRatio
+                  height: width
+                  radius: Style.radiusXS
+                  visible: !matrixCell.diagonal
+                  color: matrixCell.linked ? Color.mPrimary : "transparent"
+                  border.width: 1
+                  border.color: matrixCell.linked ? Color.mPrimary : Qt.alpha(Color.mOnSurface, 0.30)
+                  opacity: matrixCell.pending ? 0.45 : 1.0
+                  NText {
+                    anchors.centerIn: parent
+                    visible: matrixCell.linked
+                    text: "✓"
+                    font.weight: Style.fontWeightBold
+                    color: Color.mOnPrimary
+                  }
+                }
+                NText {
+                  anchors.centerIn: parent
+                  visible: matrixCell.diagonal
+                  text: "—"
+                  color: Qt.alpha(Color.mOnSurface, 0.22)
+                }
+                MouseArea {
+                  id: cellArea
+                  anchors.fill: parent
+                  enabled: !matrixCell.diagonal && root.commsPendingKey.length === 0
+                  hoverEnabled: true
+                  cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                  onClicked: root.toggleComms(matrixCell.rowAgent, matrixCell.colAgent)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+
     // ---- settings ----
     ColumnLayout {
       id: settingsCol
@@ -1529,8 +1892,11 @@ Item {
     // anti-jank rule 2).
     loadHideDelivered();
     syncAsks();
+    syncComms();
     if (root.asksMode)
       asksPanelHeight = computeAsksHeight();
+    if (root.commsMode)
+      commsPanelHeight = computeCommsHeight();
     if (root.mode === "rename") {
       if (main)
         renameInput.text = main.pendingRenameName;

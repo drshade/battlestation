@@ -7,8 +7,9 @@
 //! separated when piped. Nothing watches bsctl's state files but bsctl
 //! (contract in lib.rs).
 //!
-//! Three wake sources fold into one re-evaluation: inotify on the runtime
-//! agent-state dir, the persistent map/prefs dir AND the asks dir,
+//! File, compositor and timer wake sources fold into one re-evaluation:
+//! inotify on the runtime agent-state and comms dirs, persistent map/prefs
+//! dir and asks dir,
 //! Hyprland's `.socket2.sock` event stream, and a slow tick (session pids
 //! dying and markers aging are invisible to inotify). Emissions are deduped
 //! on the serialized result, so a subscriber is never woken for nothing.
@@ -38,7 +39,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::{asks, ipc, sys, ws};
+use crate::{asks, comms, ipc, sys, ws};
 
 /// Slow tick: inotify cannot see session pids dying or markers aging past
 /// the GC window, so re-evaluate unconditionally this often.
@@ -189,11 +190,13 @@ fn session(
     fs::create_dir_all(&files_dir)?;
     let asks_dir = asks::asks_dir();
     fs::create_dir_all(&asks_dir)?;
-    // One inotify fd, three watches: the runtime agent-state dir, the
-    // persistent map/prefs dir, and the asks dir (whose non-dot entries
-    // include the presence report). One trigger filter serves all of them
+    let comms_dir = comms::comms_dir();
+    fs::create_dir_all(&comms_dir)?;
+    // One inotify fd, four watches: the runtime agent-state dir, the
+    // persistent map/prefs dir, the asks dir (whose non-dot entries include
+    // the presence report), and the peer-comms dir. One trigger filter serves all of them
     // — each dir's protocol files are exactly its non-dot entries.
-    let ino = Inotify::new(&[&dir, &files_dir, &asks_dir])?;
+    let ino = Inotify::new(&[&dir, &files_dir, &asks_dir, &comms_dir])?;
     // Compositor events; None = degraded mode (no Hyprland), files-only.
     let mut sock = EventSock::connect();
     // Re-init entry: state may have moved while we were broken (dedupe

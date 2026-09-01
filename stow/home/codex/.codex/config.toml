@@ -22,6 +22,10 @@ command = "$HOME/.local/bin/bsctl agents set --kind codex thinking"
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
 command = "/bin/sh -c 'exec \"$HOME/.local/bin/bsctl\" asks inbox'"
+# Turn-boundary delivery for messages from human-linked peer sessions.
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "/bin/sh -c 'exec \"$HOME/.local/bin/bsctl\" comms inbox'"
 # Per-turn Deck steering: `asks inject` states the Deck regime every turn —
 # the presence nudge when the Deck switch is ON, the owner-disabled notice
 # when OFF (same envelope as `asks inbox` above; Claude wires the same verb).
@@ -64,7 +68,7 @@ matcher = "*"
 type = "command"
 command = "$HOME/.local/bin/bsctl agents set --kind codex subagent-stop"
 
-# battlestation MCP server: the asks queue + read-only world queries
+# battlestation MCP server: the Deck, Switchboard and world queries
 # (contract in ctl/src/lib.rs). Via sh -c because Codex execs MCP commands
 # directly (no shell), so $HOME would not expand in `command`.
 [mcp_servers.battlestation]
@@ -87,4 +91,16 @@ approval_mode = "approve"
 approval_mode = "approve"
 
 [mcp_servers.battlestation.tools.notify]
+approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.set_name]
+approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.list_peers]
+approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.send_message]
+approval_mode = "approve"
+
+[mcp_servers.battlestation.tools.check_messages]
 approval_mode = "approve"

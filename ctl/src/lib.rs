@@ -133,6 +133,50 @@
 //! default; `--submit` appends the Enter (the conservative default until
 //! submit behaviour is proven against each harness's input box, not a shell).
 //!
+//! # Agent communication (`bsctl comms` / the Switchboard)
+//!
+//! A private horizontal communication plane beside the Deck's vertical
+//! agent↔human queue. The human wires live top-level sessions together; linked
+//! agents may then discover and message each other. A link is ALWAYS TWO-WAY
+//! and non-transitive. `comms link` / `unlink` address both endpoints by
+//! workspace + agent name; they are CLI-only human/widget verbs and are
+//! deliberately absent from MCP. Each edge is stored internally once as a
+//! lexically sorted pair of private session ids, so duplicate or one-sided
+//! grants are impossible. Session ids are never part of the Switchboard's
+//! public CLI or MCP contract. Moving or renaming a workspace changes an
+//! agent's public address but never the underlying link.
+//!
+//! State has runtime lifetime in `${XDG_RUNTIME_DIR:-...}/battlestation-comms/`
+//! because every record addresses live sessions. `comms.json` is one atomic,
+//! flocked store: `{"next_id", "names": {session: name}, "links":
+//! [[session, session]], "messages": [{id, from, from_name, from_ws,
+//! from_workspace, to, body, created, delivered_at}]}`. The
+//! `from_*` fields snapshot the sender's `workspace / name` presentation at
+//! send time; the session ids remain private routing provenance. `comms get`
+//! exposes live public identities, public links and per-agent unread counts,
+//! never message bodies. Bodies are visible only
+//! to the addressed recipient through its identity-bound MCP call or inbox.
+//!
+//! MCP exposes `set_name` (whitespace-normalized, 40 character cap; returns
+//! the caller's public workspace + name identity), `list_peers` (direct live
+//! links only; public identities carry no derived label or session id), `send_message`
+//! (addresses a peer by workspace + name; 8,000 character cap; store first;
+//! rejects missing, ambiguous, unlinked or dead recipients; 50-unread cap per
+//! recipient), and `check_messages` (own unread mailbox only; collection stamps
+//! `delivered_at`). Claude and Codex also run
+//! the silent-tolerant `comms inbox` UserPromptSubmit hook, which collects and
+//! injects unread messages automatically. Every delivery is wrapped as
+//! peer-provided context and explicitly says it is not human/system authority.
+//!
+//! WAKE IS A TRIGGER, NOT DELIVERY. After persisting, `send_message` checks the
+//! recipient's live status. A `waiting` recipient is nudged through the existing
+//! Kitty session route with one fixed submitted line; peer-controlled body text
+//! is never typed into another terminal. The resulting UserPromptSubmit runs
+//! `comms inbox`, which performs the actual delivery. Thinking/tooling sessions
+//! are not interrupted; their mailbox waits for the next turn. Socket-less
+//! waiting sessions likewise keep the durable message even when the best-effort
+//! wake cannot fire.
+//!
 //! # The asks queue (`bsctl asks`)
 //!
 //! Attention requests: agents post asks — questions, review requests,
@@ -287,8 +331,8 @@
 //!
 //! # MCP (`bsctl mcp --kind <k>`)
 //!
-//! A stdio MCP server giving every harness the asks queue and read-only
-//! world queries — one server per session, spawned by the harness's MCP
+//! A stdio MCP server giving every harness the asks queue, the human-wired
+//! Switchboard and world queries — one server per session, spawned by the harness's MCP
 //! config the way the hooks spawn `agents set`, with the same `--kind`
 //! discriminator. Hand-rolled JSON-RPC 2.0 over stdio lines (no SDK: the
 //! needed surface is five requests — initialize, ping, tools/list,
@@ -328,9 +372,9 @@
 //! descriptions tell agents to get_ask before ever RE-RAISING an ask
 //! with the human), `update_ask` (urgency/estimate only, own
 //! asks only — the two-namespaces rule enforced at the tool boundary),
-//! `world` (the status object; the MVP deliberately exposes NO mutating
-//! world tools — that needs the consent design), `whoami` (the server's
-//! resolved identity, above). The tool DESCRIPTIONS
+//! `world` (the status object; no general desktop mutation), `whoami` (the
+//! server's resolved identity, above), and the four communication tools in the
+//! Switchboard section. The tool DESCRIPTIONS
 //! carry the mandatory-post norm — they are the one prompt surface every
 //! session of every harness receives — as does the initialize
 //! `instructions` field; their wording is contract, not copy.
@@ -489,6 +533,7 @@
 //!   "workspaces": [{ws, bs, name, display, windows, active, pref}],
 //!   "prefs": [{ws, display, present, live}],
 //!   "agents": [ ...exactly `agents get`'s rows... ],
+//!   "comms": {agents: [...], links: [...]},
 //!   "usage": { ...exactly `agents usage`'s object... },
 //!   "human": {state, idle_secs}}`
 //!
@@ -501,7 +546,7 @@
 //! across a compositor restart. `prefs` is file truth and always present,
 //! but its annotations degrade to null without a compositor to ask;
 //! `asks` is file truth ([] when the queue is empty, never null),
-//! `agents` is file+proc truth, and `human` is file truth (state
+//! `agents` and `comms` are file+proc truth, and `human` is file truth (state
 //! "unknown" before hypridle's first report; `idle_secs` is 0 while
 //! active — the direct answer, never null-as-no-data — the accumulated
 //! duration while idle, and null only while unknown) — none of the
@@ -733,6 +778,7 @@
 
 pub mod agents;
 pub mod asks;
+pub mod comms;
 pub mod display;
 pub mod ipc;
 pub mod mcp;

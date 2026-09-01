@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::ws::{BsRow, bs_join, displays_from, human_name, live_ids, pref_rows, pref_rows_json};
-use crate::{agents, asks, ipc, presence, proto, sessions, sys, usage, ws};
+use crate::{agents, asks, comms, ipc, presence, proto, sessions, sys, usage, ws};
 
 /// The world, queried live. Session scan first (it sweeps), compositor
 /// snapshots second; the map, prefs and asks files are read lock-free
@@ -23,6 +23,7 @@ pub fn snapshot() -> Value {
     let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
     let wsj = ipc::json("workspaces");
     let mons = ipc::json("monitors");
+    let comms = comms::public_snapshot_from(&recs, wsj.as_ref());
     assemble(
         recs,
         wsj.as_ref(),
@@ -31,6 +32,7 @@ pub fn snapshot() -> Value {
         &ws::load_prefs(),
         usage::snapshot(None),
         asks::rows_json(None),
+        comms,
         presence::human_json(presence::read().as_ref(), sys::now_f64()),
     )
 }
@@ -50,6 +52,7 @@ pub fn assemble(
     prefs: &BTreeMap<i64, String>,
     usage: Value,
     asks: Vec<Value>,
+    comms: Value,
     human: Value,
 ) -> Value {
     let comp = match (wsj, mons) {
@@ -83,6 +86,9 @@ pub fn assemble(
         "workspaces": workspaces,
         "prefs": prefs_v,
         "agents": Value::Array(agents::agent_rows(recs, None, None)),
+        // File+session truth: every live public endpoint and every live link.
+        // Names may be null; unnamed sessions cannot be linked.
+        "comms": comms,
         // Cache truth like prefs is file truth: {} when nothing is known,
         // never null — an unknown usage is not a lost compositor.
         "usage": usage,
@@ -332,6 +338,19 @@ mod tests {
         json!({"state": "unknown", "idle_secs": Value::Null})
     }
 
+    fn fixture_comms() -> Value {
+        json!({
+            "agents": [
+                {"workspace": "corp", "name": "builder", "kind": "claude", "status": "thinking", "unread": 0},
+                {"workspace": "ws 3", "name": "reviewer", "kind": "codex", "status": "waiting", "unread": 1},
+            ],
+            "links": [{
+                "a": {"workspace": "corp", "name": "builder"},
+                "b": {"workspace": "ws 3", "name": "reviewer"},
+            }],
+        })
+    }
+
     #[test]
     fn assemble_joins_all_sections() {
         let (recs, wsj, mons, prefs) = fixtures();
@@ -343,6 +362,7 @@ mod tests {
             &prefs,
             fixture_usage(),
             fixture_asks(),
+            fixture_comms(),
             json!({"state": "idle", "idle_secs": 300}),
         );
         // human rides the schema verbatim (file truth, shaped by presence)
@@ -376,6 +396,9 @@ mod tests {
         // agents ride the published schema
         assert_eq!(w["agents"][0]["session"], "s-1");
         assert_eq!(w["agents"][0]["subagents"][0]["id"], "a1");
+        // comms rides the public Switchboard schema verbatim
+        assert_eq!(w["comms"]["agents"][0]["name"], "builder");
+        assert_eq!(w["comms"]["links"][0]["b"]["name"], "reviewer");
         // usage is passed through kind-indexed; {} would mean nothing known
         assert_eq!(w["usage"]["claude"]["sessionPct"], 34);
     }
@@ -391,6 +414,7 @@ mod tests {
             &prefs,
             json!({}),
             vec![],
+            fixture_comms(),
             fixture_human_unknown(),
         );
         // human is file truth: "unknown" is honest absence, never null
@@ -408,6 +432,7 @@ mod tests {
         assert_eq!(w["prefs"][0]["live"], Value::Null);
         // agents are file+proc truth, never nulled
         assert_eq!(w["agents"][0]["session"], "s-1");
+        assert_eq!(w["comms"]["links"].as_array().unwrap().len(), 1);
         // usage is cache truth: {} (nothing known), never null
         assert_eq!(w["usage"], json!({}));
     }
@@ -425,6 +450,7 @@ mod tests {
             &prefs,
             json!({}),
             vec![],
+            fixture_comms(),
             fixture_human_unknown(),
         );
         assert_eq!(
@@ -444,6 +470,7 @@ mod tests {
             &prefs,
             fixture_usage(),
             fixture_asks(),
+            fixture_comms(),
             json!({"state": "idle", "idle_secs": 300}),
         );
         assert_eq!(
@@ -488,6 +515,7 @@ mod tests {
             &BTreeMap::new(),
             json!({}),
             vec![],
+            fixture_comms(),
             fixture_human_unknown(),
         );
         let t = render_text(&w);

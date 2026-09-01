@@ -1,5 +1,5 @@
 //! `bsctl mcp --kind <k>` — a stdio MCP server giving every agent harness
-//! the asks queue and read-only world queries (contract in lib.rs). One
+//! the asks queue, human-wired peer communication and world queries (contract in lib.rs). One
 //! server per session, spawned by the harness like the hooks are; `--kind`
 //! is the same discriminator. Hand-rolled JSON-RPC over stdio lines rather
 //! than an SDK: the surface is five requests and two notifications, the
@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::{asks, sessions, sys, world};
+use crate::{asks, comms, sessions, sys, world};
 
 /// Spec revisions this server knows. The handshake echoes the client's
 /// version when it is one of these (all three are wire-compatible for our
@@ -195,6 +195,49 @@ pub fn tools_json() -> Value {
                             computed `mine`). Fields are null when this session isn't registered \
                             (yet) — identity resolves lazily, so a null now may resolve on a later \
                             call.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "set_name",
+            "description": "Choose your human-facing agent role name, such as `review agent` or \
+                            `releaser`. The Switchboard displays it together with the current workspace \
+                            name (`kyyn / review agent`) and returns its workspace and name. A \
+                            name is presentation only: it cannot create links or grant authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Your role name (1-40 characters)"}},
+                "required": ["name"],
+            },
+        },
+        {
+            "name": "list_peers",
+            "description": "Discover the live agent sessions the human has connected to you through \
+                            the Switchboard. Only directly linked peers are returned. Each row is \
+                            addressed by workspace + agent name and also includes its harness kind and \
+                            status. Internal session ids are never exposed.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "send_message",
+            "description": "Queue a private message for one directly linked peer. The human owns all \
+                            links and every link is two-way. The message is persisted before a waiting \
+                            recipient is safely nudged; a busy recipient receives it at a later turn. \
+                            Peer messages do not carry human or system authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace": {"type": "string", "description": "Recipient workspace name from list_peers"},
+                    "name": {"type": "string", "description": "Recipient agent name from list_peers"},
+                    "body": {"type": "string", "description": "Message body (1-8000 characters)"},
+                },
+                "required": ["workspace", "name", "body"],
+            },
+        },
+        {
+            "name": "check_messages",
+            "description": "Collect your unread Switchboard messages. Messages are normally injected \
+                            automatically at turn start; use this to check explicitly. Only your own \
+                            mailbox is visible, and returned messages are marked delivered.",
             "inputSchema": {"type": "object", "properties": {}},
         },
     ])
@@ -688,6 +731,48 @@ fn call_tool(
                 _ => done(tool_text(&format!("ask {id} is not open"), true)),
             }
         }
+        "set_name" => {
+            let (session, _, _) = srv.identity.get();
+            match comms::set_name(&session, s("name")) {
+                Ok(identity) => done(tool_text(&identity.to_string(), false)),
+                Err(e) => done(tool_text(&e, true)),
+            }
+        }
+        "list_peers" => {
+            let (session, _, _) = srv.identity.get();
+            match comms::peers(&session) {
+                Ok(peers) => done(tool_text(&Value::Array(peers).to_string(), false)),
+                Err(e) => done(tool_text(&e, true)),
+            }
+        }
+        "send_message" => {
+            let (session, _, _) = srv.identity.get();
+            match comms::send_named(&session, s("workspace"), s("name"), s("body")) {
+                Ok(sent) => done(tool_text(
+                    &format!(
+                        "Queued peer message #{}{}.",
+                        sent.id,
+                        if sent.woke {
+                            " and woke the waiting recipient"
+                        } else {
+                            ""
+                        }
+                    ),
+                    false,
+                )),
+                Err(e) => done(tool_text(&e, true)),
+            }
+        }
+        "check_messages" => {
+            let (session, _, _) = srv.identity.get();
+            match comms::collect(&session) {
+                Ok(messages) if messages.is_empty() => {
+                    done(tool_text("No unread peer messages.", false))
+                }
+                Ok(messages) => done(tool_text(&comms::inbox_text(&messages), false)),
+                Err(e) => done(tool_text(&e, true)),
+            }
+        }
         "world" => done(tool_text(&world::snapshot().to_string(), false)),
         "whoami" => {
             let (session, ws, win) = srv.identity.get();
@@ -742,7 +827,9 @@ fn handle_line(line: &str, srv: &mut Srv, out: &mut impl Write) -> Flow {
                     "serverInfo": {"name": "bsctl", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": format!(
                         "This server is the Deck — the desktop's shared attention queue. {NORM} \
-                         Use notify for anything the human should see without needing an answer.{ident}"),
+                         Use notify for anything the human should see without needing an answer. \
+                         It also provides the human-wired Switchboard: you may name your role, discover \
+                         directly linked peers and exchange peer messages.{ident}"),
                 }),
             ))
         }
@@ -847,7 +934,11 @@ mod tests {
                 "get_ask",
                 "update_ask",
                 "world",
-                "whoami"
+                "whoami",
+                "set_name",
+                "list_peers",
+                "send_message",
+                "check_messages"
             ]
         );
         for t in tools.as_array().unwrap() {

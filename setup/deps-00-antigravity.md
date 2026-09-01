@@ -13,7 +13,7 @@ The `antigravity` package owns two files under `~/.gemini/config/`:
 --kind agy …`; the protocol contract is in `ctl/src/lib.rs` — agy's hook
 payloads are camelCase protojson keyed by `conversationId`, which bsctl
 accepts as the session key), and `mcp_config.json`, registering the
-battlestation MCP server (the asks queue; via `sh -c` because agy execs MCP
+battlestation MCP server (the Deck, Switchboard and world queries; via `sh -c` because agy execs MCP
 commands directly and would not expand `$HOME`). agy rewrites neither at
 runtime, so no clean filter is needed.
 
@@ -32,9 +32,9 @@ runtime, so no clean filter is needed.
 - **No turn-boundary answer injection.** agy's hook surface has no
   UserPromptSubmit event and no context-injection output (no
   `additionalContext` anywhere in the binary, probed 1.0.16), so the
-  `bsctl asks inbox` delivery hook the other harnesses run cannot be
-  wired: agy agents collect late answers via `get_ask` only (the norm the
-  tool descriptions carry).
+  inbox delivery hooks the other harnesses run cannot be wired: agy agents
+  collect late answers via `get_ask` and peer messages via `check_messages`
+  (the tool descriptions carry both contracts).
 - **Between-turns status is approximate.** agy fires a trailing PostToolUse
   (→ thinking) after Stop — which is why Stop maps to `waiting` rather than
   `clear` (a clear would be resurrected as "thinking" moments later). An

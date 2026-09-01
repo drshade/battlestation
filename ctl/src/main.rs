@@ -44,6 +44,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AsksCmd,
     },
+    /// Human-wired, two-way communication links between agent sessions
+    Comms {
+        #[command(subcommand)]
+        cmd: CommsCmd,
+    },
     /// Human presence: hypridle's idle listener reports, agents read
     Presence {
         #[command(subcommand)]
@@ -57,7 +62,7 @@ enum Cmd {
         #[arg(long)]
         stream: bool,
     },
-    /// MCP server over stdio: the asks queue + read-only world queries
+    /// MCP server over stdio: the Deck, Switchboard and world queries
     Mcp {
         /// The harness kind this server serves (resolves the session identity)
         #[arg(long)]
@@ -741,6 +746,47 @@ enum AsksOrderCmd {
     Get,
 }
 
+// ---- comms -----------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum CommsCmd {
+    /// Widget-facing names, symmetric links and unread counts (no bodies)
+    Get {
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+        /// Keep emitting whenever communication state changes
+        #[arg(long)]
+        stream: bool,
+    },
+    /// Create one two-way link (human/widget surface; never exposed to MCP)
+    Link {
+        #[arg(long)]
+        a_workspace: String,
+        #[arg(long)]
+        a_name: String,
+        #[arg(long)]
+        b_workspace: String,
+        #[arg(long)]
+        b_name: String,
+    },
+    /// Remove one two-way link (idempotent)
+    Unlink {
+        #[arg(long)]
+        a_workspace: String,
+        #[arg(long)]
+        a_name: String,
+        #[arg(long)]
+        b_workspace: String,
+        #[arg(long)]
+        b_name: String,
+    },
+    /// Turn-boundary peer-message delivery hook (always exits 0)
+    Inbox {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+}
+
 // ---- presence --------------------------------------------------------------------
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -1041,6 +1087,53 @@ fn main() {
             AsksCmd::Deck { args } => bsctl::asks::deck(&args),
             AsksCmd::Inject { args } => bsctl::asks::inject(&args),
             AsksCmd::Retrigger { args } => bsctl::asks::retrigger(&args),
+        },
+        Cmd::Comms { cmd } => match cmd {
+            CommsCmd::Get { format, stream } => {
+                if stream {
+                    let json = format == Format::Json;
+                    bsctl::stream::run(
+                        move || {
+                            Ok(if json {
+                                bsctl::comms::public_snapshot().to_string()
+                            } else {
+                                // The text view is primarily a CLI aid. Keep
+                                // stream framing consistent via one compact
+                                // JSON value rather than printing internally.
+                                bsctl::comms::public_snapshot().to_string()
+                            })
+                        },
+                        framing(format),
+                    )
+                } else {
+                    bsctl::comms::print_snapshot(format == Format::Json)
+                }
+            }
+            CommsCmd::Link {
+                a_workspace,
+                a_name,
+                b_workspace,
+                b_name,
+            } => match bsctl::comms::link_named(&a_workspace, &a_name, &b_workspace, &b_name) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("bsctl comms link: {e}");
+                    1
+                }
+            },
+            CommsCmd::Unlink {
+                a_workspace,
+                a_name,
+                b_workspace,
+                b_name,
+            } => match bsctl::comms::unlink_named(&a_workspace, &a_name, &b_workspace, &b_name) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("bsctl comms unlink: {e}");
+                    1
+                }
+            },
+            CommsCmd::Inbox { args } => bsctl::comms::inbox(&args),
         },
         Cmd::Presence { cmd } => match cmd {
             PresenceCmd::Set { state, already } => bsctl::presence::set(
