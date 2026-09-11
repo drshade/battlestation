@@ -148,6 +148,98 @@ hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipb
 -- time. (Supersedes Deck ask #22's Super+\.)
 hl.bind("F12", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-dictation toggle"), { description = "Dictate (tap: start / stop)" })
 
+-- 9. Tabs · Hyper
+
+-- Tab groups ("groups" in Hyprland): a stack of tiled windows in one tile
+-- with a tab bar. The whole model is the mouse drag, no keyboard verbs:
+--   HYPER + drag body       -> move the tile (a stack moves as one)   [native]
+--   HYPER + drag a tab      -> pull that window out into its own tile [native]
+--   HYPER + SHIFT + drag    -> drop onto a tile: tab them together, or join
+--                              the stack that is already there        [below]
+-- Hyprland has no drop-creates-group and its drop-merge is not modifier
+-- aware, so the SHIFT drop is done here. decorations.lua turns off
+-- drag_into_group and auto_group so a plain drop and a freshly opened
+-- window never form tabs by accident.
+--
+-- Why ONE function bind that owns the drag, and a sampling timer:
+--  * Hyprland ends an active drag at the very start of a mouse-button event,
+--    BEFORE it runs any bind for that release (ensureMouseBindState). So no
+--    release bind can hit-test the tile under the pointer: by then the drop
+--    has happened and dwindle has put the dropped window AT the cursor. The
+--    only reliable way to know what was underneath is to watch during the
+--    drag and use the last tile seen.
+--  * A function bind that dispatches window.drag() is marked releasePending
+--    by Hyprland, so it is called again on release — press starts the drag
+--    and the sampler, release stops the sampler and groups. Press/release are
+--    told apart by the in-flight state (function binds get no arguments).
+
+-- The tiled, visible window under the cursor on the monitor under the
+-- cursor, ignoring `except`. Non-current stack members report visible=false
+-- (NOT hidden=true, verified live) and share the stack's geometry, so they
+-- must be skipped or the hit is ambiguous. A window being dragged is floating
+-- for the duration, so it is skipped too.
+local function tile_under_cursor(except)
+    local p = hl.get_cursor_pos()
+    local mon = hl.get_monitor_at_cursor()
+    if not p or not mon then return nil end
+    local ws = mon.active_special_workspace or mon.active_workspace
+    if not ws then return nil end
+    for _, w in ipairs(hl.get_workspace_windows(ws)) do
+        if (not except or w.address ~= except.address) and not w.floating and w.visible
+            and p.x >= w.at.x and p.x < w.at.x + w.size.x
+            and p.y >= w.at.y and p.y < w.at.y + w.size.y then
+            return w
+        end
+    end
+    return nil
+end
+
+local tab_drag = { window = nil, target = nil } -- in flight while `window` is set
+local tab_sampler = hl.timer(function()
+    if not tab_drag.window then return end
+    tab_drag.target = tile_under_cursor(tab_drag.window) -- nil over empty space / self
+end, { timeout = 40, type = "repeat" })
+tab_sampler:set_enabled(false)
+
+hl.bind(hyperMod .. " + SHIFT + mouse:272", function()
+    if not tab_drag.window then
+        -- PRESS: start the native drag (focuses the grabbed window), then follow the pointer.
+        hl.dispatch(hl.dsp.window.drag())
+        tab_drag.window = hl.get_active_window()
+        tab_drag.target = nil
+        tab_sampler:set_enabled(true)
+        return
+    end
+    -- RELEASE: the drop already happened; pair with the last tile seen under the pointer.
+    tab_sampler:set_enabled(false)
+    local dropped, target = tab_drag.window, tab_drag.target
+    tab_drag.window, tab_drag.target = nil, nil
+    hl.dispatch(hl.dsp.window.drag()) -- release half of the drag dispatcher (no-op if already ended)
+    if not dropped or not target or target.address == dropped.address then return end
+    hl.timer(function()
+        if not target.group then
+            hl.dispatch(hl.dsp.group.toggle({ window = "address:" .. target.address }))
+        end
+        if target.group and not target.group.locked then
+            target.group:add(dropped)
+        end
+    end, { timeout = 30, type = "oneshot" })
+end, { description = "Drag window onto a tile to tab them; onto a stack to join it (mouse)" })
+
+-- Reaper: a stack whose last companion was pulled out is still a group of
+-- one (blue border, and a tab bar until disable_when_only hides it). Nothing
+-- in the Lua event set announces group membership changes, so poll: once a
+-- second, dissolve any single-member group. Cheap (a handful of windows) and
+-- nothing here ever creates a 1-window group on purpose -- the drop handler
+-- toggles and adds within one tick.
+hl.timer(function()
+    for _, w in ipairs(hl.get_windows()) do
+        if w.group and w.group.size == 1 then
+            hl.dispatch(hl.dsp.group.toggle({ window = "address:" .. w.address }))
+        end
+    end
+end, { timeout = 1000, type = "repeat" })
+
 -- 8. Hardware
 
 -- Audio
