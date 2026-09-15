@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Browser (here)
+Comment=Open links in the Firefox window on the current workspace
+Exec=/home/tom/.config/hypr/scripts/browser-here.sh %u
+Icon=firefox
+Terminal=false
+NoDisplay=true
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=false

@@ -2,7 +2,8 @@
 --   SUPER = GO  — change where you're looking; never creates/moves a window.
 --   HYPER = DO  — launch apps, act on the focused window, act on the system.
 --   SHIFT       — "…with the window" suffix (e.g. send-and-follow).
---   ALT / CTRL  — almost nothing; reserved for app-internal + rare exceptions.
+--   ALT / CTRL  — almost nothing; reserved for app-internal + rare exceptions
+--                 (SUPER+ALT+arrows = tabs is the one in use).
 -- The number row is the whole story for WORKSPACES:
 --   SUPER+N go there · HYPER+N throw the window there & follow ·
 --   HYPER+SHIFT+N throw it & stay.
@@ -61,7 +62,9 @@ hl.bind(mainMod .. " + N",            hl.dsp.exec_cmd(noctCall .. "notifications
 -- Opens in the focused window's cwd (term-here.sh walks to the foreground
 -- process and cds there); falls back to $HOME for non-terminal windows.
 hl.bind(hyperMod .. " + T",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/term-here.sh " .. TERMINAL), { description = "Open terminal" })
-hl.bind(hyperMod .. " + B",         hl.dsp.exec_cmd(launchPrefix .. BROWSER),      { description = "Open browser" })
+-- Focuses the browser window already on this workspace, or opens a new one
+-- here (browser-here.sh — also the default browser for links, see setup/).
+hl.bind(hyperMod .. " + B",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/browser-here.sh"), { description = "Open browser (here)" })
 -- Opens the file manager at the focused terminal's cwd (dolphin-here.sh via
 -- focused-cwd.sh); opens at its default location otherwise.
 hl.bind(hyperMod .. " + N",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/dolphin-here.sh"), { description = "Open file manager" })
@@ -225,6 +228,12 @@ hl.bind(hyperMod .. " + SHIFT + mouse:272", function()
         end
     end, { timeout = 30, type = "oneshot" })
 end, { description = "Drag window onto a tile to tab them; onto a stack to join it (mouse)" })
+
+-- Switch tabs within the focused stack. SUPER+arrows already walk windows;
+-- adding ALT walks the tabs (ALT's one sanctioned exception, see header).
+-- No-ops on an ungrouped window.
+hl.bind(mainMod .. " + ALT + Left",  hl.dsp.group.prev(), { description = "Previous tab" })
+hl.bind(mainMod .. " + ALT + Right", hl.dsp.group.next(), { description = "Next tab" })
 
 -- Reaper: a stack whose last companion was pulled out is still a group of
 -- one (blue border, and a tab bar until disable_when_only hides it). Nothing
