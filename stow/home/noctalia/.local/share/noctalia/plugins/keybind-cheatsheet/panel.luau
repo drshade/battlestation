@@ -164,12 +164,30 @@ local KEY_LABELS = {
   btn_extra = "Mouse Extra",
 }
 
+local MOUSE_BUTTONS = {
+  [272] = "LMB",
+  [273] = "RMB",
+  [274] = "MMB",
+  [275] = "Mouse 4",
+  [276] = "Mouse 5",
+  [277] = "Mouse Fwd",
+  [278] = "Mouse Back",
+}
+
 local function formatKey(key)
   if key == nil or key == "" then return "" end
   local exact = KEY_LABELS[key]
   if exact ~= nil then return exact end
   local lowered = KEY_LABELS[lower(key)]
   if lowered ~= nil then return lowered end
+  -- Pointer buttons by evdev code (what Hyprland reports): the three
+  -- buttons everyone knows by name, side buttons and the wheel after.
+  local button = key:match("^mouse:(%d+)$") or key:match("^[Mm]ouse (%d+)$")
+  if button ~= nil then
+    local named = MOUSE_BUTTONS[tonumber(button)]
+    if named ~= nil then return named end
+    return "Mouse " .. button
+  end
   return key:gsub("^mouse:", "Mouse ")
 end
 
