@@ -294,13 +294,16 @@ local function render(now)
       props.fill = lib.roleFill(key)
     end
     table.insert(sig, `{wsId}|{role}|{label}|{props.opacity}`)
-    local pill = ui.row(props, children)
     if cfg.barDrag then
+      -- The source wraps the whole pill: pointer cursor (not a grip), and the
+      -- pill's tooltip rides on the source, whose input area owns hover.
+      local tip = props.tooltip
+      props.tooltip = nil
       table.insert(pills, gapZone(#pills // 2 + 1))
       table.insert(pills, ui.dragSource({ key = `drag-{wsId}`, dragType = DRAG, payload = tostring(wsId),
-        previewAncestor = 0, liftFromLayout = true, tooltip = "Drag to reorder" }, { pill }))
+        previewAncestor = 0, liftFromLayout = true, grabCursor = false, tooltip = tip }, { ui.row(props, children) }))
     else
-      table.insert(pills, pill)
+      table.insert(pills, ui.row(props, children))
     end
   end
   if cfg.barDrag then
