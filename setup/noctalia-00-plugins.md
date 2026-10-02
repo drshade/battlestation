@@ -14,6 +14,17 @@ Two kinds, by where the code lives:
 **Fresh machine:** nothing beyond stowing. The first shell start clones the
 catalogs and installs the enabled catalog plugins.
 
+Tracked exception — a catalog plugin vendored under a local id:
+
+- `keybind-cheatsheet` (`battlestation/keybind-cheatsheet`, from
+  `kenn/keybind-cheatsheet` 0.2.8): carries one patch, a `modifier_labels`
+  setting so the MOD3 pills read "Hyper". A catalog id is re-exported from
+  its checkout on every enable, so a patch cannot live on the installed copy
+  and a same-id local copy never wins — hence the rename. **De-vendor once
+  upstream ships the setting**: switch `plugins.toml` (enabled list +
+  `[plugin_settings]`) and `bar.toml` back to `kenn/keybind-cheatsheet`,
+  `git rm -r` the directory, delete this entry.
+
 Writing one: `plugin.toml` manifest + Luau entry scripts; the API reference is
 `noctalia.d.luau` in the official-plugins repo. Scripts hot-reload on save;
 manifest changes need `noctalia msg plugins disable <id>` then `enable <id>`.

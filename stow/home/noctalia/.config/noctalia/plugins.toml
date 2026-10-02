@@ -9,7 +9,7 @@ enabled = [
     "battlestation/workspaces",
     "battlestation/dictation",
     "noctalia/wallhaven",
-    "kenn/keybind-cheatsheet",
+    "battlestation/keybind-cheatsheet",
 ]
 
 # battlestation/workspaces: pill colours are palette roles (primary /
@@ -25,3 +25,8 @@ active_ms = 2500
 wait_s = 30
 jitter = 0.3
 hide_delivered = true
+
+# keybind-cheatsheet (vendored, see its plugin.toml): Caps fires as MOD3
+# here (input.lua); label it by the name the keybind model uses.
+[plugin_settings."battlestation/keybind-cheatsheet"]
+modifier_labels = { MOD3 = "Hyper" }

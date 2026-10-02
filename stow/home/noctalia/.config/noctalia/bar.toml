@@ -18,7 +18,7 @@ center = [
     "battlestation/workspaces:switchboard-badge",
     "battlestation/dictation:mic",
 ]
-end = ["media", "wallpaper", "notifications", "volume", "battery", "screenshot", "kenn/keybind-cheatsheet:keybinds", "control-center"]
+end = ["media", "wallpaper", "notifications", "volume", "battery", "screenshot", "battlestation/keybind-cheatsheet:keybinds", "control-center"]
 
 [[bar.default.capsule_group]]
 id = "sysmon"
