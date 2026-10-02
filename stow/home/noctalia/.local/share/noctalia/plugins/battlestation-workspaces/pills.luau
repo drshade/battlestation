@@ -30,8 +30,11 @@ local function loadCfg()
 end
 loadCfg()
 
-local D = 18 -- bot size (px)
-local SUB = 0.6 -- sub-bot size vs its commander
+-- Bot size: the kind assets are 24-unit pixel-art SVGs, so 24px maps one
+-- grid unit to one pixel on a 1x display — anything else smears the edges.
+-- Sub-bots are exactly half (12px), still on the grid.
+local D = 24
+local SUB = 0.5
 local TICK = 100 -- emote engine resolution (ms)
 
 -- ---- bots: stable identity per session -----------------------------------------
@@ -220,7 +223,7 @@ local function render(now)
     end
     -- One weight for every pill: bold text is wider, and a width change on
     -- focus re-centres the whole row (the active state is colour only).
-    table.insert(children, ui.label({ text = label, color = fg, fontSize = 12, fontWeight = "medium" }))
+    table.insert(children, ui.label({ text = label, color = fg, fontWeight = "medium" }))
     for _, sid in ipairs(sidsByWs[tostring(w.ws)] or {}) do
       local a = bySid[sid]
       local subs = a.subagents or {}
@@ -234,7 +237,7 @@ local function render(now)
     end
     local wsId = w.ws
     local props = {
-      key = `ws-{wsId}`, gap = 5, paddingH = 7, align = "center", radius = 9, minHeight = 22,
+      key = `ws-{wsId}`, gap = 4, paddingH = 7, align = "center", radius = 10, minHeight = 24,
       opacity = if role == "focused" and not focusedMon then 0.7 else 1.0,
       tooltip = if (w.name or "") ~= "" then `ws {w.ws} · {w.display or "?"} · {w.windows or 0} windows` else nil,
       onClick = function()
