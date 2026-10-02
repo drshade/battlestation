@@ -259,7 +259,7 @@ local function row(r, openIdx)
       ui.glyph({ name = "grip-vertical", size = 14, color = "on_surface_variant" }),
     }))
   else
-    table.insert(head, ui.box({ width = 20, height = 24 }))
+    table.insert(head, ui.row({ width = 20, height = 24 }))
   end
   table.insert(head, ui.box({ width = 8, height = 8, radius = 4, fill = dot }))
   table.insert(head, ui.glyph({ name = typeGlyph[r.type] or "question-mark", size = 14, color = "on_surface_variant" }))

@@ -182,7 +182,13 @@ local function botNode(sid, now, scale, commander)
   end
   local title = a.title
   if title == nil or title == "" then title = lib.kindLabel(a.kind) end
-  return ui.image({ key = `bot-{sid}`, path = path, width = size, height = size, fit = "contain", tooltip = title }), path .. size
+  -- Fixed-size slot around a variable-size image: an emote must never change
+  -- the pill's width, or the whole bar centre shifts on every hop.
+  local slot = math.floor(D * scale + 0.5) + 2
+  local node = ui.row({ key = `slot-{sid}`, width = slot, height = slot, align = "center", justify = "center" }, {
+    ui.image({ key = `bot-{sid}`, path = path, width = size, height = size, fit = "contain", tooltip = title }),
+  })
+  return node, path .. size
 end
 
 local function render(now)
