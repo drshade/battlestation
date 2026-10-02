@@ -115,9 +115,15 @@ end
 applyAgents(agents)
 
 -- ---- this bar's view of the compositor ------------------------------------------
+-- barWidget.outputName() is only bound during host-driven calls (update,
+-- clicks); inside a state.watch callback it is nil, and a render that read
+-- it there failed OPEN — every workspace on every bar for one tick, a
+-- visible width blip on each focus change. So the name is cached from
+-- update() and nothing renders before it is known.
+local myOutput = nil
 local lastActive = nil
 local function myDisplay()
-  local mine = barWidget.outputName() or ""
+  local mine = myOutput or ""
   for _, d in ipairs(displays) do
     if d.name == mine then return d end
   end
@@ -127,7 +133,7 @@ end
 -- Visible = global order filtered to this output (unknown fails open), then
 -- when hide_trailing, trimmed after the last occupied-or-active position.
 local function visibleWorkspaces(disp)
-  local mine = barWidget.outputName() or ""
+  local mine = myOutput or ""
   local activeWs = if disp and not disp.specialShowing then disp.activeWs else -1
   local vis = {}
   for _, w in ipairs(workspaces) do
@@ -192,6 +198,7 @@ local function botNode(sid, now, scale, commander)
 end
 
 local function render(now)
+  if myOutput == nil then return end
   local disp = myDisplay()
   local vis, activeWs = visibleWorkspaces(disp)
   local focusedMon = disp == nil or disp.focused == true
@@ -202,13 +209,18 @@ local function render(now)
     local key = if role == "focused" then cfg.focused elseif role == "occupied" then cfg.occupied else cfg.empty
     local label = pillLabel(w)
     local children = {}
+    -- Outline mode: the border alone carries the state and the label keeps
+    -- constant props, so a focus change never re-measures text (a re-measure
+    -- blips the row width for a frame). Filled mode needs the contrast swap.
     local fg
     if cfg.outline then
-      fg = if key == "grey" or key == "none" then "on_surface" else key
+      fg = "on_surface"
     else
       fg = lib.roleOn(key)
     end
-    table.insert(children, ui.label({ text = label, color = fg, fontSize = 12, fontWeight = if role == "focused" then "bold" else "medium" }))
+    -- One weight for every pill: bold text is wider, and a width change on
+    -- focus re-centres the whole row (the active state is colour only).
+    table.insert(children, ui.label({ text = label, color = fg, fontSize = 12, fontWeight = "medium" }))
     for _, sid in ipairs(sidsByWs[tostring(w.ws)] or {}) do
       local a = bySid[sid]
       local subs = a.subagents or {}
@@ -248,6 +260,7 @@ end
 -- ---- emote engine + refresh ---------------------------------------------------------
 function update()
   noctalia.setUpdateInterval(TICK)
+  myOutput = barWidget.outputName() or myOutput
   local now = noctalia.nowMs()
   for sid, b in pairs(bots) do
     if b.face and now >= (b.faceUntil or 0) then b.face = nil end
