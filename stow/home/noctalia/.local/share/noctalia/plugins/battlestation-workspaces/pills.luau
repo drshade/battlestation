@@ -210,7 +210,7 @@ end
 -- the row mid-drag (it sits before or after whichever pill the pointer is on).
 local function gapZone(i)
   return ui.dropZone({ key = `gap-{i}`, accepts = { DRAG }, value = tostring(i), onDrop = "onPillDropped",
-    width = 4, height = 22, radius = 2, expandOnDrag = true, hitSlop = 96, fill = "primary/0.15" })
+    width = 4, height = 22, radius = 2, expandOnDrag = true, hitSlop = 96 })
 end
 
 -- ---- render ----------------------------------------------------------------------
