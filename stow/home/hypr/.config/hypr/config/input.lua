@@ -10,6 +10,12 @@ hl.config({
         -- sane bounds; raise delay if you get accidental doubled keystrokes.
         repeat_rate = 60,
         repeat_delay = 220,
+        touchpad = {
+            -- macOS-style clickfinger: physical click with 1 finger = left,
+            -- 2 fingers = right, 3 fingers = middle (replaces corner zones).
+            -- Two-finger *tap* already right-clicks via tap-to-click.
+            clickfinger_behavior = true,
+        },
     },
 })
 
