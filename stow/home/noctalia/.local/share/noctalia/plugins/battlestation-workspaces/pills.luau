@@ -27,6 +27,10 @@ local function loadCfg()
   cfg.activeMs = tonumber(noctalia.getConfig("active_ms")) or 1000
   cfg.waitS = tonumber(noctalia.getConfig("wait_s")) or 30
   cfg.jitter = tonumber(noctalia.getConfig("jitter")) or 0.35
+  -- In-bar drag reorder needs a shell with bar drag-and-drop (plugin API 33);
+  -- on an older shell the drag nodes would be dropped WITH the pills inside
+  -- them, so this stays opt-in.
+  cfg.barDrag = noctalia.getConfig("bar_drag") == true
 end
 loadCfg()
 
@@ -166,6 +170,45 @@ local function pillLabel(w)
   return `{n} - {name}`
 end
 
+-- ---- in-bar reorder (drag a pill onto a gap) ------------------------------------
+-- The drop hands back the dragged ws and the target gap index among THIS bar's
+-- visible pills. The move is anchored onto the GLOBAL battlespace order so
+-- pills on other displays (and trailing-hidden ones) keep their slots, then
+-- committed whole through `bsctl ws map set` — bsctl is the map's only author.
+local DRAG = "bs-pill"
+local lastVisibleIds = {}
+
+function onPillDropped(payload, value)
+  local id = tonumber(payload)
+  local to = tonumber(value)
+  local vis = {}
+  for _, x in ipairs(lastVisibleIds) do table.insert(vis, x) end
+  local from = lib.indexOf(vis, id)
+  if not id or not to or not from then return end
+  table.remove(vis, from)
+  if from < to then to -= 1 end
+  to = math.max(1, math.min(to, #vis + 1))
+  table.insert(vis, to, id)
+  local inVis = {}
+  for _, x in ipairs(vis) do inVis[x] = true end
+  local merged, k = {}, 1
+  for _, w in ipairs(workspaces) do
+    if inVis[w.ws] then
+      table.insert(merged, vis[k]); k += 1
+    else
+      table.insert(merged, w.ws)
+    end
+  end
+  local args = { "ws", "map", "set" }
+  for _, x in ipairs(merged) do table.insert(args, x) end
+  lib.bsctl(args)
+end
+
+local function gapZone(i)
+  return ui.dropZone({ key = `gap-{i}`, accepts = { DRAG }, value = tostring(i), onDrop = "onPillDropped",
+    width = 4, height = 22, radius = 2, expandOnDrag = true, hitSlop = 14, fill = "primary/0.15" })
+end
+
 -- ---- render ----------------------------------------------------------------------
 local lastSig = ""
 local function botNode(sid, now, scale, commander)
@@ -251,13 +294,27 @@ local function render(now)
       props.fill = lib.roleFill(key)
     end
     table.insert(sig, `{wsId}|{role}|{label}|{props.opacity}`)
-    table.insert(pills, ui.row(props, children))
+    local pill = ui.row(props, children)
+    if cfg.barDrag then
+      table.insert(pills, gapZone(#pills // 2 + 1))
+      table.insert(pills, ui.dragSource({ key = `drag-{wsId}`, dragType = DRAG, payload = tostring(wsId),
+        previewAncestor = 0, liftFromLayout = true, tooltip = "Drag to reorder" }, { pill }))
+    else
+      table.insert(pills, pill)
+    end
   end
+  if cfg.barDrag then
+    table.insert(pills, gapZone(#pills // 2 + 1))
+    table.insert(sig, "drag")
+  end
+  local ids = {}
+  for _, w in ipairs(vis) do table.insert(ids, w.ws) end
+  lastVisibleIds = ids
   local s = table.concat(sig, ";")
   if s == lastSig then return end
   lastSig = s
   local container = if barWidget.isVertical() then ui.column else ui.row
-  barWidget.render(container({ gap = 6, align = "center" }, pills))
+  barWidget.render(container({ gap = if cfg.barDrag then 2 else 6, align = "center" }, pills))
 end
 
 -- ---- emote engine + refresh ---------------------------------------------------------

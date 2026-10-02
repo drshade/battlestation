@@ -20,5 +20,7 @@
   "color.tertiary": "Tertiary",
   "color.error": "Error",
   "color.grey": "Grey",
-  "color.none": "None"
+  "color.none": "None",
+  "settings.bar_drag.label": "Drag pills to reorder (needs shell drag-and-drop in the bar)",
+  "settings.bar_drag.description": "Plugin API 33+. On an older shell the pills would disappear, so leave this off until the shell supports it."
 }

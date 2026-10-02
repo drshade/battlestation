@@ -108,6 +108,13 @@ min = 0.0
 max = 0.9
 
 [[setting]]
+key = "bar_drag"
+type = "bool"
+label_key = "settings.bar_drag.label"
+description_key = "settings.bar_drag.description"
+default = false
+
+[[setting]]
 key = "hide_delivered"
 type = "bool"
 label_key = "settings.hide_delivered.label"

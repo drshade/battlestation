@@ -25,6 +25,7 @@ active_ms = 2500
 wait_s = 30
 jitter = 0.3
 hide_delivered = true
+bar_drag = true    # needs the bar drag-and-drop shell patch (plugin API 33)
 
 # keybind-cheatsheet (vendored, see its plugin.toml): Caps fires as MOD3
 # here (input.lua); label it by the name the keybind model uses.
