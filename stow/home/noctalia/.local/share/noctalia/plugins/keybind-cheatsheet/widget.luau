@@ -2,7 +2,7 @@
 -- Static, event-only bar entry. Parsing and cache ownership belong to the data
 -- service; this widget only toggles the panel or requests a refresh.
 
-local PANEL_ID = "kenn/keybind-cheatsheet:cheatsheet"
+local PANEL_ID = "battlestation/keybind-cheatsheet:cheatsheet" -- vendored id (see plugin.toml)
 local REFRESH_REQUEST_KEY = "keybind-cheatsheet.refresh-request"
 
 local function render()

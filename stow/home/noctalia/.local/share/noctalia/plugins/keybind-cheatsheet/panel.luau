@@ -14,7 +14,7 @@ if noctalia == nil then
   panel = host.panel
 end
 
-local PANEL_ID = "kenn/keybind-cheatsheet:cheatsheet"
+local PANEL_ID = "battlestation/keybind-cheatsheet:cheatsheet" -- vendored id (see plugin.toml)
 local SNAPSHOT_KEY = "keybind-cheatsheet.snapshot"
 local REFRESH_REQUEST_KEY = "keybind-cheatsheet.refresh-request"
 local SELF_TEST_REQUEST_KEY = "keybind-cheatsheet.self-test-request"
