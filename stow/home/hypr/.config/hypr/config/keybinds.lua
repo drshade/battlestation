@@ -17,7 +17,7 @@
 -- (Design rationale lives in git history: docs/keybinds.md, retired once implemented.)
 local mainMod  = "SUPER"
 local hyperMod = "MOD3" -- caps:hyper makes Caps fire as MOD3 (verified live); see input.lua
-local noctCall = "qs -c noctalia-shell ipc call "
+local noct = "noctalia msg " -- the shell's IPC (`noctalia msg --help` lists every verb)
 local launchPrefix = "uwsm app -- " -- if you are not using UWSM, make this empty (e.g. "")
 -- Workspace navigation by BATTLESPACE id (bs-id) rather than raw Hyprland
 -- ws-id: bsctl maps bs-id <-> ws-id through a persisted map the bar plugin
@@ -54,8 +54,8 @@ hl.bind(mainMod .. " + Down",  hl.dsp.focus({ direction = "down" }),  { descript
 hl.bind(mainMod .. " + SHIFT + Down", hl.dsp.focus({ workspace = "empty" }), { description = "Go to next empty workspace" })
 hl.bind(mainMod .. " + Tab",          hl.dsp.window.cycle_next(),            { description = "Cycle windows" })
 hl.bind(mainMod .. " + S",            hl.dsp.workspace.toggle_special(),     { description = "Toggle scratchpad" })
-hl.bind(mainMod .. " + A",            hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces asks"), { description = "The Deck (agent asks queue)" })
-hl.bind(mainMod .. " + N",            hl.dsp.exec_cmd(noctCall .. "notifications toggleHistory"), { description = "Notification history" })
+hl.bind(mainMod .. " + A",            hl.dsp.exec_cmd(noct .. "panel-toggle battlestation/workspaces:deck"), { description = "The Deck (agent asks queue)" })
+hl.bind(mainMod .. " + N",            hl.dsp.exec_cmd(noct .. "panel-toggle control-center notifications"), { description = "Notification history" })
 
 -- 2. Launch · Hyper
 
@@ -71,8 +71,8 @@ hl.bind(hyperMod .. " + N",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.conf
 -- Opens VS Code at the focused terminal's cwd (code-here.sh via focused-cwd.sh);
 -- opens with no folder when the focused window isn't a terminal.
 hl.bind(hyperMod .. " + E",         hl.dsp.exec_cmd(launchPrefix .. "$HOME/.config/hypr/scripts/code-here.sh"), { description = "Open VS Code" })
-hl.bind(hyperMod .. " + Space",     hl.dsp.exec_cmd(noctCall .. "launcher toggle"), { description = "App launcher" })
-hl.bind(hyperMod .. " + SHIFT + E", hl.dsp.exec_cmd(noctCall .. "launcher emoji"),  { description = "Emoji picker" })
+hl.bind(hyperMod .. " + Space",     hl.dsp.exec_cmd(noct .. "panel-toggle launcher"), { description = "App launcher" })
+hl.bind(hyperMod .. " + SHIFT + E", hl.dsp.exec_cmd(noct .. "panel-toggle launcher /emo"),  { description = "Emoji picker" })
 
 -- 3. Window · Hyper
 
@@ -105,7 +105,7 @@ for i = 1, 10 do
 end
 
 hl.bind(hyperMod .. " + S", hl.dsp.window.move({ workspace = "special" }),                  { description = "Send window to scratchpad" })
-hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-workspaces rename"), { description = "Rename workspace" })
+hl.bind(hyperMod .. " + R", hl.dsp.exec_cmd(noct .. "panel-toggle battlestation/workspaces:workspaces rename"), { description = "Rename workspace" })
 -- Clear any manual pill reordering: the battlespace map falls back to
 -- identity (bs-id N = the Nth live ws-id, ascending).
 hl.bind(hyperMod .. " + SHIFT + Backspace", hl.dsp.exec_cmd(ws .. " map reset"), { description = "Reset workspace order to default" })
@@ -126,11 +126,11 @@ end
 
 -- 6. System · Hyper
 
-hl.bind(hyperMod .. " + Print",     hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit toggle"),       { description = "Screenshot toolkit" })
-hl.bind(hyperMod .. " + L",         hl.dsp.exec_cmd(noctCall .. "sessionMenu toggle"),                 { description = "Session menu (lock/logout/reboot)" })
+hl.bind(hyperMod .. " + Print",     hl.dsp.exec_cmd(noct .. "screenshot-region"),                        { description = "Screenshot (region)" })
+hl.bind(hyperMod .. " + L",         hl.dsp.exec_cmd(noct .. "panel-toggle session"),                     { description = "Session menu (lock/logout/reboot)" })
 hl.bind(hyperMod .. " + comma",     hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display set scale --down"), { description = "Zoom display out (scale down)" })
 hl.bind(hyperMod .. " + period",    hl.dsp.exec_cmd("$HOME/.local/bin/bsctl display set scale --up"),   { description = "Zoom display in (scale up)" })
-hl.bind(hyperMod .. " + Backspace", hl.dsp.exec_cmd("qs -c noctalia-shell kill; sleep 1; qs -c noctalia-shell"), { description = "Restart Noctalia shell" })
+hl.bind(hyperMod .. " + Backspace", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/restart-shell.sh"), { description = "Restart Noctalia shell" })
 
 -- 7. Edit · Super
 
@@ -139,17 +139,17 @@ hl.bind(mainMod .. " + C",           send_shortcut("CTRL", "Insert"),           
 hl.bind(mainMod .. " + V",           send_shortcut("SHIFT", "Insert"),                  { description = "Paste" })
 hl.bind(mainMod .. " + X",           send_shortcut("CTRL", "X"),                        { description = "Cut" })
 hl.bind(mainMod .. " + Z",           send_shortcut("CTRL", "Z"),                        { description = "Undo" })
-hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noctCall .. "launcher clipboard"), { description = "Clipboard history" })
+hl.bind(mainMod .. " + CONTROL + V", hl.dsp.exec_cmd(noct .. "panel-toggle clipboard"), { description = "Clipboard history" })
 
 -- Dictation: tap to start recording, tap again to transcribe and type into
--- the focused window (the Dictation Noctalia plugin owns the pw-record →
+-- the focused window (the battlestation/dictation Noctalia plugin owns the pw-record →
 -- whisper-cli → wtype pipeline). A bare, modifier-LESS key on purpose: text
 -- typed while a physical modifier is held combines with it in the compositor
 -- (digits became SUPER+N workspace jumps under the original Super+\ hold
 -- bind), and modifier-release binds proved undetectable here — so the fix is
 -- structural: with a tap-toggle on a plain key, nothing is held at injection
 -- time. (Supersedes Deck ask #22's Super+\.)
-hl.bind("F12", hl.dsp.exec_cmd(noctCall .. "plugin:battlestation-dictation toggle"), { description = "Dictate (tap: start / stop)" })
+hl.bind("F12", hl.dsp.exec_cmd(noct .. "plugin battlestation/dictation:dictation all toggle"), { description = "Dictate (tap: start / stop)" })
 
 -- 9. Tabs · Hyper
 
@@ -252,20 +252,20 @@ end, { timeout = 1000, type = "repeat" })
 -- 8. Hardware
 
 -- Audio
-hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd(noctCall .. "volume increase"),   { locked = true, repeating = true, description = "Volume up" })
-hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd(noctCall .. "volume decrease"),   { locked = true, repeating = true, description = "Volume down" })
-hl.bind("XF86AudioMute",        hl.dsp.exec_cmd(noctCall .. "volume muteOutput"), { locked = true, repeating = true, description = "Mute output" })
-hl.bind("XF86AudioMicMute",     hl.dsp.exec_cmd(noctCall .. "volume muteInput"),  { locked = true, repeating = true, description = "Mute microphone" })
+hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd(noct .. "volume-up"),   { locked = true, repeating = true, description = "Volume up" })
+hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd(noct .. "volume-down"), { locked = true, repeating = true, description = "Volume down" })
+hl.bind("XF86AudioMute",        hl.dsp.exec_cmd(noct .. "volume-mute"), { locked = true, repeating = true, description = "Mute output" })
+hl.bind("XF86AudioMicMute",     hl.dsp.exec_cmd(noct .. "mic-mute"),    { locked = true, repeating = true, description = "Mute microphone" })
 
 -- Media
-hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd(noctCall .. "media playPause"), { locked = true, description = "Play/pause media" })
-hl.bind("XF86AudioPause", hl.dsp.exec_cmd(noctCall .. "media playPause"), { locked = true, description = "Play/pause media" })
-hl.bind("XF86AudioNext",  hl.dsp.exec_cmd(noctCall .. "media next"),      { locked = true, description = "Next track" })
-hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd(noctCall .. "media previous"),  { locked = true, description = "Previous track" })
+hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd(noct .. "media toggle"), { locked = true, description = "Play/pause media" })
+hl.bind("XF86AudioPause", hl.dsp.exec_cmd(noct .. "media toggle"), { locked = true, description = "Play/pause media" })
+hl.bind("XF86AudioNext",  hl.dsp.exec_cmd(noct .. "media next"),     { locked = true, description = "Next track" })
+hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd(noct .. "media previous"),  { locked = true, description = "Previous track" })
 
 -- Brightness
-hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd(noctCall .. "brightness increase"), { repeating = true, description = "Brightness up" })
-hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd(noctCall .. "brightness decrease"), { repeating = true, description = "Brightness down" })
+hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd(noct .. "brightness-up"), { repeating = true, description = "Brightness up" })
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd(noct .. "brightness-down"), { repeating = true, description = "Brightness down" })
 
--- Screenshot (quick): annotate full screen on the Print key
-hl.bind("Print", hl.dsp.exec_cmd(noctCall .. "plugin:screen-toolkit annotate"), { description = "Screenshot (annotate)" })
+-- Screenshot (quick): freeze the screen and annotate it on the Print key
+hl.bind("Print", hl.dsp.exec_cmd(noct .. "screenshot-annotate"), { description = "Screenshot (annotate)" })

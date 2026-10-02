@@ -20,9 +20,7 @@ esac
 
 hyprctl eval "hl.config({ general = { layout = \"$next\" } })" >/dev/null
 
-# Announce the new mode via noctalia's transient toast OSD (the volume/brightness
-# popup channel), NOT the freedesktop notification server -- so it shows once and
-# vanishes without ever piling up in notification history. A new toast supersedes
-# the previous one, so rapid re-toggles never stack.
-qs -c noctalia-shell ipc call toast send \
-    "{\"title\":\"Layout: $next\",\"duration\":1500}" >/dev/null 2>&1 || true
+# Announce the new mode through the shell's own notification channel (no
+# D-Bus round trip; the shell is the notification daemon anyway). Best-effort:
+# the layout has already changed, a missing shell must not fail the toggle.
+noctalia msg notification-show "Layout: $next" "" >/dev/null 2>&1 || true

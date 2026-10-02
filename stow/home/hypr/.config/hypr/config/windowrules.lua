@@ -119,3 +119,7 @@ hl.window_rule({
 
     no_focus = true,
 })
+
+-- Noctalia's settings window (a regular toplevel, unlike its layer-shell bar
+-- and panels): float it at a sane size instead of tiling it into a column.
+hl.window_rule({ match = { class = "dev.noctalia.Noctalia" }, float = true, size = { 1080, 920 }, center = true })
