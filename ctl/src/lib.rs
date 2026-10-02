@@ -150,12 +150,16 @@
 //! because every record addresses live sessions. `comms.json` is one atomic,
 //! flocked store: `{"next_id", "names": {session: name}, "links":
 //! [[session, session]], "messages": [{id, from, from_name, from_ws,
-//! from_workspace, to, body, created, delivered_at}]}`. The
-//! `from_*` fields snapshot the sender's `workspace / name` presentation at
-//! send time; the session ids remain private routing provenance. `comms get`
+//! from_workspace, to, to_name, to_ws, to_workspace, body, created,
+//! delivered_at}]}`. The `from_*` and `to_*` fields snapshot both endpoints'
+//! `workspace / name` presentation at send time; the session ids remain
+//! private routing provenance. `comms get`
 //! exposes live public identities, public links and per-agent unread counts,
-//! never message bodies. Bodies are visible only
-//! to the addressed recipient through its identity-bound MCP call or inbox.
+//! never message bodies. The human-only `comms history` CLI exposes the runtime
+//! message log with public endpoint identities, bodies and delivery timestamps;
+//! `--tail N` selects the newest N in chronological order and `--stream`
+//! re-emits when messages arrive or delivery state changes. Agents can see
+//! bodies only through the addressed recipient's identity-bound MCP call or inbox.
 //!
 //! MCP exposes `set_name` (whitespace-normalized, 40 character cap; returns
 //! the caller's public workspace + name identity), `list_peers` (direct live

@@ -855,6 +855,57 @@ fn agents_get_stream_shares_the_engine() {
 }
 
 #[test]
+fn comms_history_stream_follows_arrival_and_delivery() {
+    let env = TestEnv::new("stream-comms-history");
+    let s = Streamer::spawn(
+        &env,
+        &[
+            "comms", "history", "--format", "json", "--stream", "--tail", "1",
+        ],
+    );
+    assert_eq!(s.next("initial message history"), json!([]));
+
+    let dir = env.run.join("battlestation-comms");
+    let path = dir.join("comms.json");
+    fs::write(
+        &path,
+        json!({
+            "next_id": 2,
+            "names": {"private-a": "sender", "private-b": "recipient"},
+            "links": [["private-a", "private-b"]],
+            "messages": [{
+                "id": 1,
+                "from": "private-a",
+                "from_name": "sender",
+                "from_workspace": "alpha",
+                "to": "private-b",
+                "to_name": "recipient",
+                "to_workspace": "beta",
+                "body": "hello",
+                "created": 10.0,
+                "delivered_at": null
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let arrived = s.converge("message arrival", |value| {
+        value.as_array().is_some_and(|v| v.len() == 1)
+    });
+    assert_eq!(arrived[0]["body"], "hello");
+    assert_eq!(arrived[0]["from"]["name"], "sender");
+    assert!(!arrived.to_string().contains("private-a"));
+
+    let mut store: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    store["messages"][0]["delivered_at"] = json!(11.0);
+    fs::write(&path, store.to_string()).unwrap();
+    let delivered = s.converge("delivery-state change", |value| {
+        value[0]["delivered_at"] == json!(11.0)
+    });
+    assert_eq!(delivered[0]["id"], 1);
+}
+
+#[test]
 fn text_stream_frames_with_blank_lines_when_piped() {
     // --stream is orthogonal to --format: a text stream through a pipe
     // (stdout here is a pipe by construction — the tty clear-redraw path

@@ -107,6 +107,7 @@ fn help_renders_at_every_level() {
         &["agents", "get", "--help"],
         &["comms", "--help"],
         &["comms", "get", "--help"],
+        &["comms", "history", "--help"],
         &["comms", "link", "--help"],
         &["comms", "unlink", "--help"],
     ] {

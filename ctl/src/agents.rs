@@ -473,7 +473,10 @@ fn kitty_send_text(to: &str, bytes: &[u8]) -> i32 {
     match child.wait_with_output() {
         Ok(o) if o.status.success() => 0,
         Ok(o) => {
-            eprint!("bsctl: kitty send-text failed: {}", String::from_utf8_lossy(&o.stderr));
+            eprint!(
+                "bsctl: kitty send-text failed: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
             1
         }
         Err(e) => {

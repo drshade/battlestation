@@ -849,7 +849,9 @@ fn deck_file() -> PathBuf {
 }
 
 fn deck_enabled() -> bool {
-    fs::read_to_string(deck_file()).map(|s| s.trim() != "off").unwrap_or(true)
+    fs::read_to_string(deck_file())
+        .map(|s| s.trim() != "off")
+        .unwrap_or(true)
 }
 
 fn set_deck(on: bool) -> i32 {
@@ -963,15 +965,23 @@ pub fn inject(_args: &[String]) -> i32 {
     let now = sys::now_f64();
     let rec = crate::presence::read();
     let presence = crate::presence::brief(rec.as_ref(), now);
-    let active = rec.as_ref().and_then(|r| r.get("state").and_then(Value::as_str)) == Some("active");
+    let active = rec
+        .as_ref()
+        .and_then(|r| r.get("state").and_then(Value::as_str))
+        == Some("active");
 
     // Read-only: load() reads the store lock-free (writes land by atomic rename).
     let (_next, asks) = load();
-    let open = asks.iter().filter(|r| proto::field(r, "state") == "open").count();
+    let open = asks
+        .iter()
+        .filter(|r| proto::field(r, "state") == "open")
+        .count();
     let posted = if session.is_empty() {
         0
     } else {
-        asks.iter().filter(|r| proto::field(r, "session") == session).count()
+        asks.iter()
+            .filter(|r| proto::field(r, "session") == session)
+            .count()
     };
 
     // Watched = human active AND this session's workspace on screen (visible on
@@ -1065,7 +1075,12 @@ pub fn transcript_ends_with_question(transcript: &str) -> bool {
 
 /// The backstop rule, isolated for the truth-table test. All four already
 /// gated (enabled, session known) before this is reached.
-fn should_retrigger(unwatched: bool, ended_with_q: bool, posted_this_turn: bool, already: bool) -> bool {
+fn should_retrigger(
+    unwatched: bool,
+    ended_with_q: bool,
+    posted_this_turn: bool,
+    already: bool,
+) -> bool {
     unwatched && ended_with_q && !posted_this_turn && !already
 }
 
@@ -1103,7 +1118,11 @@ pub fn retrigger(args: &[String]) -> i32 {
     let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut input);
     let payload = proto::parse_payload(&input);
     // Never loop: if we already re-prompted this stop, let it end.
-    if payload.get("stop_hook_active").and_then(Value::as_bool).unwrap_or(false) {
+    if payload
+        .get("stop_hook_active")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return 0;
     }
     let session = proto::session_key(&payload);
@@ -1114,7 +1133,10 @@ pub fn retrigger(args: &[String]) -> i32 {
     // Watched? (same rule as inject) — if the human can see this terminal, inline
     // was fine; never nag.
     let rec = crate::presence::read();
-    let active = rec.as_ref().and_then(|r| r.get("state").and_then(Value::as_str)) == Some("active");
+    let active = rec
+        .as_ref()
+        .and_then(|r| r.get("state").and_then(Value::as_str))
+        == Some("active");
     let agent_ws = ws_for_session(&session);
     let unwatched = !(active && agent_ws.is_some_and(|w| visible_wss().contains(&w)));
 
@@ -1142,7 +1164,10 @@ pub fn retrigger(args: &[String]) -> i32 {
     };
 
     if should_retrigger(unwatched, ended_q, posted_this_turn, false) {
-        println!("{}", json!({"decision": "block", "reason": RETRIGGER_REASON}));
+        println!(
+            "{}",
+            json!({"decision": "block", "reason": RETRIGGER_REASON})
+        );
     }
     0
 }

@@ -758,6 +758,17 @@ enum CommsCmd {
         #[arg(long)]
         stream: bool,
     },
+    /// Human-visible message history, including bodies and delivery state
+    History {
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+        /// Show only the newest N messages (kept in chronological order)
+        #[arg(long, value_name = "N")]
+        tail: Option<usize>,
+        /// Keep emitting whenever messages arrive or delivery state changes
+        #[arg(long)]
+        stream: bool,
+    },
     /// Create one two-way link (human/widget surface; never exposed to MCP)
     Link {
         #[arg(long)]
@@ -1107,6 +1118,27 @@ fn main() {
                     )
                 } else {
                     bsctl::comms::print_snapshot(format == Format::Json)
+                }
+            }
+            CommsCmd::History {
+                format,
+                tail,
+                stream,
+            } => {
+                if stream {
+                    let json = format == Format::Json;
+                    bsctl::stream::run(
+                        move || {
+                            Ok(if json {
+                                bsctl::comms::public_history(tail).to_string()
+                            } else {
+                                bsctl::comms::history_text(tail)
+                            })
+                        },
+                        framing(format),
+                    )
+                } else {
+                    bsctl::comms::print_history(tail, format == Format::Json)
                 }
             }
             CommsCmd::Link {

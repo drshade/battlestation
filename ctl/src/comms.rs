@@ -288,6 +288,132 @@ pub fn public_snapshot_from(recs: &[Value], workspaces: Option<&Value>) -> Value
     json!({"agents": agents, "links": links})
 }
 
+/// Human-facing message history. Unlike the routing store, this projection
+/// contains only public endpoint identities; private session ids never cross
+/// the CLI boundary. A tail selects the newest N records without reversing
+/// their chronological order.
+pub fn public_history(tail: Option<usize>) -> Value {
+    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let workspaces = ipc::json("workspaces");
+    public_history_from(&recs, workspaces.as_ref(), tail)
+}
+
+fn public_history_from(recs: &[Value], workspaces: Option<&Value>, tail: Option<usize>) -> Value {
+    let (_, names, _, messages) = load_from(&comms_dir());
+    let current: BTreeMap<String, Value> = recs
+        .iter()
+        .map(|r| {
+            let sid = proto::field(r, "sid");
+            let endpoint = json!({
+                "workspace": workspace_label_from(r.get("ws").and_then(proto::py_int), workspaces),
+                "name": names.get(&sid).cloned(),
+            });
+            (sid, endpoint)
+        })
+        .collect();
+    let start = tail
+        .map(|count| messages.len().saturating_sub(count))
+        .unwrap_or(0);
+    Value::Array(
+        messages[start..]
+            .iter()
+            .map(|message| {
+                json!({
+                    "id": message.get("id").cloned().unwrap_or(Value::Null),
+                    "from": history_endpoint(message, "from", &current, &names),
+                    "to": history_endpoint(message, "to", &current, &names),
+                    "body": message.get("body").cloned().unwrap_or(Value::Null),
+                    "created": message.get("created").cloned().unwrap_or(Value::Null),
+                    "delivered_at": message.get("delivered_at").cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn history_endpoint(
+    message: &Value,
+    side: &str,
+    current: &BTreeMap<String, Value>,
+    names: &BTreeMap<String, String>,
+) -> Value {
+    let session = proto::field(message, side);
+    let live = current.get(&session);
+    let name_key = format!("{side}_name");
+    let workspace_key = format!("{side}_workspace");
+    let name = message
+        .get(&name_key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            live.and_then(|endpoint| endpoint.get("name"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| names.get(&session).cloned())
+        .unwrap_or_else(|| "unknown agent".into());
+    let workspace = message
+        .get(&workspace_key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            live.and_then(|endpoint| endpoint.get("workspace"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "unknown workspace".into());
+    json!({"workspace": workspace, "name": name})
+}
+
+pub fn history_text(tail: Option<usize>) -> String {
+    let history = public_history(tail);
+    let Some(messages) = history.as_array() else {
+        return String::new();
+    };
+    if messages.is_empty() {
+        return "No messages.".into();
+    }
+    let mut blocks = Vec::with_capacity(messages.len());
+    for message in messages {
+        let state = if message.get("delivered_at").is_some_and(Value::is_null) {
+            "unread"
+        } else {
+            "delivered"
+        };
+        let id = message.get("id").and_then(Value::as_i64).unwrap_or(0);
+        let created = message
+            .get("created")
+            .and_then(Value::as_f64)
+            .map(|value| format!("{value:.3}"))
+            .unwrap_or_else(|| "unknown".into());
+        let mut block = format!(
+            "#{id}  {state}  created {created}\n  from: {} / {}\n  to: {} / {}\n  body:\n",
+            proto::field(&message["from"], "workspace"),
+            proto::field(&message["from"], "name"),
+            proto::field(&message["to"], "workspace"),
+            proto::field(&message["to"], "name"),
+        );
+        for line in proto::field(message, "body").lines() {
+            block.push_str("    ");
+            block.push_str(line);
+            block.push('\n');
+        }
+        blocks.push(block.trim_end().to_string());
+    }
+    blocks.join("\n\n")
+}
+
+pub fn print_history(tail: Option<usize>, json_out: bool) -> i32 {
+    if json_out {
+        println!("{}", public_history(tail));
+    } else {
+        println!("{}", history_text(tail));
+    }
+    0
+}
+
 pub fn peers(session: &str) -> Result<Vec<Value>, String> {
     if session.is_empty() {
         return Err("session identity is not available yet".into());
@@ -382,6 +508,8 @@ pub fn send(from: &str, to: &str, body: &str) -> Result<Sent, String> {
     };
     let from_ws = sender.get("ws").and_then(proto::py_int);
     let from_workspace = workspace_label(from_ws);
+    let to_ws = recipient.get("ws").and_then(proto::py_int);
+    let to_workspace = workspace_label(to_ws);
     let waiting = proto::field(recipient, "status") == "waiting";
     let id = with_lock(|| -> Result<i64, String> {
         let dir = comms_dir();
@@ -401,6 +529,7 @@ pub fn send(from: &str, to: &str, body: &str) -> Result<Sent, String> {
             ));
         }
         let from_name = names.get(from).cloned();
+        let to_name = names.get(to).cloned();
         let id = next;
         next += 1;
         messages.push(json!({
@@ -410,6 +539,9 @@ pub fn send(from: &str, to: &str, body: &str) -> Result<Sent, String> {
             "from_ws": from_ws,
             "from_workspace": from_workspace,
             "to": to,
+            "to_name": to_name,
+            "to_ws": to_ws,
+            "to_workspace": to_workspace,
             "body": body,
             "created": sys::now_f64(),
             "delivered_at": Value::Null,

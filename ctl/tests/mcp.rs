@@ -579,6 +579,31 @@ fn switchboard_names_symmetric_links_and_private_delivery() {
         "thinking peers are queued, not interrupted"
     );
 
+    let history_out = env.comms(&["history", "--format", "json", "--tail", "1"]);
+    assert!(history_out.status.success());
+    let history: Value = serde_json::from_slice(&history_out.stdout).unwrap();
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    assert_eq!(history[0]["id"], 1);
+    assert_eq!(
+        history[0]["from"],
+        json!({"workspace": "ws 7", "name": "review agent"})
+    );
+    assert_eq!(
+        history[0]["to"],
+        json!({"workspace": "ws 3", "name": "releaser"})
+    );
+    assert_eq!(history[0]["body"], "Please review commit abc.");
+    assert!(history[0]["delivered_at"].is_null());
+    let public_history = history.to_string();
+    assert!(!public_history.contains("sess-own"), "{public_history}");
+    assert!(!public_history.contains("sess-peer"), "{public_history}");
+    let empty_tail: Value = serde_json::from_slice(
+        &env.comms(&["history", "--format", "json", "--tail", "0"])
+            .stdout,
+    )
+    .unwrap();
+    assert_eq!(empty_tail, json!([]));
+
     let state: Value =
         serde_json::from_slice(&env.comms(&["get", "--format", "json"]).stdout).unwrap();
     let peer = state["agents"]
@@ -616,6 +641,26 @@ fn switchboard_names_symmetric_links_and_private_delivery() {
             .iter()
             .all(|agent| agent["unread"] == 0)
     );
+    let history: Value =
+        serde_json::from_slice(&env.comms(&["history", "--format", "json"]).stdout).unwrap();
+    assert!(history[0]["delivered_at"].is_number());
+
+    let (text, is_err) = c.call(
+        "send_message",
+        json!({"workspace": "ws 3", "name": "releaser", "body": "Second message."}),
+    );
+    assert!(!is_err, "{text}");
+    let all: Value =
+        serde_json::from_slice(&env.comms(&["history", "--format", "json"]).stdout).unwrap();
+    assert_eq!(all[0]["id"], 1, "history stays chronological");
+    assert_eq!(all[1]["id"], 2, "history stays chronological");
+    let tail: Value = serde_json::from_slice(
+        &env.comms(&["history", "--format", "json", "--tail", "1"])
+            .stdout,
+    )
+    .unwrap();
+    assert_eq!(tail.as_array().unwrap().len(), 1);
+    assert_eq!(tail[0]["id"], 2);
 
     assert!(
         env.comms(&[
