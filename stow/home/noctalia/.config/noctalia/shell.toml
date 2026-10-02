@@ -1,0 +1,132 @@
+# Noctalia shell behaviour. Every *.toml in this directory is merged
+# (alphabetically); GUI edits land in ~/.local/state/noctalia/settings.toml
+# and win over these files — fold them back here when they should persist.
+
+[shell]
+font_family = "DejaVu LGC Sans"
+polkit_agent = true           # the shell is the PolicyKit auth agent (no separate plugin)
+setup_wizard_enabled = false  # config is this directory, not a wizard
+clipboard_enabled = true
+screen_time_enabled = false
+
+[shell.panel]
+control_center_placement = "attached"
+launcher_placement = "floating"
+launcher_position = "center"
+clipboard_placement = "floating"
+clipboard_position = "center"
+session_placement = "floating"
+session_position = "center"
+
+[shell.launcher]
+pinned = ["cachyos-pi", "nvidia-settings", "steam", "firefox", "org.kde.dolphin"]
+sort_by_usage = true
+categories = true
+
+[shell.screenshot]
+annotate = true               # region captures open in the annotation editor too
+
+# Session menu. The lock entry runs `loginctl lock-session` instead of the
+# shell's own locker: hypridle answers the logind Lock signal with hyprlock,
+# a separate process, so a shell crash can never strand a locked session
+# (see setup/deps-00-hyprlock-hypridle.md). Keep this in lockstep with
+# [lockscreen] below.
+[shell.session]
+show_shortcuts = true
+
+[[shell.session.actions]]
+action = "lock"
+command = "loginctl lock-session"
+countdown_seconds = 10
+shortcut = "1"
+
+[[shell.session.actions]]
+action = "suspend"
+countdown_seconds = 10
+shortcut = "2"
+
+[[shell.session.actions]]
+action = "hibernate"
+countdown_seconds = 10
+shortcut = "3"
+
+[[shell.session.actions]]
+action = "reboot"
+countdown_seconds = 10
+shortcut = "4"
+
+[[shell.session.actions]]
+action = "logout"
+countdown_seconds = 10
+shortcut = "5"
+
+[[shell.session.actions]]
+action = "shutdown"
+countdown_seconds = 10
+shortcut = "6"
+variant = "destructive"
+
+[[shell.session.actions]]
+action = "reboot_to_uefi"
+countdown_seconds = 10
+shortcut = "7"
+
+# hyprlock owns locking (see the session menu note above): the shell never
+# draws a lock surface and never locks on suspend — hypridle does both.
+[lockscreen]
+enabled = false
+lock_before_suspend = false
+
+[idle]
+# hypridle owns idle (presence reporting + post-lock blanking); nothing here.
+
+[notification]
+position = "top_right"
+
+[osd]
+position = "top_right"
+
+[location]
+address = "Amsterdam"
+
+[weather]
+enabled = true
+unit = "metric"
+
+[nightlight]
+enabled = false
+temperature_day = 6500
+temperature_night = 4000
+
+[control_center]
+sidebar = "compact"
+
+[[control_center.shortcuts]]
+type = "wifi"
+
+[[control_center.shortcuts]]
+type = "bluetooth"
+
+[[control_center.shortcuts]]
+type = "wallpaper"
+
+[[control_center.shortcuts]]
+type = "notification"
+
+[[control_center.shortcuts]]
+type = "power_profile"
+
+[[control_center.shortcuts]]
+type = "caffeine"
+
+[[control_center.shortcuts]]
+type = "nightlight"
+
+[desktop_widgets]
+enabled = false
+
+[dock]
+enabled = false
+
+[backdrop]
+enabled = false

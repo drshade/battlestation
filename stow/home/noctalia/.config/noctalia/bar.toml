@@ -1,0 +1,60 @@
+# One bar per output. Widget names that match a [widget.<name>] table below
+# take that table's type + options; plugin widgets are addressed as
+# "<author>/<plugin>:<entry>" (code under ../../.local/share/noctalia/plugins).
+
+[bar.default]
+position = "top"
+background_opacity = 0.93
+radius = 12
+margin_edge = 4
+margin_ends = 4
+capsule = true
+widget_spacing = 6
+start = ["launcher", "clock", "group:sysmon"]
+center = [
+    "battlestation/workspaces:pills",
+    "battlestation/workspaces:usage",
+    "battlestation/workspaces:deck-badge",
+    "battlestation/workspaces:switchboard-badge",
+    "battlestation/dictation:mic",
+]
+end = ["media", "wallpaper", "notifications", "volume", "battery", "screenshot", "control-center"]
+
+[[bar.default.capsule_group]]
+id = "sysmon"
+members = ["cpu", "temp", "ram", "swap"]
+
+[bar.default.dead_zone.actions]
+right = "panel-toggle control-center"
+
+[widget.launcher]
+glyph = "rocket"
+
+[widget.clock]
+format = "{:%H:%M %a, %b %d}"
+tooltip_format = "{:%A, %d %B %Y}"
+
+[widget.cpu]
+type = "sysmon"
+stat = "cpu_usage"
+
+[widget.temp]
+type = "sysmon"
+stat = "cpu_temp"
+
+[widget.ram]
+type = "sysmon"
+stat = "ram_used"
+
+[widget.media]
+artist_first = true
+hide_album_art = true
+max_length = 145
+title_scroll = "always"
+
+[widget.volume.actions]
+middle = "exec pwvucontrol || pavucontrol"
+
+[widget.swap]
+type = "sysmon"
+stat = "swap_pct"

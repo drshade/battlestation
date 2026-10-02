@@ -44,34 +44,14 @@ stow/home/code/.config/Code - OSS/**
 !stow/home/code/.config/Code - OSS/User/
 !stow/home/code/.config/Code - OSS/User/settings.json
 
-# Noctalia colors (~/.config/noctalia/colors.json): derived output, not config —
-# regenerated (matugen-style) on every wallpaper/theme change. The wallpaper +
-# color settings in settings.json are the source of truth; tracking the output
-# would only churn.
-stow/home/noctalia/.config/noctalia/colors.json
-
-# Noctalia TEMPLATE outputs (same derived-output class as colors.json): the
-# enabled templates in settings.json regenerate these into ~/.config on every
-# theme change — they live at the target as REAL files the template engine
-# owns (kitty's machinery even replaces current-theme.conf wholesale, which
-# is why stow must not own these paths). A fresh machine gets them on the
-# first theme apply.
+# Noctalia TEMPLATE outputs: the templates enabled in theme.toml regenerate
+# these into ~/.config on every palette change — derived output that lives
+# at the target as REAL files the template engine owns (kitty's machinery
+# even replaces current-theme.conf wholesale, which is why stow must not own
+# these paths). A fresh machine gets them on the first theme apply.
 stow/home/kitty/.config/kitty/themes/
 stow/home/kitty/.config/kitty/current-theme.conf
 stow/home/btop/.config/btop/themes/
-
-# Noctalia plugins (~/.config/noctalia/plugins): default-deny — plugin code is
-# installed/updated by Noctalia's plugin manager, and plugins.json (tracked)
-# already records the source + enabled set; tracking third-party code here
-# duplicates upstream and churns on every update. Opt-ins are only for plugins
-# whose source of truth IS this repo.
-stow/home/noctalia/.config/noctalia/plugins/*
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/**
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-dictation/
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-dictation/**
-!stow/home/noctalia/.config/noctalia/plugins/kde-connect/
-!stow/home/noctalia/.config/noctalia/plugins/kde-connect/**
 
 # Rust build output (ctl/): cargo-generated, never tracked
 ctl/target/

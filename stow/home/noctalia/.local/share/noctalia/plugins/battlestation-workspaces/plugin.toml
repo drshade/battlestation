@@ -1,0 +1,181 @@
+# Battlestation Workspaces — the desktop's agent cockpit in the bar.
+#
+# ONE data source: the `world` service subscribes to `bsctl status --format
+# json --stream` (contract: ctl/src/lib.rs) and republishes each section to
+# the plugin's shared state; every widget and panel is pure presentation
+# over that state, and every command goes back through bsctl. Nothing here
+# reads a state file or talks to the compositor.
+
+id = "battlestation/workspaces"
+name = "Battlestation Workspaces"
+version = "1.0.0"
+plugin_api = 32
+author = "battlestation"
+license = "MIT"
+icon = "robot"
+description = "Workspace pills with live agent status, the Deck attention queue, the Switchboard link manager and plan usage — all over bsctl."
+dependencies = ["bsctl"]
+tags = ["bar", "panel", "service", "hyprland"]
+
+# ---- settings --------------------------------------------------------------
+[[setting]]
+key = "capitalize_names"
+type = "bool"
+label_key = "settings.capitalize_names.label"
+default = true
+
+[[setting]]
+key = "outline_pills"
+type = "bool"
+label_key = "settings.outline_pills.label"
+description_key = "settings.outline_pills.description"
+default = false
+
+[[setting]]
+key = "hide_trailing"
+type = "bool"
+label_key = "settings.hide_trailing.label"
+description_key = "settings.hide_trailing.description"
+default = true
+
+[[setting]]
+key = "focused_color"
+type = "select"
+label_key = "settings.focused_color.label"
+default = "primary"
+options = [
+  { value = "primary", label_key = "color.primary" },
+  { value = "secondary", label_key = "color.secondary" },
+  { value = "tertiary", label_key = "color.tertiary" },
+  { value = "error", label_key = "color.error" },
+  { value = "grey", label_key = "color.grey" },
+  { value = "none", label_key = "color.none" },
+]
+
+[[setting]]
+key = "occupied_color"
+type = "select"
+label_key = "settings.occupied_color.label"
+default = "secondary"
+options = [
+  { value = "primary", label_key = "color.primary" },
+  { value = "secondary", label_key = "color.secondary" },
+  { value = "tertiary", label_key = "color.tertiary" },
+  { value = "error", label_key = "color.error" },
+  { value = "grey", label_key = "color.grey" },
+  { value = "none", label_key = "color.none" },
+]
+
+[[setting]]
+key = "empty_color"
+type = "select"
+label_key = "settings.empty_color.label"
+default = "grey"
+options = [
+  { value = "primary", label_key = "color.primary" },
+  { value = "secondary", label_key = "color.secondary" },
+  { value = "tertiary", label_key = "color.tertiary" },
+  { value = "error", label_key = "color.error" },
+  { value = "grey", label_key = "color.grey" },
+  { value = "none", label_key = "color.none" },
+]
+
+[[setting]]
+key = "active_ms"
+type = "int"
+label_key = "settings.active_ms.label"
+description_key = "settings.active_ms.description"
+default = 1000
+min = 200
+max = 20000
+
+[[setting]]
+key = "wait_s"
+type = "int"
+label_key = "settings.wait_s.label"
+description_key = "settings.wait_s.description"
+default = 30
+min = 2
+max = 600
+
+[[setting]]
+key = "jitter"
+type = "double"
+label_key = "settings.jitter.label"
+description_key = "settings.jitter.description"
+default = 0.35
+min = 0.0
+max = 0.9
+
+[[setting]]
+key = "hide_delivered"
+type = "bool"
+label_key = "settings.hide_delivered.label"
+description_key = "settings.hide_delivered.description"
+default = true
+
+# ---- entries ---------------------------------------------------------------
+# The world stream: one subscriber per shell, feeding every entry below.
+[[service]]
+id = "world"
+entry = "world.luau"
+
+# Workspace pills for THIS bar's output, bots per agent session.
+[[widget]]
+id = "pills"
+entry = "pills.luau"
+
+  [widget.actions]
+  middle = "none"
+
+# Claude plan usage (session % / weekly %), from `bsctl agents usage`.
+[[widget]]
+id = "usage"
+entry = "usage.luau"
+
+  [widget.actions]
+  middle = "none"
+
+# Open-asks badge; click opens the Deck panel. Collapses when the queue is empty.
+[[widget]]
+id = "deck-badge"
+entry = "deck_badge.luau"
+
+  [widget.actions]
+  middle = "none"
+
+# Switchboard badge: named agents / links / unread; click opens the link manager.
+[[widget]]
+id = "switchboard-badge"
+entry = "switchboard_badge.luau"
+
+  [widget.actions]
+  middle = "none"
+
+# The Deck: asks triage. Open with `noctalia msg panel-toggle battlestation/workspaces:deck`.
+[[panel]]
+id = "deck"
+entry = "deck.luau"
+width = 980
+height = 640
+placement = "attached"
+keyboard_focus = "exclusive"
+
+# The Switchboard: human-wired agent links.
+[[panel]]
+id = "switchboard"
+entry = "switchboard.luau"
+width = 720
+height = 520
+placement = "attached"
+keyboard_focus = "on_demand"
+
+# Workspaces: rename + reorder (battlespace order). `panel-toggle … rename`
+# opens with the focused display's active workspace in edit.
+[[panel]]
+id = "workspaces"
+entry = "workspaces.luau"
+width = 560
+height = 460
+placement = "attached"
+keyboard_focus = "exclusive"

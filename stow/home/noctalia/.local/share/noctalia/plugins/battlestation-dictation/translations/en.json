@@ -1,0 +1,7 @@
+{
+  "settings.max_duration_s.label": "Max recording (seconds)",
+  "settings.max_duration_s.description": "Stuck-mic backstop: with a tap-toggle, forgetting the second tap is the normal failure",
+  "settings.model_path.label": "Whisper model",
+  "settings.model_path.description": "ggml model file; empty = ~/.local/share/whisper-models/ggml-small.en.bin",
+  "settings.show_when_idle.label": "Show the mic while idle"
+}

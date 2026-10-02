@@ -1,0 +1,25 @@
+# Palette follows the wallpaper (Material 3 tonal-spot); Tokyo-Night is the
+# fallback when no wallpaper is set. App templates regenerate their outputs
+# (kitty/btop theme files, GTK/Qt/KColorScheme) on every palette change —
+# those outputs are derived, so .gitignore keeps them out of the repo.
+
+[theme]
+mode = "dark"
+source = "wallpaper"
+wallpaper_scheme = "m3-tonal-spot"
+builtin = "Tokyo-Night"
+
+[theme.templates]
+enable_builtin_templates = true
+builtin_ids = ["kitty", "btop", "gtk3", "gtk4", "qt", "kcolorscheme"]
+enable_community_templates = false
+
+[wallpaper]
+directory = "~/Pictures/Wallpapers"
+fill_mode = "crop"
+transition_duration = 1500
+
+[wallpaper.automation]
+enabled = true
+interval_seconds = 3600
+order = "random"

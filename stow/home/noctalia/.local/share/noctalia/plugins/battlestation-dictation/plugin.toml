@@ -1,0 +1,65 @@
+# Battlestation Dictation — tap-toggle voice typing, fully local:
+#   pw-record --target <mic> <wav>   on start; stopped with SIGINT on the second tap
+#   whisper-cli -m <model> -f <wav>  transcribes; stdout is the text
+#   wtype -- <text>                  types it into the focused window
+# States: idle → recording → transcribing → injecting → idle. Every failure
+# is LOUD (a notification naming the broken piece) and returns to idle —
+# there is no wedged state. The keybind is a bare, modifier-less key (F12)
+# on purpose: synthetic typing combines with any physically held modifier in
+# the compositor (see setup/dictation-00-setup.md).
+#   noctalia msg plugin battlestation/dictation:dictation all toggle
+
+id = "battlestation/dictation"
+name = "Battlestation Dictation"
+version = "1.0.0"
+plugin_api = 32
+author = "battlestation"
+license = "MIT"
+icon = "microphone"
+description = "Tap-toggle dictation: speak, tap again, and the transcript is typed into the focused window (pw-record → whisper-cli → wtype, all local)."
+dependencies = ["pw-record", "whisper-cli", "wtype"]
+tags = ["bar", "service", "panel", "audio"]
+
+[[setting]]
+key = "max_duration_s"
+type = "int"
+label_key = "settings.max_duration_s.label"
+description_key = "settings.max_duration_s.description"
+default = 55
+min = 5
+max = 58
+
+[[setting]]
+key = "model_path"
+type = "file"
+label_key = "settings.model_path.label"
+description_key = "settings.model_path.description"
+default = ""
+
+[[setting]]
+key = "show_when_idle"
+type = "bool"
+label_key = "settings.show_when_idle.label"
+default = true
+
+[[service]]
+id = "dictation"
+entry = "dictation.luau"
+
+[[widget]]
+id = "mic"
+entry = "mic.luau"
+
+  [widget.actions]
+  middle = "none"
+
+# The microphone picker: the system-default source can record digital
+# silence while the onboard mic is fine. The choice is machine-local state
+# (PipeWire node names differ per machine), so it lives in the plugin's data
+# dir, not in config.
+[[panel]]
+id = "mic-picker"
+entry = "picker.luau"
+width = 560
+height = 360
+placement = "attached"

@@ -1,0 +1,26 @@
+# Plugins. The two battlestation/* plugins are local (their source is this
+# repo, stowed into ~/.local/share/noctalia/plugins); the rest install from
+# the catalogs on enable. Manual updates only — a plugin update is a change
+# to review, not a surprise.
+
+[plugins]
+auto_update = "none"
+enabled = [
+    "battlestation/workspaces",
+    "battlestation/dictation",
+    "noctalia/wallhaven",
+]
+
+# battlestation/workspaces: pill colours are palette roles (primary /
+# secondary / tertiary / error / grey / none).
+[plugin_settings."battlestation/workspaces"]
+capitalize_names = false
+outline_pills = true
+hide_trailing = false
+focused_color = "tertiary"
+occupied_color = "primary"
+empty_color = "grey"
+active_ms = 2500
+wait_s = 30
+jitter = 0.3
+hide_delivered = true
