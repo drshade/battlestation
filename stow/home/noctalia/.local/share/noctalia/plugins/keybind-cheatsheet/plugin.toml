@@ -4,7 +4,8 @@
 # PANEL_ID constants in widget.luau/panel.luau retargeted to this id, and a
 # comment stripper that skips `--` inside string literals (service.luau
 # luaCommentStart) so binds whose command carries `--flags` keep their
-# description and category. A catalog id
+# description and category, and a `merge_sequential` setting (panel.luau
+# mergeSequential) that collapses "… workspace 1/2/3" runs into one row. A catalog id
 # is always re-exported from its checkout on enable, so the patch cannot
 # live on the installed copy. Exit path in setup/noctalia-00-plugins.md.
 id = "battlestation/keybind-cheatsheet"
@@ -98,6 +99,13 @@ type = "bool"
 label_key = "settings.show_actions.label"
 description_key = "settings.show_actions.description"
 default = false
+
+[[setting]]
+key = "merge_sequential"
+type = "bool"
+label_key = "settings.merge_sequential.label"
+description_key = "settings.merge_sequential.description"
+default = true
 
 [[setting]]
 key = "modifier_labels"
