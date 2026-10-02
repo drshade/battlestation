@@ -217,8 +217,11 @@ live in `setup/README.md`.
   everything in that directory is ours, so no ignore-list) and are enabled by
   id in `plugins.toml`. Catalog plugins install into
   `~/.local/state/noctalia/plugins/` on enable and never touch the repo.
-  Plugin scripts hot-reload on save; a manifest (`plugin.toml`) change needs
-  `noctalia msg plugins disable <id>` + `enable <id>`. Entry ids must be
+  The shell's hot reload watches each script by path, and ours are stow
+  symlinks — an editor or `sed -i` that replaces the repo file leaves the
+  link untouched and the watch silent, so the running widget keeps its old
+  tree. After editing a plugin file, reload it: `noctalia msg plugins disable
+  <id>` + `enable <id>` (also required for a manifest change). Entry ids must be
   unique across *all* entry types in one plugin. `noctalia plugins lint
   <dir>` cross-checks a manifest against its scripts.
 - **hyprlock is the locker on every normal path.** Suspend, idle, and the

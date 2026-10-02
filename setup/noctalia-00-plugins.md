@@ -27,8 +27,9 @@ Tracked exception — a catalog plugin vendored under a local id:
   delete this entry.
 
 Writing one: `plugin.toml` manifest + Luau entry scripts; the API reference is
-`noctalia.d.luau` in the official-plugins repo. Scripts hot-reload on save;
-manifest changes need `noctalia msg plugins disable <id>` then `enable <id>`.
+`noctalia.d.luau` in the official-plugins repo. Reload after any edit with
+`noctalia msg plugins disable <id>` then `enable <id>`: the shell's hot reload
+watches the stowed symlink, not the repo file an editor replaces.
 `noctalia plugins lint <dir>` checks a manifest against its scripts, and
 `noctalia msg plugins list` shows load state. The shell log
 (`~/.cache/noctalia/noctalia.log`) carries `[luau]` errors with the entry name.
