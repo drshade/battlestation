@@ -1,7 +1,10 @@
 # VENDORED from the Noctalia community catalog (kenn/keybind-cheatsheet
 # 0.2.8, MIT) under a local id, carrying ONE patch: the `modifier_labels`
 # setting (panel.luau modifierLabel) so MOD3 can read "Hyper", plus the
-# PANEL_ID constants in widget.luau/panel.luau retargeted to this id. A catalog id
+# PANEL_ID constants in widget.luau/panel.luau retargeted to this id, and a
+# comment stripper that skips `--` inside string literals (service.luau
+# luaCommentStart) so binds whose command carries `--flags` keep their
+# description and category. A catalog id
 # is always re-exported from its checkout on enable, so the patch cannot
 # live on the installed copy. Exit path in setup/noctalia-00-plugins.md.
 id = "battlestation/keybind-cheatsheet"

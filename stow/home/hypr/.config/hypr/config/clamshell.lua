@@ -7,9 +7,12 @@
 
 local clamshell = "$HOME/.config/hypr/scripts/clamshell.sh"
 
+-- 10. Hardware
+
 -- React to the lid while the session runs. `locked = true` lets these fire on
 -- the lock screen too (you may shut the lid while locked). The shell follows
 -- output add/remove on its own (one bar per output), so nothing restarts here.
+-- (The "-- N. Name" header above is the cheatsheet's category, as in keybinds.lua.)
 hl.bind("switch:on:Lid Switch",  hl.dsp.exec_cmd(clamshell .. " on"),  { locked = true, description = "Lid closed: disable internal panel" })
 hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd(clamshell .. " off"), { locked = true, description = "Lid opened: enable internal panel" })
 
