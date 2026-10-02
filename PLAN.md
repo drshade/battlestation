@@ -111,8 +111,9 @@ dir + one hooks config).
   bounce/wiggle transforms (now a size hop + flicker). Settings UI is
   generated from the manifests, so Settings.qml is gone. Shutdown gotcha
   (single-instance lock can linger) is handled by `restart-shell.sh`.
-  Follow-ups: KDE Connect bar plugin (catalog pick), the per-locale clock
-  format, and a Luau-side test harness if the panels grow.
+  Follow-ups: KDE Connect bar plugin (catalog pick), and a Luau-side test
+  harness if the panels grow. The keybind cheatsheet is vendored until
+  community-plugins#903 (our four patches) ships as 0.3.0.
 - **bsctl grammar restructure (2026-07-04):** the whole CLI re-cut for
   humans and machines around domain nouns and a fixed nomenclature
   (bs-id/ws-id/display-id/display-name), designed in full before anyone

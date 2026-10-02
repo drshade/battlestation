@@ -17,10 +17,9 @@ catalogs and installs the enabled catalog plugins.
 Tracked exception — a catalog plugin vendored under a local id:
 
 - `keybind-cheatsheet` (`battlestation/keybind-cheatsheet`): the
-  `kenn/keybind-cheatsheet` 0.3.0 tree proposed upstream from the
-  `drshade/community-plugins` fork (branch `keybind-cheatsheet/labels-merge-mouse`:
-  modifier labels, numbered-run merging, named mouse buttons, string-safe
-  comment stripping). A catalog id is re-exported from its checkout on every
+  `kenn/keybind-cheatsheet` 0.3.0 tree proposed upstream as
+  noctalia-dev/community-plugins#903 (modifier labels, numbered-run merging,
+  named mouse buttons, string-safe comment stripping). A catalog id is re-exported from its checkout on every
   enable, so patches cannot live on the installed copy and a same-id local
   copy never wins — hence the local id. **De-vendor once upstream ships
   0.3.0**: switch `plugins.toml` (enabled list + `[plugin_settings]`) and
