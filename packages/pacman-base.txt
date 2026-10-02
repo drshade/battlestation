@@ -16,7 +16,7 @@ git                            # clone/manage this repo (ships with installer)
 openssh                        # ssh keys + agent (setup/sshkeys-*, stow/home/ssh-agent)
 
 # --- desktop: Hyprland + Noctalia ----------------------------------------
-cachyos-hypr-noctalia          # THE desktop meta: pulls noctalia-shell/quickshell, uwsm, portals, jq, wl-clipboard, …
+cachyos-hypr-noctalia          # THE desktop meta: pulls noctalia (v5 rewrite, unused), uwsm, portals, jq, wl-clipboard, …
 hyprland                       # compositor (config: stow/home/hypr)
 kitty                          # terminal (config: stow/home/kitty; the standard terminal — see setup/debloat-00-removing-alacritty.md)
 sddm                           # display manager
