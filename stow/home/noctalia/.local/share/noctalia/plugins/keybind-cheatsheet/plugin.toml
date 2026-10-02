@@ -1,17 +1,12 @@
-# VENDORED from the Noctalia community catalog (kenn/keybind-cheatsheet
-# 0.2.8, MIT) under a local id, carrying ONE patch: the `modifier_labels`
-# setting (panel.luau modifierLabel) so MOD3 can read "Hyper", plus the
-# PANEL_ID constants in widget.luau/panel.luau retargeted to this id, and a
-# comment stripper that skips `--` inside string literals (service.luau
-# luaCommentStart) so binds whose command carries `--flags` keep their
-# description and category, and a `merge_sequential` setting (panel.luau
-# mergeSequential) that collapses "… workspace 1/2/3" runs into one row, and
-# pointer buttons named by evdev code (LMB/RMB/MMB, not "Mouse 272"). A catalog id
-# is always re-exported from its checkout on enable, so the patch cannot
-# live on the installed copy. Exit path in setup/noctalia-00-plugins.md.
+# VENDORED from the Noctalia community catalog: kenn/keybind-cheatsheet with
+# the labels/merge/mouse/comment-stripper patches (the 0.3.0 PR, see
+# setup/noctalia-00-plugins.md), under a local id because a catalog id is
+# always re-exported from its checkout on enable. Only two deltas against the
+# PR tree: this id/author, and the PANEL_ID constants in widget.luau /
+# panel.luau retargeted to it. Drop the directory once upstream ships 0.3.0.
 id = "battlestation/keybind-cheatsheet"
 name = "Keybind Cheatsheet"
-version = "0.2.8"
+version = "0.3.0"
 plugin_api = 9
 author = "battlestation"
 license = "MIT"
