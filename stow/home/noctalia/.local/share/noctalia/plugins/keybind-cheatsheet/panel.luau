@@ -345,9 +345,6 @@ local function modifierLabel(modifier)
       return custom
     end
   end
-  if modifier == "SUPER" then
-    return "Super"
-  end
   return modifier:sub(1, 1) .. lower(modifier:sub(2))
 end
 
