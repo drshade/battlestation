@@ -1,6 +1,6 @@
 # battlestation
 
-My **battlestation** — the CachyOS + Hyprland + Noctalia (Quickshell) desktop
+My **battlestation** — the CachyOS + Hyprland + Noctalia desktop
 configuration and personal customisations for this machine, managed as dotfiles
 with [GNU Stow](https://www.gnu.org/software/stow/).
 

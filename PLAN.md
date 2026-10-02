@@ -21,8 +21,8 @@ event-to-pixel) and renders lines; commands flow back through bsctl
 (`ws focus` on click, `ws map set` on drag). Three harnesses live in
 production: Claude Code, Codex and Antigravity (`agents set --kind <k>` in
 each harness's stowed config; per-kind presentation via the registry in
-`Cfg.qml` — adding a harness = one registry entry + one asset dir + one
-hooks config).
+the plugin's `lib.luau` — adding a harness = one registry entry + one asset
+dir + one hooks config).
 
 ## Open
 
@@ -97,6 +97,22 @@ hooks config).
 
 ## Recently completed (prune once absorbed)
 
+- **Noctalia v5 (2026-10-02):** the shell moved from the frozen Quickshell
+  v4 line (noctalia-qs archived 2026-07) to the native v5 rewrite; the
+  pre-migration state is tagged `noctalia-v4`. Config is now hand-written
+  TOML (`stow/home/noctalia/.config/noctalia/*.toml`), plugins are Luau
+  under `.local/share/noctalia/plugins/` (the shell's local source), and the
+  20 shell keybinds go through `noctalia msg`. Both homegrown plugins were
+  rewritten, not ported: `battlestation/workspaces` = one `world` service
+  over `bsctl status --stream` + four bar widgets + three panels (Deck,
+  Switchboard, Workspaces); `battlestation/dictation` = a service state
+  machine + mic widget + mic picker. Lost on purpose: in-bar pill drag
+  (panel-only drag in v5 — reorder moved into the Workspaces panel) and the
+  bounce/wiggle transforms (now a size hop + flicker). Settings UI is
+  generated from the manifests, so Settings.qml is gone. Shutdown gotcha
+  (single-instance lock can linger) is handled by `restart-shell.sh`.
+  Follow-ups: KDE Connect bar plugin (catalog pick), the per-locale clock
+  format, and a Luau-side test harness if the panels grow.
 - **bsctl grammar restructure (2026-07-04):** the whole CLI re-cut for
   humans and machines around domain nouns and a fixed nomenclature
   (bs-id/ws-id/display-id/display-name), designed in full before anyone

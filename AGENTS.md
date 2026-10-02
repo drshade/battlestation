@@ -35,8 +35,8 @@ now, even if it costs a little more today.
 ## What this repo is
 
 Personal dotfiles, published as a reference for others, for a **CachyOS**
-machine running **Hyprland** (Wayland compositor) + **Noctalia** (a
-Quickshell-based desktop shell). Configs are version-controlled here and
+machine running **Hyprland** (Wayland compositor) + **Noctalia** (the native
+desktop shell: bar, launcher, panels; TOML config, Luau plugins). Configs are version-controlled here and
 symlinked into place with **GNU Stow**.
 
 ## The Stow model
@@ -65,8 +65,8 @@ symlinked into place with **GNU Stow**.
   (`bsctl agents usage`). Protocol contracts are specified in `ctl/src/lib.rs`;
   bsctl is the only thing that reads or writes its state files — everything
   else queries bsctl (one-shot or `--stream`). Plain system glue stays shell — and anything
-  that must work **when the system is broken** (`restart_crashed_lock.sh`,
-  `displays-on.sh`) stays shell *as policy*: a recovery path must never
+  that must work **when the system is broken** (`displays-on.sh`,
+  `restart-shell.sh`) stays shell *as policy*: a recovery path must never
   depend on a build artifact. bsctl is the one deployed artifact that is
   built rather than symlinked, so it can go stale against its source —
   doctor verifies freshness (fails when tracked `ctl/` files are newer than
@@ -200,62 +200,56 @@ live in `setup/README.md`.
   an output stuck disabled or at a bad mode. Runtime `hl.monitor` mode/scale evals
   only apply to an *enabled* output — on a disabled one they return "ok" but
   no-op; re-enable via `hyprctl reload` first.
-- **Noctalia rewrites its own config.** `stow/home/noctalia/.config/noctalia/settings.json`
-  is written by the running shell. Editing it on disk works, but if Noctalia is
-  running it may overwrite your edit on its next settings-write. After editing,
-  reload Noctalia (or log out/in) and re-verify with `grep`.
-- **Noctalia only scans apps (and plugin code) at shell start.** Quickshell's
-  desktop-entry service reads `XDG_DATA_DIRS`' `applications/` dirs once — a
-  newly installed app (pacman or flatpak) won't appear in the launcher until
-  the shell restarts (`Hyper+Backspace`). Same for edits to installed plugin
-  files: its file watcher covers Noctalia's own config, not the plugins dir.
-  The environment is NOT the problem — uwsm already exports the flatpak dirs
-  in `XDG_DATA_DIRS` (verified against the running process, 2026-07-02).
+- **Noctalia's config is layered; the GUI writes a different file.** The
+  shell merges every `*.toml` under `stow/home/noctalia/.config/noctalia/`
+  (alphabetically) and hot-reloads on save — those files are the source of
+  truth and the only thing stowed. Anything changed through the settings
+  window lands in `~/.local/state/noctalia/settings.toml`, an override layer
+  that WINS over the stowed files and is untracked. So a GUI tweak silently
+  shadows the repo: fold it into the TOML (`noctalia config export` prints
+  the merged result) and delete the override, or the next machine won't have
+  it. `noctalia config validate` checks the stowed files; the warning
+  `plugin_settings.<id>: no loaded plugin` is expected when validating with
+  the shell stopped.
+- **Noctalia plugins: ours are stowed, the rest are installed.** The two
+  homegrown plugins live in the `noctalia` package under
+  `.local/share/noctalia/plugins/<name>/` (the shell's *local* plugin source;
+  everything in that directory is ours, so no ignore-list) and are enabled by
+  id in `plugins.toml`. Catalog plugins install into
+  `~/.local/state/noctalia/plugins/` on enable and never touch the repo.
+  Plugin scripts hot-reload on save; a manifest (`plugin.toml`) change needs
+  `noctalia msg plugins disable <id>` + `enable <id>`. Entry ids must be
+  unique across *all* entry types in one plugin. `noctalia plugins lint
+  <dir>` cross-checks a manifest against its scripts.
 - **hyprlock is the locker on every normal path.** Suspend, idle, and the
   Noctalia session menu (`Hyper+L`) all end at **hyprlock**, driven by
   **hypridle** (`hypr/.config/hypr/hyprlock.conf` + `hypridle.conf`, started from
-  `autostart.lua`). Two settings make this hold and must stay in lockstep:
-  Noctalia's `general.lockOnSuspend` is `false` (so it doesn't lock on the sleep
-  path), and its session-menu **lock entry has a custom `command`,
-  `loginctl lock-session`** (`sessionMenu.powerOptions[action=lock].command`).
-  That custom command matters: `CompositorService.lock()` runs it and returns
-  *before* activating Noctalia's own `WlSessionLock`, so the menu bypasses the
-  in-shell locker entirely. `loginctl lock-session` emits the logind Lock signal,
-  which hypridle answers with hyprlock. hyprlock being a separate process is the
-  whole point — a Noctalia crash on resume can no longer strand the session on a
-  black `ext-session-lock`, the failure mode that drove the switch (see
-  `setup/deps-00-hyprlock-hypridle.md`). Clear the custom command or re-enable
-  `lockOnSuspend` and you're back to the fragile in-shell locker.
-- **Crashed Noctalia lock ⇒ stuck `ext-session-lock` (legacy path).** Noctalia's
-  `WlSessionLock` is no longer reached in normal use (per above), but the failure
-  mode is kept documented in case it's re-enabled: if Noctalia crashes *while
-  locked* the compositor keeps the session locked (for security) with nothing
-  rendering the password prompt — you land on Hyprland's bare "lock app died"
-  recovery screen. The compositor is fine; only the locker died, so **do not log
-  out or reboot** (you'd lose every running app). Recover with
-  `scripts/restart_crashed_lock.sh`, run **from a text VT** (Ctrl+Alt+F3) since
-  the GUI is locked. The on-screen hint Hyprland prints
-  (`hyprctl keyword allow_session_lock_restore 1` → `dispatch exec hyprlock`)
-  does *not* apply verbatim: the Lua parser rejects `keyword`/bare `dispatch`
-  (use `eval` + `hl.*`, per the gotcha above), and the crashed locker is
-  `qs -c noctalia-shell`, not hyprlock. The script does the Lua-native equivalent
-  (set `misc:allow_session_lock_restore`, ensure the shell is up, re-present the
-  lock); you then type your password to unlock normally.
-- **`stow/home/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme
-  changes (matugen-style output). It is derived output, not config — the
-  wallpaper/color settings in `settings.json` are the source of truth — so it
-  is gitignored, untracked, and must stay that way (see "Runtime-rewritten
-  tracked files" under working habits).
+  `autostart.lua`). Two settings in `noctalia/.config/noctalia/shell.toml`
+  make this hold and must stay in lockstep: `[lockscreen]` has `enabled =
+  false` and `lock_before_suspend = false` (the shell never draws a lock
+  surface and never locks on the sleep path), and the session menu's lock
+  action carries `command = "loginctl lock-session"`, which emits the logind
+  Lock signal that hypridle answers with hyprlock. hyprlock being a separate
+  process is the whole point — a shell crash can never strand the session on
+  a black `ext-session-lock` (see `setup/deps-00-hyprlock-hypridle.md`).
+  Re-enable the shell's lockscreen or drop the custom command and you are back
+  to an in-shell locker; if you ever do, know the recovery for a locker that
+  crashes *while locked*: the compositor keeps the lock (for security) with
+  nothing drawing the prompt. Do **not** log out or reboot — from a text VT
+  set `misc:allow_session_lock_restore` via `hyprctl eval` (the Lua parser
+  rejects `hyprctl keyword`) and relaunch the locker so it adopts the lock.
 - **Two-terminal trap (resolved).** Hyprland's terminal is set in
-  `stow/home/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
-  launcher uses `appLauncher.terminalCommand` in its `settings.json`. These are
-  independent — changing one does not change the other. We standardized on
-  **kitty** in both (see `setup/debloat-00-removing-alacritty.md`).
-- **Third-party Noctalia plugins are untracked by design.** `.gitignore`
-  default-denies `…/noctalia/plugins/`; the plugin manager owns that code and
-  the tracked `plugins.json` is the registry. `!` opt-ins exist only for
-  plugins whose source of truth is this repo — see
-  `setup/noctalia-00-plugins.md` before adding one.
+  `stow/home/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`);
+  Noctalia's launcher resolves terminal apps through the `$TERMINAL`
+  environment variable (never put `-e` in it). These are independent —
+  changing one does not change the other. We standardized on **kitty** (see
+  `setup/debloat-00-removing-alacritty.md`).
+- **The shell is single-instance and can linger on shutdown.** `pkill -x
+  noctalia` closes its surfaces but the process has been seen to hang
+  afterwards, still holding the instance lock, so an immediate relaunch fails
+  with "already running" and the desktop sits bar-less. Restart through
+  `scripts/restart-shell.sh` (Hyper+Backspace), which waits for the old
+  process and finishes it off if it lingers — never a bare `pkill; noctalia`.
 - **Secrets / machine-local state** must never be committed. See `.gitignore`
   (e.g. `fish_variables`). When adding a package, scan it for tokens/state
   before staging.
@@ -298,8 +292,9 @@ live in `setup/README.md`.
 - **Runtime-rewritten tracked files are handled by mechanism, not vigilance.**
   When an app churns a file at runtime, classify it and wire up the matching
   defense — don't fall back to "remember not to commit it":
-  - **Derived output** — regenerable from other tracked config (e.g. Noctalia's
-    `colors.json`, rebuilt from the wallpaper/color settings): **gitignore it**.
+  - **Derived output** — regenerable from other tracked config (e.g. the
+    theme files Noctalia's templates write into `kitty/` and `btop/`, rebuilt
+    from `theme.toml` on every palette change): **gitignore it**.
     Derived ≠ source of truth; tracking it only records churn.
   - **Merged config** — a file this repo owns that the app also rewrites
     runtime keys into (e.g. Claude Code's `settings.json`, where it

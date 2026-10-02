@@ -46,11 +46,8 @@ outputs on the wrong side: `scripts/displays-on.sh` (wake, idempotent) and its
 mirror `scripts/displays-off.sh` (blank). To change the delay, edit the second
 listener's `timeout`.
 
-Two `settings.json` values route everything to hyprlock and must stay in
-lockstep: `general.lockOnSuspend` is `false` (Noctalia doesn't lock on sleep),
-and the session menu's lock entry
-(`sessionMenu.powerOptions[action=lock].command`) is `loginctl lock-session` —
-`CompositorService.lock()` runs that and returns before its own `WlSessionLock`,
-so `Hyper+L` → lock also lands on hyprlock. Noctalia's in-shell locker is thus
-unreached in normal use; `restart_crashed_lock.sh` survives only for the case it
-is deliberately re-enabled.
+Two values in Noctalia's `shell.toml` route everything to hyprlock and must
+stay in lockstep: `[lockscreen]` is `enabled = false` with
+`lock_before_suspend = false` (the shell neither draws a lock surface nor locks
+on sleep), and the session menu's lock action has `command = "loginctl
+lock-session"`, so `Hyper+L` → lock also lands on hyprlock.

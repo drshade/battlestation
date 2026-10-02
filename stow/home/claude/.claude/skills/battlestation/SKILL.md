@@ -2,7 +2,7 @@
 name: battlestation
 description: >-
   Context for "battlestation" — The User's personal machine: a CachyOS +
-  Hyprland + Noctalia (Quickshell) desktop whose configuration lives in the
+  Hyprland + Noctalia desktop whose configuration lives in the
   dotfiles repo at ~/dev/battlestation. Load this BEFORE touching anything
   about THIS machine, whether the user is ASKING how something works or
   TELLING you to change/fix/configure it — displays and monitors (scale,
@@ -27,7 +27,7 @@ It is a single git repository — the source of truth for how the system is set 
 - **Repo:** `~/dev/battlestation` (remote: `git@github.com:drshade/battlestation.git`)
 - **OS:** CachyOS (Arch-based)
 - **Compositor:** Hyprland (Wayland)
-- **Shell/UI:** Noctalia — a Quickshell-based desktop shell
+- **Shell/UI:** Noctalia (v5, native) — bar, launcher, panels; config is TOML, plugins are Luau
 - **Login shell:** fish
 - **Dotfile management:** GNU Stow, grouped by target root: `stow/<group>/<pkg>/`
   (`home/` → `$HOME`, `root/` → `/` for system configs like `/etc`)
