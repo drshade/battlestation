@@ -227,9 +227,11 @@ live in `setup/README.md`.
   `autostart.lua`). Two settings in `noctalia/.config/noctalia/shell.toml`
   make this hold and must stay in lockstep: `[lockscreen]` has `enabled =
   false` and `lock_before_suspend = false` (the shell never draws a lock
-  surface and never locks on the sleep path), and the session menu's lock
-  action carries `command = "loginctl lock-session"`, which emits the logind
-  Lock signal that hypridle answers with hyprlock. hyprlock being a separate
+  surface and never locks on the sleep path), and the session menu's Lock
+  button is a custom `action = "command"` running `loginctl lock-session`,
+  which emits the logind Lock signal that hypridle answers with hyprlock.
+  (The built-in `lock` action is hidden whenever the shell's lockscreen is
+  disabled, custom command or not — hence the custom button.) hyprlock being a separate
   process is the whole point — a shell crash can never strand the session on
   a black `ext-session-lock` (see `setup/deps-00-hyprlock-hypridle.md`).
   Re-enable the shell's lockscreen or drop the custom command and you are back

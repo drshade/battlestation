@@ -49,5 +49,6 @@ listener's `timeout`.
 Two values in Noctalia's `shell.toml` route everything to hyprlock and must
 stay in lockstep: `[lockscreen]` is `enabled = false` with
 `lock_before_suspend = false` (the shell neither draws a lock surface nor locks
-on sleep), and the session menu's lock action has `command = "loginctl
-lock-session"`, so `Hyper+L` → lock also lands on hyprlock.
+on sleep), and the session menu's Lock button is a custom `action = "command"`
+running `loginctl lock-session`, so `Hyper+L` → lock also lands on hyprlock
+(the built-in `lock` action is hidden while the shell's lockscreen is off).

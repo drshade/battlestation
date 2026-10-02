@@ -26,17 +26,21 @@ categories = true
 [shell.screenshot]
 annotate = true               # region captures open in the annotation editor too
 
-# Session menu. The lock entry runs `loginctl lock-session` instead of the
-# shell's own locker: hypridle answers the logind Lock signal with hyprlock,
-# a separate process, so a shell crash can never strand a locked session
-# (see setup/deps-00-hyprlock-hypridle.md). Keep this in lockstep with
-# [lockscreen] below.
+# Session menu. Lock is a CUSTOM button running `loginctl lock-session`:
+# hypridle answers the logind Lock signal with hyprlock, a separate process,
+# so a shell crash can never strand a locked session (see
+# setup/deps-00-hyprlock-hypridle.md). It cannot be the built-in `lock`
+# action — the shell hides that one whenever its own lockscreen is disabled
+# ([lockscreen] below), which it must stay. Hibernate and reboot-to-UEFI
+# are custom buttons too (no built-in action for either).
 [shell.session]
 show_shortcuts = true
 
 [[shell.session.actions]]
-action = "lock"
+action = "command"
 command = "loginctl lock-session"
+label = "Lock"
+glyph = "lock"
 countdown_seconds = 10
 shortcut = "1"
 
@@ -46,7 +50,10 @@ countdown_seconds = 10
 shortcut = "2"
 
 [[shell.session.actions]]
-action = "hibernate"
+action = "command"
+command = "systemctl hibernate"
+label = "Hibernate"
+glyph = "moon"
 countdown_seconds = 10
 shortcut = "3"
 
@@ -67,7 +74,10 @@ shortcut = "6"
 variant = "destructive"
 
 [[shell.session.actions]]
-action = "reboot_to_uefi"
+action = "command"
+command = "systemctl reboot --firmware-setup"
+label = "UEFI"
+glyph = "cpu"
 countdown_seconds = 10
 shortcut = "7"
 
