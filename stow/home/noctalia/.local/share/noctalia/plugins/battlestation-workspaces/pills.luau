@@ -299,13 +299,15 @@ local function render(now)
     end
     table.insert(sig, `{wsId}|{role}|{label}|{props.opacity}`)
     if cfg.barDrag then
-      -- The source wraps the whole pill: pointer cursor (not a grip), and the
-      -- pill's tooltip rides on the source, whose input area owns hover.
-      local tip = props.tooltip
-      props.tooltip = nil
+      -- The source wraps the whole pill, and its input area owns the pointer:
+      -- the pill's tooltip and click move onto the source (a press released
+      -- before the drag threshold is the click), with the pointer cursor since
+      -- a pill is an item, not a grip.
+      local tip, click = props.tooltip, props.onClick
+      props.tooltip, props.onClick = nil, nil
       table.insert(pills, gapZone(#pills // 2 + 1))
       table.insert(pills, ui.dragSource({ key = `drag-{wsId}`, dragType = DRAG, payload = tostring(wsId),
-        previewAncestor = 0, liftFromLayout = true, grabCursor = false, tooltip = tip }, { ui.row(props, children) }))
+        previewAncestor = 0, liftFromLayout = true, grabCursor = false, tooltip = tip, onClick = click }, { ui.row(props, children) }))
     else
       table.insert(pills, ui.row(props, children))
     end
