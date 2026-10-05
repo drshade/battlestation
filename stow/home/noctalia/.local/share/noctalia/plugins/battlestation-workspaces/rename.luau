@@ -40,7 +40,8 @@ function render()
       ui.button({ glyph = "x", variant = "ghost", controlSize = "sm", onClick = function() panel.close() end }),
     }),
     ui.input({
-      key = `name-{ws}-{openNonce}`, value = target.name, focus = true, controlSize = "md",
+      -- selectAll: the first keystroke replaces the old name, Backspace clears it.
+      key = `name-{ws}-{openNonce}`, value = target.name, focus = true, selectAll = true, controlSize = "md",
       placeholder = "Name (empty resets to the number) — Enter to apply",
       onSubmit = function(v)
         lib.bsctl({ "ws", "name", "set", "--ws-id", ws, "--name", v })
