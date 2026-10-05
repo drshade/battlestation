@@ -23,22 +23,23 @@ keybinds use; `noctalia msg panel-toggle <bogus>` prints the live panel ids.
 
 ## Local build override (bar drag-and-drop)
 
-Until upstream ships plugin API 33 (noctalia-dev/noctalia PR from the
-`drshade/noctalia` fork, branch `bar-plugin-drag-drop`), the shell runs from a
-local release build installed under `~/.local`, which precedes `/usr/bin` on
-PATH so autostart and `restart-shell.sh` pick it up unchanged:
+Until upstream ships them, the shell runs from a local release build of the
+`drshade/noctalia` fork's `local-build` branch — the two proposed changes
+(`bar-plugin-drag-drop`: drag-and-drop in bar plugin widgets; `input-select-all`:
+the `selectAll` input prop the rename dialog uses) on top of upstream main —
+installed under `~/.local`, which precedes `/usr/bin` on PATH so autostart and
+`restart-shell.sh` pick it up unchanged:
 
 ```sh
-cd ~/dev/noctalia && just configure release ~/.local && just build release && just install release
+cd ~/dev/noctalia && git switch local-build && just configure release ~/.local && just build release && just install release
 ```
 
 Build deps: `sudo pacman -S meson just nlohmann-json stb` (plus what
 BUILDING.md lists; the CachyOS package already pulled the runtime libs).
 `bar_drag = true` in `plugins.toml` depends on this build — on the packaged
-5.2.0 the pills would vanish. **Remove once upstream ships it**: `rm
-~/.local/bin/noctalia && rm -rf ~/.local/share/noctalia/assets`, set
-`bar_drag` back to false only if the packaged version still lacks API 33,
-delete this section.
+5.2.0 the pills would vanish. **Remove once upstream ships both**: `rm
+~/.local/bin/noctalia && rm -rf ~/.local/share/noctalia/assets`, then delete
+this section (if only one has shipped, keep the local build).
 
 ## Leftovers from a Quickshell-era install
 
