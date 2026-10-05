@@ -2,8 +2,8 @@
 -- Workspace pills for THIS bar's output: one capsule per workspace in
 -- battlespace order, labelled by bs-id ("3 - name"), carrying one animated
 -- bot per agent session on it (plus smaller sub-bots for running subagents).
--- Click a pill → `bsctl ws focus`. Right-click anywhere → the Workspaces
--- panel (rename / reorder). Pure presentation over the world state.
+-- Click a pill → `bsctl ws focus`; drag one onto a gap → `bsctl ws map set`;
+-- right-click anywhere → the rename panel. Pure presentation over the world state.
 --
 -- Each bar instance shows ONLY the workspaces on its own output, but the
 -- order and bs numbers stay GLOBAL — bs-ids are what SUPER+N addresses, so a
@@ -370,5 +370,5 @@ function onConfigChanged()
 end
 
 function onRightClick()
-  noctalia.togglePanel("battlestation/workspaces:workspaces")
+  noctalia.togglePanel("battlestation/workspaces:rename")
 end

@@ -177,12 +177,12 @@ height = 520
 placement = "attached"
 keyboard_focus = "on_demand"
 
-# Workspaces: rename + reorder (battlespace order). `panel-toggle … rename`
-# opens with the focused display's active workspace in edit.
+# Rename the active workspace (HYPER+R, right-click on the pills). Reorder
+# is a drag in the bar.
 [[panel]]
-id = "workspaces"
-entry = "workspaces.luau"
-width = 560
-height = 460
+id = "rename"
+entry = "rename.luau"
+width = 420
+height = 120
 placement = "attached"
 keyboard_focus = "exclusive"

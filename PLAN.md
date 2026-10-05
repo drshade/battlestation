@@ -105,10 +105,11 @@ dir + one hooks config).
   20 shell keybinds go through `noctalia msg`. Both homegrown plugins were
   rewritten, not ported: `battlestation/workspaces` = one `world` service
   over `bsctl status --stream` + four bar widgets + three panels (Deck,
-  Switchboard, Workspaces); `battlestation/dictation` = a service state
-  machine + mic widget + mic picker. Lost on purpose: in-bar pill drag
-  (panel-only drag in v5 — reorder moved into the Workspaces panel) and the
-  bounce/wiggle transforms (now a size hop + flicker). Settings UI is
+  Switchboard, Rename); `battlestation/dictation` = a service state
+  machine + mic widget + mic picker. In-bar pill drag came back via a shell
+  patch (drag-and-drop in bar plugin widgets, proposed upstream from the
+  `drshade/noctalia` fork; a local build runs until it ships). Lost on
+  purpose: the bounce/wiggle transforms (now a size hop + flicker). Settings UI is
   generated from the manifests, so Settings.qml is gone. Shutdown gotcha
   (single-instance lock can linger) is handled by `restart-shell.sh`.
   Follow-ups: KDE Connect bar plugin (catalog pick), and a Luau-side test
