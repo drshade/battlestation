@@ -371,7 +371,13 @@ impl Identity {
     /// (session, ws, win) — empty session / nulls while unresolved.
     fn get(&mut self) -> (String, Option<i64>, Option<String>) {
         if self.resolved.is_none() {
-            let (_, harness) = sys::ancestor_chain(&self.kind);
+            // Codex spawns MCP servers from its shared daemon, in the
+            // session's working directory: resolve_harness turns that into
+            // the session's own TUI (see sys).
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let (_, harness) = sys::resolve_harness(&self.kind, &cwd);
             self.resolved =
                 harness.and_then(|pid| sessions::session_by_pid(&sys::state_dir(), pid));
         }

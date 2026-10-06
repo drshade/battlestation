@@ -95,6 +95,91 @@ pub fn ancestor_chain(kind: &str) -> (Vec<i64>, Option<i64>) {
     (pids, harness)
 }
 
+/// [`ancestor_chain`] from an arbitrary pid instead of this process.
+pub fn ancestors_of(start: i64) -> Vec<i64> {
+    let mut pids = Vec::new();
+    let mut pid = start;
+    while pid > 1 {
+        pids.push(pid);
+        match ppid_of(pid) {
+            Some(p) if p != pid => pid = p,
+            _ => break,
+        }
+    }
+    pids
+}
+
+/// Resolve the harness process a hook (or MCP server) belongs to, with the
+/// Codex correction. Codex runs hooks and MCP servers from one shared
+/// `codex app-server` daemon, which hangs under whichever TUI first started
+/// it — so ancestry alone names that FIRST session's terminal for EVERY
+/// Codex session. When the ancestor harness is such a daemon, re-resolve by
+/// working directory: the one live TUI process of this kind (comm == kind,
+/// not a daemon) whose cwd is `cwd`. Ambiguous (none, or several TUIs in the
+/// same directory) keeps the ancestry answer rather than guessing.
+/// Returns (pids to match against the compositor's clients, harness pid).
+pub fn resolve_harness(kind: &str, cwd: &str) -> (Vec<i64>, Option<i64>) {
+    let (pids, harness) = ancestor_chain(kind);
+    let Some(h) = harness else {
+        return (pids, harness);
+    };
+    if !is_daemon_cmdline(&cmdline_of(h)) {
+        return (pids, harness);
+    }
+    match pick_tui(&harness_tuis(kind), cwd) {
+        Some(tui) => (ancestors_of(tui), Some(tui)),
+        None => (pids, harness),
+    }
+}
+
+/// A harness process that is a shared daemon rather than an interactive
+/// instance (Codex: `codex app-server …`).
+fn is_daemon_cmdline(cmdline: &str) -> bool {
+    cmdline.contains("app-server")
+}
+
+fn cmdline_of(pid: i64) -> String {
+    fs::read(format!("/proc/{pid}/cmdline"))
+        .map(|b| String::from_utf8_lossy(&b).replace('\0', " "))
+        .unwrap_or_default()
+}
+
+/// Live interactive harness processes of `kind`: (pid, cwd), daemons excluded.
+fn harness_tuis(kind: &str) -> Vec<(i64, String)> {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for e in entries.flatten() {
+        let Ok(pid) = e.file_name().to_string_lossy().parse::<i64>() else {
+            continue;
+        };
+        let comm_ok = fs::read_to_string(format!("/proc/{pid}/comm"))
+            .is_ok_and(|c| comm_matches_kind(c.trim_end_matches('\n'), kind));
+        if !comm_ok || is_daemon_cmdline(&cmdline_of(pid)) {
+            continue;
+        }
+        if let Ok(cwd) = fs::read_link(format!("/proc/{pid}/cwd")) {
+            out.push((pid, cwd.to_string_lossy().into_owned()));
+        }
+    }
+    out
+}
+
+/// The pure half of [`resolve_harness`]: exactly one candidate in `cwd`
+/// wins; none or several is "unknown".
+fn pick_tui(candidates: &[(i64, String)], cwd: &str) -> Option<i64> {
+    if cwd.is_empty() {
+        return None;
+    }
+    let mut hits = candidates.iter().filter(|(_, c)| c == cwd).map(|(p, _)| *p);
+    let first = hits.next()?;
+    if hits.next().is_some() {
+        return None;
+    }
+    Some(first)
+}
+
 /// [`ancestor_chain`]'s comm rule: exact match, or — for a kind longer than
 /// comm's 15-char limit — the kernel's truncation of it (exactly 15 chars
 /// AND a prefix of the kind; shorter prefixes are different names).
@@ -196,6 +281,28 @@ mod tests {
         let comm = comm.trim_end_matches('\n');
         let (_, found) = ancestor_chain(comm);
         assert_eq!(found, Some(parent));
+    }
+
+    #[test]
+    fn daemon_cmdline_is_the_app_server() {
+        assert!(is_daemon_cmdline("/home/x/.codex/packages/app-server-daemon/releases/0.1/bin/codex app-server --listen"));
+        assert!(!is_daemon_cmdline("/home/x/.local/bin/codex resume"));
+        assert!(!is_daemon_cmdline("/home/x/.local/bin/codex"));
+    }
+
+    #[test]
+    fn tui_pick_needs_exactly_one_match() {
+        let c = vec![(10, "/a".to_string()), (11, "/b".to_string()), (12, "/b".to_string())];
+        assert_eq!(pick_tui(&c, "/a"), Some(10));
+        assert_eq!(pick_tui(&c, "/b"), None, "two TUIs in one directory is ambiguous");
+        assert_eq!(pick_tui(&c, "/c"), None);
+        assert_eq!(pick_tui(&c, ""), None);
+    }
+
+    #[test]
+    fn ancestors_of_self_matches_ancestor_chain() {
+        let (chain, _) = ancestor_chain("claude");
+        assert_eq!(ancestors_of(std::process::id() as i64), chain);
     }
 
     #[test]

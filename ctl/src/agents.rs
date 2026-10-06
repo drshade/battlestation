@@ -201,7 +201,10 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str, over: Option<&
         return;
     }
 
-    let (pids, harness_pid) = sys::ancestor_chain(kind);
+    // Ancestry names the harness — corrected for Codex, whose hooks run from
+    // a shared daemon (see sys::resolve_harness): the payload's cwd picks the
+    // TUI this session actually lives in.
+    let (pids, harness_pid) = sys::resolve_harness(kind, &proto::field(&d, "cwd"));
     // Fall back to our immediate parent so the pid field is never omitted.
     let pid = harness_pid.unwrap_or_else(|| std::os::unix::process::parent_id() as i64);
 
@@ -252,7 +255,7 @@ fn existing_title(dir: &Path, sid: &str) -> String {
 
 /// The testable end of the session write path: everything hyprctl/proc
 /// derived arrives as plain values (`ws`/`win`/`term_pid` from
-/// client_for_pids, `pid` from ancestor_chain), so tests can exercise the
+/// client_for_pids, `pid` from resolve_harness), so tests can exercise the
 /// write without a compositor.
 #[allow(clippy::too_many_arguments)]
 pub fn write_session(

@@ -50,8 +50,14 @@
 //!   is the HARNESS process — the nearest ancestor whose comm matches the
 //!   kind (harness binaries are named after their kind: comm `claude` /
 //!   `codex`, both verified live; comm is the kernel's 15-char truncation,
-//!   so longer kinds match on their truncation) — and the scan sweeps
-//!   session files whose pid is dead. `status` is semantic; mapping states
+//!   so longer kinds match on their truncation), with one correction:
+//!   Codex runs hooks and MCP servers from a shared `codex app-server`
+//!   daemon parented under whichever TUI first started it, so ancestry
+//!   would file EVERY Codex session under that first terminal. When the
+//!   ancestor harness is that daemon, the hook payload's `cwd` (the MCP
+//!   server's own cwd) picks the one live Codex TUI in that directory
+//!   instead; two TUIs in one directory stay ambiguous and keep the
+//!   ancestry answer. The scan sweeps session files whose pid is dead. `status` is semantic; mapping states
 //!   to colours is the widget's concern. `title` (the bot's hover tooltip)
 //!   is kind-agnostic precedence, first non-empty wins: (1) the LAST
 //!   `"type":"ai-title"` record in the transcript, whitespace-collapsed to
@@ -348,8 +354,8 @@
 //!
 //! SESSION IDENTITY: no harness tells an MCP server which session spawned
 //! it, so the server resolves its own — the /proc ancestor walk names the
-//! harness process (comm == kind, the hook rule) and the session file
-//! recording that pid IS the session; its sid + ws ride every posted ask.
+//! harness process (comm == kind, the hook rule, with the same Codex daemon
+//! correction by cwd) and the session file recording that pid IS the session; its sid + ws ride every posted ask.
 //! Unresolvable (headless, hooks not yet fired) degrades to posting with
 //! empty session/null ws and retries per call — never fails. The identity
 //! is also HANDED TO THE AGENT rather than left to archaeology: `whoami`
