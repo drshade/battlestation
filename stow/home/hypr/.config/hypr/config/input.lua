@@ -13,10 +13,20 @@ hl.config({
         touchpad = {
             -- macOS-style clickfinger: physical click with 1 finger = left,
             -- 2 fingers = right, 3 fingers = middle (replaces corner zones).
-            -- Two-finger *tap* already right-clicks via tap-to-click.
             clickfinger_behavior = true,
+            -- Only a physical press clicks; a light tap fires too easily
+            -- mid-typing or while resting a palm.
+            tap_to_click = false,
         },
     },
+})
+
+-- The touchpad gets mild acceleration and a little extra speed; mice stay on
+-- the flat profile above. A name with no matching device is ignored.
+hl.device({
+    name = "ven_2c2f:00-2c2f:0034-touchpad",
+    accel_profile = "adaptive",
+    sensitivity = 0.2,
 })
 
 hl.gesture({ fingers = 4, direction = "horizontal", action = "workspace" })
