@@ -761,9 +761,14 @@
 //! the request socket
 //! `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`, one
 //! request per connection (write command, shutdown write, read reply to
-//! EOF). Instance discovery: the env var first (empty counts as unset),
-//! else the newest-mtime dir under `$XDG_RUNTIME_DIR/hypr/` — the
+//! EOF). Instance discovery: the env var when that instance is live, else
+//! the newest-mtime live dir under `$XDG_RUNTIME_DIR/hypr/` — the
 //! restart_crashed_lock.sh walk, so VT/recovery contexts still resolve.
+//! Live = `hyprland.lock`'s pid is a running `Hyprland`; an inherited
+//! signature is not trusted on its own, because processes that outlive a
+//! compositor restart (the Codex app-server daemon) keep the dead one's.
+//! Nothing live falls back to env-then-newest; the hyprctl fallback is
+//! pinned to the resolved instance.
 //!
 //! Wire format, verified live against Hyprland 0.55.4 (2026-07-03):
 //! `j/<query>` returns JSON (`j/monitors all`, `j/workspaces`,

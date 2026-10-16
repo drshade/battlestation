@@ -41,16 +41,24 @@
 //! of breaking. Re-sending after a non-ok reply is safe: the error reply
 //! means the compositor rejected the request rather than executing it.
 //!
-//! Instance discovery: `$HYPRLAND_INSTANCE_SIGNATURE` first (empty counts as
-//! unset), else the newest-mtime dir under `<runtime>/hypr/` — the
+//! Instance discovery: `$HYPRLAND_INSTANCE_SIGNATURE` when that instance is
+//! live, else the newest-mtime LIVE dir under `<runtime>/hypr/` — the
 //! restart_crashed_lock.sh walk, so VT/recovery contexts without the env var
-//! still find the running instance.
+//! still find the running instance. Live = the pid on `hyprland.lock`'s first
+//! line is a running `Hyprland` (comm-checked, so a recycled pid doesn't
+//! count). The env var alone is not trusted: a long-lived process started
+//! before a compositor restart (the Codex app-server daemon, parented under
+//! systemd --user) keeps the dead instance's signature forever, and its
+//! hooks would otherwise query a socket nobody listens on. With no live
+//! instance at all the pick is the plain env-then-newest one, so the failure
+//! looks exactly as it did before. The hyprctl fallback is pinned to the
+//! resolved instance for the same reason.
 
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde_json::Value;
@@ -67,10 +75,10 @@ fn runtime_dir() -> PathBuf {
 }
 
 /// Newest-mtime pick among instance-dir candidates — the
-/// restart_crashed_lock.sh `ls -t | head -n1` walk, for when
-/// `$HYPRLAND_INSTANCE_SIGNATURE` is unset. Mtime ties break toward the
-/// lexically greater name so the pick stays deterministic (ls -t leaves tie
-/// order unspecified; any stable rule works, this one needs no extra state).
+/// restart_crashed_lock.sh `ls -t | head -n1` walk. Mtime ties break toward
+/// the lexically greater name so the pick stays deterministic (ls -t leaves
+/// tie order unspecified; any stable rule works, this one needs no extra
+/// state).
 pub fn newest_instance(entries: &[(String, f64)]) -> Option<&str> {
     entries
         .iter()
@@ -78,25 +86,94 @@ pub fn newest_instance(entries: &[(String, f64)]) -> Option<&str> {
         .map(|(name, _)| name.as_str())
 }
 
-/// The instance dir holding both sockets: `<runtime>/hypr/<instance>/`.
-/// None only when discovery itself fails (no `hypr/` dir, no instance dirs).
-fn instance_dir() -> Option<PathBuf> {
+/// The pure half of [`instance_name`]. `entries` are (name, mtime, live).
+/// A live env instance wins; else the newest live one; with nothing live,
+/// the env instance (even unlisted) or the newest dir — the pre-liveness
+/// pick, so a compositor-less context fails the same way it always did.
+pub fn pick_instance<'a>(
+    env: Option<&'a str>,
+    entries: &'a [(String, f64, bool)],
+) -> Option<&'a str> {
+    if let Some(his) = env
+        && entries.iter().any(|(n, _, live)| *live && n == his)
+    {
+        return Some(his);
+    }
+    let live: Vec<(String, f64)> = entries
+        .iter()
+        .filter(|(_, _, live)| *live)
+        .map(|(n, m, _)| (n.clone(), *m))
+        .collect();
+    if let Some(n) = newest_instance(&live) {
+        return entries
+            .iter()
+            .map(|(name, _, _)| name.as_str())
+            .find(|name| *name == n);
+    }
+    if env.is_some() {
+        return env;
+    }
+    let all: Vec<(String, f64)> = entries.iter().map(|(n, m, _)| (n.clone(), *m)).collect();
+    let n = newest_instance(&all)?.to_string();
+    entries
+        .iter()
+        .map(|(name, _, _)| name.as_str())
+        .find(|name| *name == n)
+}
+
+/// Is the compositor that owns this instance dir still running? The first
+/// line of `hyprland.lock` is its pid; a dead or recycled pid (comm is not
+/// `Hyprland`) means a stale dir left behind by a crash or restart.
+fn instance_live(dir: &Path) -> bool {
+    let Ok(lock) = fs::read_to_string(dir.join("hyprland.lock")) else {
+        return false;
+    };
+    let Some(pid) = lock
+        .lines()
+        .next()
+        .and_then(|l| l.trim().parse::<u32>().ok())
+    else {
+        return false;
+    };
+    fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim_end() == "Hyprland")
+}
+
+/// The instance signature to talk to (see the header's discovery rule).
+/// None only when there is no env var and no instance dir at all.
+fn instance_name() -> Option<String> {
     let hypr = runtime_dir().join("hypr");
-    match env::var_os("HYPRLAND_INSTANCE_SIGNATURE").filter(|v| !v.is_empty()) {
-        Some(his) => Some(hypr.join(his)),
-        None => {
-            let entries: Vec<(String, f64)> = fs::read_dir(&hypr)
-                .ok()?
-                .flatten()
+    let env = env::var("HYPRLAND_INSTANCE_SIGNATURE")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let entries: Vec<(String, f64, bool)> = fs::read_dir(&hypr)
+        .map(|rd| {
+            rd.flatten()
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                 .filter_map(|e| {
                     let mtime = sys::mtime_f64(&e.metadata().ok()?)?;
-                    Some((e.file_name().to_string_lossy().into_owned(), mtime))
+                    let live = instance_live(&e.path());
+                    Some((e.file_name().to_string_lossy().into_owned(), mtime, live))
                 })
-                .collect();
-            Some(hypr.join(newest_instance(&entries)?))
-        }
+                .collect()
+        })
+        .unwrap_or_default();
+    pick_instance(env.as_deref(), &entries).map(str::to_string)
+}
+
+/// The instance dir holding both sockets: `<runtime>/hypr/<instance>/`.
+fn instance_dir() -> Option<PathBuf> {
+    Some(runtime_dir().join("hypr").join(instance_name()?))
+}
+
+/// hyprctl aimed at the same instance the socket path resolved — it reads
+/// `$HYPRLAND_INSTANCE_SIGNATURE` too, so an inherited stale value would
+/// send the fallback to the same dead compositor.
+fn hyprctl() -> Command {
+    let mut cmd = Command::new("hyprctl");
+    if let Some(his) = instance_name() {
+        cmd.env("HYPRLAND_INSTANCE_SIGNATURE", his);
     }
+    cmd
 }
 
 /// The request socket: `<instance>/.socket.sock`. None when discovery fails —
@@ -136,7 +213,7 @@ pub fn json(query: &str) -> Option<Value> {
     {
         return Some(v);
     }
-    let out = Command::new("hyprctl")
+    let out = hyprctl()
         .args(query.split_whitespace())
         .arg("-j")
         .output()
@@ -173,11 +250,7 @@ fn ok_command(words: &[&str]) -> i32 {
     {
         return 0;
     }
-    match Command::new("hyprctl")
-        .args(words)
-        .stdout(Stdio::null())
-        .status()
-    {
+    match hyprctl().args(words).stdout(Stdio::null()).status() {
         Ok(s) => s.code().unwrap_or(1),
         Err(_) => {
             eprintln!("bsctl: hyprctl not found");
@@ -252,6 +325,42 @@ mod tests {
         assert_eq!(newest_instance(&entries), Some("bbb"));
         let entries = e(&[("aaa", 100.0), ("bbb", 100.0)]);
         assert_eq!(newest_instance(&entries), Some("bbb"));
+    }
+
+    fn l(rows: &[(&str, f64, bool)]) -> Vec<(String, f64, bool)> {
+        rows.iter()
+            .map(|(n, m, live)| (n.to_string(), *m, *live))
+            .collect()
+    }
+
+    #[test]
+    fn pick_instance_trusts_a_live_env_signature() {
+        let entries = l(&[("env_1", 100.0, true), ("new_2", 300.0, true)]);
+        assert_eq!(pick_instance(Some("env_1"), &entries), Some("env_1"));
+    }
+
+    #[test]
+    fn pick_instance_skips_a_dead_env_signature() {
+        // A daemon started before a compositor restart: its env names the
+        // dead instance, whose dir (and socket files) are still on disk.
+        let entries = l(&[("dead_1", 500.0, false), ("live_2", 300.0, true)]);
+        assert_eq!(pick_instance(Some("dead_1"), &entries), Some("live_2"));
+        assert_eq!(pick_instance(Some("gone_0"), &entries), Some("live_2"));
+    }
+
+    #[test]
+    fn pick_instance_prefers_live_over_newer_dead() {
+        let entries = l(&[("dead_9", 900.0, false), ("live_1", 100.0, true)]);
+        assert_eq!(pick_instance(None, &entries), Some("live_1"));
+    }
+
+    #[test]
+    fn pick_instance_without_live_keeps_the_old_pick() {
+        let entries = l(&[("old_1", 100.0, false), ("new_2", 300.0, false)]);
+        assert_eq!(pick_instance(Some("old_1"), &entries), Some("old_1"));
+        assert_eq!(pick_instance(Some("unlisted"), &entries), Some("unlisted"));
+        assert_eq!(pick_instance(None, &entries), Some("new_2"));
+        assert_eq!(pick_instance(None, &[]), None);
     }
 
     #[test]
