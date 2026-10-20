@@ -496,7 +496,7 @@ impl TestEnv {
 
 #[test]
 fn scale_up_from_nothing_seeds_nearest_rung_via_socket() {
-    // No state file: the reported scale 1.0 seeds rung 0, up -> rung 1.
+    // No state file: the reported scale 1.0 seeds rung 2, up -> rung 3.
     let env = TestEnv::new("scale-up-fresh");
     let fixture = scale_mons_fixture(1.0);
     let eval = scale_eval_req("1.25000");
@@ -521,15 +521,15 @@ fn scale_up_from_nothing_seeds_nearest_rung_via_socket() {
     );
     assert!(env.log("calls.log").is_empty());
     // the new rung index is persisted, index + newline
-    assert_eq!(fs::read(env.scale_state()).unwrap(), b"1\n");
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"3\n");
 }
 
 #[test]
 fn scale_up_prefers_saved_index_over_reported_scale() {
-    // Saved rung 3 disagrees with the reported scale 1.0 — the index wins
+    // Saved rung 5 disagrees with the reported scale 1.0 — the index wins
     // (Hyprland's grid snap makes the reported value untrustworthy).
     let env = TestEnv::new("scale-saved-index");
-    fs::write(env.scale_state(), "3\n").unwrap();
+    fs::write(env.scale_state(), "5\n").unwrap();
     let fixture = scale_mons_fixture(1.0);
     let eval = scale_eval_req("2.00000");
     let ws = scale_ws_fixture();
@@ -550,14 +550,14 @@ fn scale_up_prefers_saved_index_over_reported_scale() {
             WS_REQ.to_string(),
         ]
     );
-    assert_eq!(fs::read(env.scale_state()).unwrap(), b"4\n");
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"6\n");
 }
 
 #[test]
 fn scale_clamps_at_both_ends() {
-    // Top rung + up: stays 3.00000, index stays 6 — and still dispatches.
+    // Top rung + up: stays 3.00000, index stays 8 — and still dispatches.
     let env = TestEnv::new("scale-clamp-top");
-    fs::write(env.scale_state(), "6\n").unwrap();
+    fs::write(env.scale_state(), "8\n").unwrap();
     let fixture = scale_mons_fixture(3.0);
     let eval = scale_eval_req("3.00000");
     let ws = scale_ws_fixture();
@@ -577,12 +577,12 @@ fn scale_clamps_at_both_ends() {
             WS_REQ.to_string(),
         ]
     );
-    assert_eq!(fs::read(env.scale_state()).unwrap(), b"6\n");
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"8\n");
 
     // Bottom rung + down, seeded from the reported scale (no state file).
     let env = TestEnv::new("scale-clamp-bottom");
-    let fixture = scale_mons_fixture(1.0);
-    let eval = scale_eval_req("1.00000");
+    let fixture = scale_mons_fixture(0.75);
+    let eval = scale_eval_req("0.75000");
     let ws = scale_ws_fixture();
     env.start_socket(
         "testinst",
@@ -674,7 +674,7 @@ fn scale_falls_back_to_hyprctl() {
         ]
     );
     assert_eq!(env.log("eval.log"), vec![eval]);
-    assert_eq!(fs::read(env.scale_state()).unwrap(), b"1\n");
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"3\n");
 }
 
 #[test]
@@ -717,8 +717,8 @@ fn scale_value_evals_explicit_scale_and_seeds_nearest_rung() {
             WS_REQ.to_string(),
         ]
     );
-    // nearest rung to 1.3 is 1.25 (rung 1): later --up/--down step from there
-    assert_eq!(fs::read(env.scale_state()).unwrap(), b"1\n");
+    // nearest rung to 1.3 is 1.25 (rung 3): later --up/--down step from there
+    assert_eq!(fs::read(env.scale_state()).unwrap(), b"3\n");
 
     // a non-positive value is refused before any state or dispatch
     let out = env.display(&["set", "scale", "--value", "0"]);
@@ -756,7 +756,7 @@ fn scale_selector_targets_a_named_unfocused_monitor() {
     );
     assert_eq!(
         fs::read(env.run.join("hypr-display-scale.eDP-1")).unwrap(),
-        b"1\n"
+        b"3\n"
     );
     // an unknown selector errors listing the display numbering
     let out = env.display(&["set", "scale", "--display-id", "9", "--up"]);

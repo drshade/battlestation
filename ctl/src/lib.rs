@@ -701,8 +701,9 @@
 //!
 //! Step a monitor's scale along a fixed ladder at runtime, preserving its
 //! mode. The selector is optional and defaults to the FOCUSED monitor
-//! (what the zoom keybinds mean). The ladder is `1.0 1.25 1.5 1.75 2.0
-//! 2.5 3.0` (rung 0 = native). Hyprland snaps fractional scales to its own
+//! (what the zoom keybinds mean). The ladder is `0.75 0.8 1.0 1.25 1.5
+//! 1.75 2.0 2.5 3.0` (native 1.0 = rung 2; the rungs below it zoom out
+//! past native). Hyprland snaps fractional scales to its own
 //! 1/120 grid and the achievable values are irregular per panel, so the
 //! REPORTED scale can't drive deterministic stepping — the rung INDEX is
 //! persisted per monitor instead, at

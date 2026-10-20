@@ -20,8 +20,10 @@ use crate::ipc;
 use crate::proto::round_half_even;
 use crate::ws::lua_escape;
 
-/// The scale ladder — rung 0 = native; tune freely (script parity).
-pub const LADDER: [f64; 7] = [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
+/// The scale ladder — native 1.0 is rung 2; the two rungs below it zoom
+/// out past native (a larger logical desktop, downsampled to the panel).
+/// Tune freely: saved indices are runtime state, gone on reboot.
+pub const LADDER: [f64; 9] = [0.75, 0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
 
 pub enum Action {
     Up,
@@ -414,29 +416,31 @@ mod tests {
 
     #[test]
     fn nearest_rung_snaps_and_ties_break_low() {
-        assert_eq!(nearest_rung(1.0), 0);
-        assert_eq!(nearest_rung(3.0), 6);
+        assert_eq!(nearest_rung(1.0), 2);
+        assert_eq!(nearest_rung(0.8), 1);
+        assert_eq!(nearest_rung(3.0), 8);
         // Hyprland's 1/120-grid snap reports values off the ladder
-        assert_eq!(nearest_rung(1.241_666), 1); // snapped "1.25"
-        assert_eq!(nearest_rung(1.733_333), 3); // snapped "1.75"
+        assert_eq!(nearest_rung(1.241_666), 3); // snapped "1.25"
+        assert_eq!(nearest_rung(1.733_333), 5); // snapped "1.75"
         assert_eq!(nearest_rung(0.5), 0); // below the ladder
-        assert_eq!(nearest_rung(9.9), 6); // above the ladder
+        assert_eq!(nearest_rung(9.9), 8); // above the ladder
         // exact midpoints: python min() keeps the FIRST minimum (lower rung)
-        assert_eq!(nearest_rung(1.125), 0);
-        assert_eq!(nearest_rung(2.75), 5);
+        assert_eq!(nearest_rung(1.125), 2);
+        assert_eq!(nearest_rung(2.75), 7);
     }
 
     #[test]
     fn stepped_prefers_saved_and_clamps() {
         // no saved index: seed from the reported scale
-        assert_eq!(stepped(None, 1.0, 1), 1);
-        assert_eq!(stepped(None, 1.0, -1), 0); // bottom clamp
-        assert_eq!(stepped(None, 3.0, 1), 6); // top clamp
+        assert_eq!(stepped(None, 1.0, 1), 3);
+        assert_eq!(stepped(None, 1.0, -1), 1); // below native
+        assert_eq!(stepped(None, 0.75, -1), 0); // bottom clamp
+        assert_eq!(stepped(None, 3.0, 1), 8); // top clamp
         // saved index wins over a disagreeing reported scale
         assert_eq!(stepped(Some(3), 1.0, 1), 4);
         assert_eq!(stepped(Some(3), 1.0, -1), 2);
         // saved is not pre-clamped; the result is
-        assert_eq!(stepped(Some(99), 1.0, 1), 6);
+        assert_eq!(stepped(Some(99), 1.0, 1), 8);
         assert_eq!(stepped(Some(-5), 3.0, -1), 0);
     }
 
@@ -461,7 +465,8 @@ mod tests {
         assert_eq!(
             formatted,
             [
-                "1.00000", "1.25000", "1.50000", "1.75000", "2.00000", "2.50000", "3.00000"
+                "0.75000", "0.80000", "1.00000", "1.25000", "1.50000", "1.75000", "2.00000",
+                "2.50000", "3.00000"
             ]
         );
     }
