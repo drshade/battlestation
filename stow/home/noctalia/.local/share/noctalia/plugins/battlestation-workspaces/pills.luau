@@ -27,7 +27,7 @@ local function loadCfg()
   cfg.activeMs = tonumber(noctalia.getConfig("active_ms")) or 1000
   cfg.waitS = tonumber(noctalia.getConfig("wait_s")) or 30
   cfg.jitter = tonumber(noctalia.getConfig("jitter")) or 0.35
-  -- In-bar drag reorder needs a shell with bar drag-and-drop (plugin API 33);
+  -- In-bar drag reorder needs a shell with bar drag-and-drop (plugin API 38);
   -- on an older shell the drag nodes would be dropped WITH the pills inside
   -- them, so this stays opt-in.
   cfg.barDrag = noctalia.getConfig("bar_drag") == true

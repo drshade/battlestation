@@ -21,14 +21,14 @@ Restart with `Hyper+Backspace` (`scripts/restart-shell.sh`, which waits out
 the single-instance lock). `noctalia msg --help` lists every IPC verb the
 keybinds use; `noctalia msg panel-toggle <bogus>` prints the live panel ids.
 
-## Local build override (bar drag-and-drop)
+## Local build override (bar drag-and-drop, input select-all)
 
-Until upstream ships them, the shell runs from a local release build of the
-`drshade/noctalia` fork's `local-build` branch — the two proposed changes
-(`bar-plugin-drag-drop`: drag-and-drop in bar plugin widgets; `input-select-all`:
-the `selectAll` input prop the rename dialog uses) on top of upstream main —
-installed under `~/.local`, which precedes `/usr/bin` on PATH so autostart and
-`restart-shell.sh` pick it up unchanged:
+Until a release ships both, the shell runs from a local release build of the
+`drshade/noctalia` fork's `local-build` branch: upstream main (which has
+drag-and-drop in bar plugin widgets, plugin API 38) plus `input-select-all`
+(the `selectAll` input prop the rename dialog uses, API 40 on that branch;
+not yet upstream). It is installed under `~/.local`, which precedes
+`/usr/bin` on PATH, so autostart and `restart-shell.sh` pick it up unchanged:
 
 ```sh
 cd ~/dev/noctalia && git switch local-build && just configure release ~/.local && just build release && just install release
@@ -36,8 +36,9 @@ cd ~/dev/noctalia && git switch local-build && just configure release ~/.local &
 
 Build deps: `sudo pacman -S meson just nlohmann-json stb` (plus what
 BUILDING.md lists; the CachyOS package already pulled the runtime libs).
-`bar_drag = true` in `plugins.toml` depends on this build — on the packaged
-5.2.0 the pills would vanish. **Remove once upstream ships both**: `rm
+`bar_drag = true` in `plugins.toml` needs bar drag-and-drop (API 38): on a
+packaged shell older than that, the pills would vanish. **Remove once a
+release ships both**: `rm
 ~/.local/bin/noctalia && rm -rf ~/.local/share/noctalia/assets`, then delete
 this section (if only one has shipped, keep the local build).
 
