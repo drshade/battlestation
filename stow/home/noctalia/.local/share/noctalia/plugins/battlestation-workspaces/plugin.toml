@@ -172,8 +172,8 @@ keyboard_focus = "exclusive"
 [[panel]]
 id = "switchboard"
 entry = "switchboard.luau"
-width = 720
-height = 520
+width = 1240
+height = 720
 placement = "attached"
 keyboard_focus = "on_demand"
 

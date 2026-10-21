@@ -8,13 +8,16 @@
 -- A symmetric adjacency matrix: named live agents are both the rows and the
 -- columns, and a cell toggle links/unlinks that pair (each pair appears
 -- twice; both cells show the same state). Unnamed sessions are listed below
--- but cannot be wired — an agent must set_name first.
+-- but cannot be wired — an agent must set_name first. Messages not yet
+-- delivered to their recipient are listed under the matrix (the +N counts).
 local lib = require("./lib.luau")
 
 local comms = noctalia.state.get("comms") or {}
 local pending = {} -- pairKey -> true while a link/unlink round-trips
+local mail = {} -- undelivered messages, newest last (from `comms history`)
+local mailUnread = -1 -- total unread the list was fetched for
 
-local CELL = 96 -- column width (px); the row heading column is wider
+local CELL = 120 -- column width (px): fits a two-word role name; HEAD is wider
 local HEAD = 220
 
 local function key(a)
@@ -52,6 +55,54 @@ local function toggle(a, b, isLinked)
 end
 
 local statusColor = { thinking = "tertiary", tooling = "secondary", waiting = "on_surface_variant" }
+
+local function totalUnread()
+  local n = 0
+  for _, a in ipairs(comms.agents or {}) do n += tonumber(a.unread) or 0 end
+  return n
+end
+
+-- The comms snapshot carries counts only; bodies and senders come from the
+-- human-visible history. Refetch only when the unread total moves.
+local function refreshMail()
+  local want = totalUnread()
+  if want == mailUnread then return end
+  mailUnread = want
+  if want == 0 then mail = {}; render(); return end
+  lib.bsctl({ "comms", "history", "--format", "json", "--tail", "200" }, function(res)
+    if res.exitCode ~= 0 then return end
+    local list = noctalia.json.decode(res.stdout)
+    if type(list) ~= "table" then return end
+    local out = {}
+    for _, m in ipairs(list) do
+      if type(m.delivered_at) ~= "number" then table.insert(out, m) end
+    end
+    mail = out
+    render()
+  end)
+end
+
+local function age(created)
+  local s = math.max(0, os.time() - math.floor(tonumber(created) or 0))
+  if s < 60 then return `{s}s` end
+  if s < 3600 then return `{s // 60}m` end
+  if s < 86400 then return `{s // 3600}h` end
+  return `{s // 86400}d`
+end
+
+local function who(e)
+  return `{e and e.workspace or "?"} / {e and e.name or "?"}`
+end
+
+local function mailRow(m)
+  local first = string.match(tostring(m.body or ""), "^[^\n]*") or ""
+  return ui.row({ key = `mail-{m.id}`, gap = 8, align = "center", paddingH = 6 }, {
+    ui.glyph({ name = "mail", size = 14, color = "error" }),
+    ui.label({ text = `{who(m.from)}  →  {who(m.to)}`, fontSize = 12, fontWeight = "medium", maxLines = 1 }),
+    ui.label({ text = age(m.created), fontSize = 11, color = "on_surface_variant", maxLines = 1 }),
+    ui.label({ text = first, fontSize = 11, color = "on_surface_variant", maxLines = 1, flexGrow = 1 }),
+  })
+end
 
 -- Row heading: status dot, kind mark, name, workspace, unread.
 local function heading(a)
@@ -110,6 +161,12 @@ function render()
       table.insert(rows, ui.row({ key = `row-{key(a)}`, gap = 4, align = "center", radius = 10, fill = "surface_variant/0.25" }, cells))
     end
   end
+  if #mail > 0 then
+    table.insert(rows, ui.separator({}))
+    table.insert(rows, ui.label({ text = `Undelivered ({#mail}) — reaches the recipient when its turn ends or its next prompt starts`,
+      fontSize = 12, fontWeight = "bold", maxLines = 1 }))
+    for _, m in ipairs(mail) do table.insert(rows, mailRow(m)) end
+  end
   local foot = {}
   if #unnamed > 0 then
     local parts = {}
@@ -129,8 +186,10 @@ function render()
   }))
 end
 
-noctalia.state.watch("comms", function(v) comms = v or {}; render() end)
+noctalia.state.watch("comms", function(v) comms = v or {}; refreshMail(); render() end)
 
 function onOpen(_ctx)
+  mailUnread = -1 -- refetch: delivery may have happened while closed
+  refreshMail()
   render()
 end
