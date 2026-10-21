@@ -435,30 +435,66 @@ pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i3
         return 1;
     }
 
+    // One kitty process can hold several tabs/windows, and send-text without a
+    // match types into whichever is ACTIVE — not necessarily this session's.
+    // The session's own window is the one whose child process (kitty's
+    // `pid:` match field) is the session's ancestor directly under term_pid.
+    let Some(harness) = rec.get("pid").and_then(proto::py_int) else {
+        eprintln!("bsctl: session {session_id} has no harness pid");
+        return 1;
+    };
+    let Some(window_pid) = window_child(&sys::ancestors_of(harness), term_pid) else {
+        eprintln!(
+            "bsctl: session {session_id}'s process {harness} is not inside kitty {term_pid} — \
+             cannot pick its window"
+        );
+        return 1;
+    };
+    let target = KittyTarget {
+        to: format!("unix:{sock}"),
+        window: format!("pid:{window_pid}"),
+    };
+
     // Send the text, then — when submitting — a SEPARATE Enter after a short
     // beat. A CR appended to the SAME burst is racy: Claude Code's TUI paste
     // detection folds a trailing CR into the pasted text as a literal newline
     // instead of a submit about as often as not (observed live 2026-07-05 —
     // identical bytes submitted one run, newlined the next). A lone CR arriving
     // after the burst has settled reads as Enter deterministically.
-    let to = format!("unix:{sock}");
-    if kitty_send_text(&to, text) != 0 {
+    if kitty_send_text(&target, text) != 0 {
         return 1; // error already reported
     }
     if submit {
         std::thread::sleep(std::time::Duration::from_millis(150));
-        return kitty_send_text(&to, b"\r");
+        return kitty_send_text(&target, b"\r");
     }
     0
 }
 
-/// Pipe `bytes` to `kitty @ --to <to> send-text --stdin`. `kitty @` ships with
-/// (and speaks the protocol of) the running kitty — the version-matched
-/// fallback logic ipc.rs uses for hyprctl. One window per socket, so no
-/// `--match` is needed. Nonzero + stderr on any spawn/exec failure.
-fn kitty_send_text(to: &str, bytes: &[u8]) -> i32 {
+/// The process kitty spawned for a session's window: the entry just below
+/// `term_pid` in the session's ancestor chain (self first, as
+/// [`sys::ancestors_of`] returns it). None when the chain never reaches
+/// `term_pid`, or the session process IS the terminal.
+pub fn window_child(chain: &[i64], term_pid: i64) -> Option<i64> {
+    let at = chain.iter().position(|&p| p == term_pid)?;
+    at.checked_sub(1).map(|i| chain[i])
+}
+
+/// A kitty control socket plus the window match inside it.
+struct KittyTarget {
+    to: String,
+    window: String,
+}
+
+/// Pipe `bytes` to `kitty @ --to <to> send-text --match <window> --stdin`.
+/// `kitty @` ships with (and speaks the protocol of) the running kitty — the
+/// version-matched fallback logic ipc.rs uses for hyprctl. The socket picks
+/// the kitty process; the match picks the session's window among its tabs.
+/// Nonzero + stderr on any spawn/exec failure, including a match that finds
+/// no window.
+fn kitty_send_text(target: &KittyTarget, bytes: &[u8]) -> i32 {
     let mut child = match Command::new("kitty")
-        .args(["@", "--to", to, "send-text", "--stdin"])
+        .args(["@", "--to", &target.to, "send-text", "--match", &target.window, "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -535,6 +571,19 @@ pub fn agent_cells(rows: &[Value]) -> Vec<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn window_child_is_the_entry_under_the_terminal() {
+        // claude -> fish -> kitty -> Hyprland
+        assert_eq!(window_child(&[500, 400, 300, 200], 300), Some(400));
+        // the session process is the window's child itself
+        assert_eq!(window_child(&[400, 300, 200], 300), Some(400));
+        // not inside that terminal, or the terminal itself
+        assert_eq!(window_child(&[500, 400, 200], 300), None);
+        assert_eq!(window_child(&[300, 200], 300), None);
+        assert_eq!(window_child(&[], 300), None);
+    }
+
     use super::*;
 
     fn s(v: &[&str]) -> Vec<String> {

@@ -174,8 +174,11 @@
 //! rejects missing, ambiguous, unlinked or dead recipients; 50-unread cap per
 //! recipient), and `check_messages` (own unread mailbox only; collection stamps
 //! `delivered_at`). Claude and Codex also run
-//! the silent-tolerant `comms inbox` UserPromptSubmit hook, which collects and
-//! injects unread messages automatically. Every delivery is wrapped as
+//! the silent-tolerant `comms inbox` hook on both UserPromptSubmit and Stop,
+//! which collects unread messages automatically: at a prompt it injects them
+//! as turn context; at Stop it replies `decision: block` with them as the
+//! reason, so the turn continues instead of ending on unread mail (the reply
+//! shape follows the payload's `hook_event_name`). Every delivery is wrapped as
 //! peer-provided context and explicitly says it is not human/system authority.
 //!
 //! WAKE IS A TRIGGER, NOT DELIVERY. After persisting, `send_message` checks the
@@ -183,7 +186,8 @@
 //! Kitty session route with one fixed submitted line; peer-controlled body text
 //! is never typed into another terminal. The resulting UserPromptSubmit runs
 //! `comms inbox`, which performs the actual delivery. Thinking/tooling sessions
-//! are not interrupted; their mailbox waits for the next turn. Socket-less
+//! are not interrupted; their mail is delivered by the Stop hook as the
+//! current turn ends. Socket-less
 //! waiting sessions likewise keep the durable message even when the best-effort
 //! wake cannot fire.
 //!

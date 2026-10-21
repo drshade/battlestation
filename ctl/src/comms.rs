@@ -641,8 +641,9 @@ pub fn inbox(args: &[String]) -> i32 {
     }
     let mut input = Vec::new();
     let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut input);
+    let payload = proto::parse_payload(&input);
     if session.is_empty() {
-        session = proto::session_key(&proto::parse_payload(&input));
+        session = proto::session_key(&payload);
     }
     let Ok(messages) = collect(&session) else {
         return 0;
@@ -652,12 +653,28 @@ pub fn inbox(args: &[String]) -> i32 {
     }
     println!(
         "{}",
-        json!({"hookSpecificOutput": {
-            "hookEventName": "UserPromptSubmit",
-            "additionalContext": inbox_text(&messages),
-        }})
+        inbox_envelope(&proto::field(&payload, "hook_event_name"), &inbox_text(&messages))
     );
     0
+}
+
+/// The hook reply that hands `text` to the agent, shaped by the event that
+/// ran the verb. UserPromptSubmit injects it as turn context. Stop BLOCKS the
+/// stop with the messages as the reason, so a message that arrived mid-turn
+/// (when send's idle-only wake could not type) still reaches an agent whose
+/// turn is ending — without it the mail waits for the human's next prompt.
+/// Both harnesses honour `decision: block` + a non-empty reason on Stop. No
+/// loop guard is needed: delivery stamps the messages, so a stop only blocks
+/// while there is new mail, and send caps unread per recipient.
+pub fn inbox_envelope(event: &str, text: &str) -> Value {
+    if event == "Stop" {
+        json!({"decision": "block", "reason": text})
+    } else {
+        json!({"hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": text,
+        }})
+    }
 }
 
 pub fn print_snapshot(json_out: bool) -> i32 {
@@ -694,6 +711,21 @@ pub fn print_snapshot(json_out: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn inbox_envelope_follows_the_hook_event() {
+        let stop = inbox_envelope("Stop", "mail");
+        assert_eq!(stop["decision"], "block");
+        assert_eq!(stop["reason"], "mail");
+        assert!(stop.get("hookSpecificOutput").is_none());
+        for event in ["UserPromptSubmit", ""] {
+            let v = inbox_envelope(event, "mail");
+            assert_eq!(v["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit");
+            assert_eq!(v["hookSpecificOutput"]["additionalContext"], "mail");
+            assert!(v.get("decision").is_none());
+        }
+    }
+
     use super::*;
 
     #[test]

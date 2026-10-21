@@ -89,6 +89,10 @@
           {
             "command": "$HOME/.local/bin/bsctl asks retrigger",
             "type": "command"
+          },
+          {
+            "command": "$HOME/.local/bin/bsctl comms inbox",
+            "type": "command"
           }
         ]
       }

@@ -55,6 +55,12 @@ command = "$HOME/.local/bin/bsctl agents set --kind codex waiting"
 [[hooks.Stop.hooks]]
 type = "command"
 command = "$HOME/.local/bin/bsctl agents set --kind codex waiting"
+# Peer mail that arrived mid-turn: `comms inbox` on Stop replies
+# decision:block with the messages, so the turn continues instead of ending
+# on unread mail. Needs the one-time /hooks re-trust like any new hook.
+[[hooks.Stop.hooks]]
+type = "command"
+command = "/bin/sh -c 'exec \"$HOME/.local/bin/bsctl\" comms inbox'"
 
 [[hooks.SubagentStart]]
 matcher = "*"
