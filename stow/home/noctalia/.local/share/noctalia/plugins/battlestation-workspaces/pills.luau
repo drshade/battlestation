@@ -292,8 +292,14 @@ local function render(now)
       end,
     }
     if cfg.outline then
+      -- The focused pill gets a heavier border and a tint of its colour: a
+      -- 1px hue change alone is hard to spot. Both are paint-only, so the
+      -- row's width never moves on focus. The fill is always set (clear when
+      -- unfocused): the reconciler keeps a prop a later render omits.
       props.border = lib.roleOutline(key)
-      props.borderWidth = 1
+      props.borderWidth = if role == "focused" then 2 else 1
+      local tint = if props.border then string.match(props.border, "^[^/]+") else nil
+      props.fill = if role == "focused" and tint ~= nil then `{tint}/0.22` else "on_surface/0"
     else
       props.fill = lib.roleFill(key)
     end
