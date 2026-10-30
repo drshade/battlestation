@@ -3,7 +3,9 @@
 Claude Code is a self-managed install (its own updater); it is deliberately
 absent from the package manifests. Config lives in the stowed `claude`
 package (`~/.claude`): settings, hooks, statusline, skills, and the global
-CLAUDE.md carrying the asks-queue posting norm.
+CLAUDE.md — a relative symlink to the `codex` package's `AGENTS.md`, so both
+harnesses read one instruction file (Claude Code reads only CLAUDE.md, Codex
+only AGENTS.md). Stowing `claude` without `codex` leaves it dangling.
 
 ## MCP registration (one-time)
 

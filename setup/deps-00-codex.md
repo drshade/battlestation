@@ -11,8 +11,8 @@ Config is the stowed `~/.codex/config.toml` (`stow/home/codex`), which
 carries the agent-session status hooks (`bsctl agents set --kind codex …`)
 and the battlestation MCP server (`[mcp_servers.battlestation]`, the Deck,
 Switchboard and world queries) — protocol contracts in `ctl/src/lib.rs`. The package also stows
-`~/.codex/AGENTS.md`, Codex's global instructions, carrying the asks-queue
-posting norm. Two out-of-band steps:
+`~/.codex/AGENTS.md`, the global instructions shared with Claude Code (its
+`CLAUDE.md` is a symlink to this file). Two out-of-band steps:
 
 - **Trust the hooks (one-time, and again per change).** Codex refuses
   non-managed command hooks until they are reviewed: open `codex` and
