@@ -156,18 +156,41 @@ pub fn proc_info(pid: i64) -> Option<(i64, String)> {
     Some((ppid, comm.trim_end_matches('\n').to_string()))
 }
 
-/// macOS: one `proc_pidinfo(PROC_PIDTBSDINFO)` call yields both the ppid
-/// and `pbi_comm` (the executable name, NUL-terminated, ≤ 15 chars).
+/// macOS: one `proc_pidinfo(PROC_PIDT_SHORTBSDINFO)` call yields both the
+/// ppid and `pbsi_comm` (the executable name, NUL-terminated, ≤ 15 chars).
+/// The SHORT flavor on purpose: the full `PROC_PIDTBSDINFO` is refused for
+/// another user's process, and every Terminal.app session has the
+/// root-owned `login` in its ancestry — the walk stopped there, one step
+/// short of the terminal, so no Terminal.app session was ever placed
+/// (found live, macOS 27). libc doesn't bind the struct; it is
+/// `struct proc_bsdshortinfo` from <sys/proc_info.h> (64 bytes).
 #[cfg(target_os = "macos")]
 pub fn proc_info(pid: i64) -> Option<(i64, String)> {
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    #[repr(C)]
+    struct ProcBsdShortInfo {
+        pid: u32,
+        ppid: u32,
+        pgid: u32,
+        status: u32,
+        comm: [libc::c_char; 16], // MAXCOMLEN
+        flags: u32,
+        uid: u32,
+        gid: u32,
+        ruid: u32,
+        rgid: u32,
+        svuid: u32,
+        svgid: u32,
+        rfu: u32,
+    }
+    const PROC_PIDT_SHORTBSDINFO: libc::c_int = 13;
+    let mut info: ProcBsdShortInfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<ProcBsdShortInfo>() as libc::c_int;
     let n = unsafe {
         libc::proc_pidinfo(
             pid as libc::c_int,
-            libc::PROC_PIDTBSDINFO,
+            PROC_PIDT_SHORTBSDINFO,
             0,
-            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            (&mut info as *mut ProcBsdShortInfo).cast(),
             size,
         )
     };
@@ -175,15 +198,12 @@ pub fn proc_info(pid: i64) -> Option<(i64, String)> {
         return None;
     }
     let comm: Vec<u8> = info
-        .pbi_comm
+        .comm
         .iter()
         .take_while(|&&c| c != 0)
         .map(|&c| c as u8)
         .collect();
-    Some((
-        info.pbi_ppid as i64,
-        String::from_utf8_lossy(&comm).into_owned(),
-    ))
+    Some((info.ppid as i64, String::from_utf8_lossy(&comm).into_owned()))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -290,6 +310,16 @@ mod tests {
         let (_, comm) = proc_info(parent).unwrap();
         let (_, found) = ancestor_chain(&comm);
         assert_eq!(found, Some(parent));
+    }
+
+    #[test]
+    fn ancestor_walk_reaches_init() {
+        // Regression: the walk must not stop at a process owned by another
+        // user (macOS Terminal.app sessions descend from root's `login`).
+        // Reaching init means the last pid walked is a child of pid 1.
+        let (pids, _) = ancestor_chain("no-such-harness-kind");
+        let last = *pids.last().unwrap();
+        assert_eq!(proc_info(last).map(|(ppid, _)| ppid), Some(1), "chain {pids:?}");
     }
 
     #[test]
