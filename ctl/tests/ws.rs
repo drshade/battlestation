@@ -21,7 +21,7 @@ struct TestEnv {
 impl TestEnv {
     fn new(name: &str) -> Self {
         static N: AtomicUsize = AtomicUsize::new(0);
-        let root = std::env::temp_dir().join(format!(
+        let root = fixture_base().join(format!(
             "bsctl-ws-{}-{}-{}",
             std::process::id(),
             name,
@@ -741,4 +741,11 @@ fn usage_errors_exit_2() {
         assert!(!out.stderr.is_empty(), "ws {args:?} must explain on stderr");
     }
     assert!(env.dispatches().is_empty());
+}
+
+/// Fixture roots live under `/tmp` rather than `std::env::temp_dir()`: the
+/// fakes bind unix sockets inside them, macOS caps socket paths at 104
+/// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
+fn fixture_base() -> PathBuf {
+    PathBuf::from("/tmp")
 }

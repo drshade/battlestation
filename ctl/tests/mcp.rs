@@ -23,7 +23,7 @@ struct TestEnv {
 impl TestEnv {
     fn new(name: &str) -> Self {
         static N: AtomicUsize = AtomicUsize::new(0);
-        let root = std::env::temp_dir().join(format!(
+        let root = fixture_base().join(format!(
             "bsctl-mcp-{}-{}-{}",
             std::process::id(),
             name,
@@ -299,11 +299,11 @@ fn ask_fast_path_returns_the_answer_mid_block() {
 fn get_ask_delivery_stamps_own_session_only() {
     let env = TestEnv::new("deliver-own");
     // Identity fabrication: the server resolves its session by walking its
-    // /proc ancestors for comm == kind, then matching that pid against the
+    // process ancestors for comm == kind, then matching that pid against the
     // session files. This test process IS the server's ancestor, so a kind
     // equal to our own comm plus a session file recording our pid gives
     // the server a real identity ("sess-own").
-    let comm = fs::read_to_string("/proc/self/comm").unwrap();
+    let comm = bsctl::sys::proc_info(std::process::id() as i64).unwrap().1;
     let kind = comm.trim().to_string();
     let ws_dir = env.run.join("battlestation-ws");
     fs::create_dir_all(&ws_dir).unwrap();
@@ -394,7 +394,7 @@ fn whoami_and_mine_label_own_asks() {
     let env = TestEnv::new("whoami");
     // The delivery tests' identity fabrication: comm-matched kind + a
     // session file recording this process's pid = a resolved identity.
-    let comm = fs::read_to_string("/proc/self/comm").unwrap();
+    let comm = bsctl::sys::proc_info(std::process::id() as i64).unwrap().1;
     let kind = comm.trim().to_string();
     let ws_dir = env.run.join("battlestation-ws");
     fs::create_dir_all(&ws_dir).unwrap();
@@ -467,7 +467,7 @@ fn whoami_and_mine_label_own_asks() {
 #[test]
 fn switchboard_names_symmetric_links_and_private_delivery() {
     let env = TestEnv::new("switchboard");
-    let comm = fs::read_to_string("/proc/self/comm").unwrap();
+    let comm = bsctl::sys::proc_info(std::process::id() as i64).unwrap().1;
     let kind = comm.trim().to_string();
     let ws_dir = env.run.join("battlestation-ws");
     fs::create_dir_all(&ws_dir).unwrap();
@@ -1013,4 +1013,11 @@ fn list_asks_and_world_return_parseable_json() {
     let (text, is_err) = c.call("frobnicate", json!({}));
     assert!(is_err);
     assert!(text.contains("unknown tool"));
+}
+
+/// Fixture roots live under `/tmp` rather than `std::env::temp_dir()`: the
+/// fakes bind unix sockets inside them, macOS caps socket paths at 104
+/// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
+fn fixture_base() -> PathBuf {
+    PathBuf::from("/tmp")
 }

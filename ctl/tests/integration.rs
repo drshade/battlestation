@@ -29,7 +29,7 @@ struct TestEnv {
 impl TestEnv {
     fn new(name: &str) -> Self {
         static N: AtomicUsize = AtomicUsize::new(0);
-        let root = std::env::temp_dir().join(format!(
+        let root = fixture_base().join(format!(
             "bsctl-it-{}-{}-{}",
             std::process::id(),
             name,
@@ -188,10 +188,7 @@ fn session_write_with_title_and_injected_ws() {
     assert_eq!(rec["kind"], json!("claude"));
     assert_eq!(rec["title"], json!("Fix the widget poller")); // last line, collapsed
     let pid = rec["pid"].as_i64().expect("pid must be an int");
-    assert!(
-        Path::new(&format!("/proc/{pid}")).exists(),
-        "pid must be a live ancestor"
-    );
+    assert!(bsctl::sys::pid_alive(pid), "pid must be a live ancestor");
     // The matched clients row's address is captured alongside ws — the stub
     // derives it from the client pid, which is NOT the harness pid the
     // record carries (the first matching ANCESTOR wins the clients pass).
@@ -898,7 +895,12 @@ fn comms_history_stream_follows_arrival_and_delivery() {
 
     let mut store: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     store["messages"][0]["delivered_at"] = json!(11.0);
-    fs::write(&path, store.to_string()).unwrap();
+    // Publish like every bsctl writer does — temp + rename (lib.rs
+    // contract). An in-place rewrite is not a protocol write: the macOS
+    // dir watcher (kqueue) only sees entries added/removed/renamed.
+    let tmp = dir.join(".comms.json.tmp");
+    fs::write(&tmp, store.to_string()).unwrap();
+    fs::rename(&tmp, &path).unwrap();
     let delivered = s.converge("delivery-state change", |value| {
         value[0]["delivered_at"] == json!(11.0)
     });
@@ -1202,4 +1204,11 @@ fn tool_verb_heals_empty_marker_fields_from_meta() {
         env.read_json("s9.h1"),
         json!({"type": "general-purpose", "description": "Late meta"})
     );
+}
+
+/// Fixture roots live under `/tmp` rather than `std::env::temp_dir()`: the
+/// fakes bind unix sockets inside them, macOS caps socket paths at 104
+/// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
+fn fixture_base() -> PathBuf {
+    PathBuf::from("/tmp")
 }

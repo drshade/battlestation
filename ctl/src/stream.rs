@@ -8,7 +8,8 @@
 //! (contract in lib.rs).
 //!
 //! File, compositor and timer wake sources fold into one re-evaluation:
-//! inotify on the runtime agent-state and comms dirs, persistent map/prefs
+//! a directory watcher ([`crate::watch`]: inotify on Linux, kqueue on
+//! macOS) on the runtime agent-state and comms dirs, persistent map/prefs
 //! dir and asks dir,
 //! Hyprland's `.socket2.sock` event stream, and a slow tick (session pids
 //! dying and markers aging are invisible to inotify). Emissions are deduped
@@ -30,18 +31,16 @@
 //! (null). A closed stdout (the subscriber went away) is the one CLEAN
 //! exit: streaming to nobody is done, not broken.
 
-use std::ffi::CString;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::{asks, comms, ipc, sys, ws};
+use crate::{asks, comms, ipc, sys, watch, ws};
 
-/// Slow tick: inotify cannot see session pids dying or markers aging past
+/// Slow tick: the dir watcher cannot see session pids dying or markers aging past
 /// the GC window, so re-evaluate unconditionally this often.
 const TICK: Duration = Duration::from_secs(10);
 /// After a triggering event, drain further events this long before
@@ -142,13 +141,15 @@ pub fn frame(cur: &str, first: bool, framing: Framing) -> String {
 /// Exits 0 when stdout closes — the subscriber is done, not broken.
 pub fn run(mut query: impl FnMut() -> Result<String, i32>, framing: Framing) -> i32 {
     let mut prev: Option<String> = None;
-    match query() {
-        Err(code) => return code,
-        Ok(cur) => {
-            if emit(&mut prev, &cur, framing).is_err() {
-                return 0; // subscriber already gone
-            }
-        }
+    // Validate up front (a bad selector exits non-zero, never streams), but
+    // do NOT emit here: the first emission comes from the session's re-init
+    // entry, AFTER the state dirs exist and the watcher is armed. So a
+    // subscriber's first line is a guarantee — any state change it makes
+    // after seeing it will be observed (emitting first raced the arming:
+    // a write landing in between was missed until the slow tick, or hit a
+    // not-yet-created dir).
+    if let Err(code) = query() {
+        return code;
     }
     let mut applier = Applier::new();
     let mut last_err = String::new();
@@ -192,11 +193,11 @@ fn session(
     fs::create_dir_all(&asks_dir)?;
     let comms_dir = comms::comms_dir();
     fs::create_dir_all(&comms_dir)?;
-    // One inotify fd, four watches: the runtime agent-state dir, the
+    // One watcher fd (inotify / kqueue, see watch.rs), four watches: the runtime agent-state dir, the
     // persistent map/prefs dir, the asks dir (whose non-dot entries include
     // the presence report), and the peer-comms dir. One trigger filter serves all of them
     // — each dir's protocol files are exactly its non-dot entries.
-    let ino = Inotify::new(&[&dir, &files_dir, &asks_dir, &comms_dir])?;
+    let ino = watch::Watcher::new(&[&dir, &files_dir, &asks_dir, &comms_dir])?;
     // Compositor events; None = degraded mode (no Hyprland), files-only.
     let mut sock = EventSock::connect();
     // Re-init entry: state may have moved while we were broken (dedupe
@@ -210,7 +211,7 @@ fn session(
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let ready = wait2(
-            ino.fd,
+            ino.fd(),
             sock.as_ref().map(|s| s.stream.as_raw_fd()),
             remaining.as_millis().min(i32::MAX as u128) as i32,
         )?;
@@ -243,7 +244,7 @@ fn session(
         let mut rounds = 0;
         while rounds < COALESCE_ROUNDS {
             let Some((i, s)) = wait2(
-                ino.fd,
+                ino.fd(),
                 sock.as_ref().map(|s| s.stream.as_raw_fd()),
                 COALESCE_MS,
             )?
@@ -311,28 +312,6 @@ fn emit(prev: &mut Option<String>, cur: &str, framing: Framing) -> io::Result<()
 /// an entry.
 pub fn name_triggers(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && name != "debug.log"
-}
-
-/// Parse a raw inotify read(2) buffer into (mask, name) pairs. Wire layout
-/// per inotify(7): `{wd: i32, mask: u32, cookie: u32, len: u32}` followed by
-/// `len` bytes of NUL-padded name (len == 0: no name). Fields are read
-/// byte-wise so buffer alignment never matters; a truncated tail is dropped.
-pub fn parse_events(buf: &[u8]) -> Vec<(u32, String)> {
-    const HDR: usize = 16;
-    let mut out = Vec::new();
-    let mut off = 0;
-    while off + HDR <= buf.len() {
-        let mask = u32::from_ne_bytes(buf[off + 4..off + 8].try_into().unwrap());
-        let len = u32::from_ne_bytes(buf[off + 12..off + 16].try_into().unwrap()) as usize;
-        if off + HDR + len > buf.len() {
-            break;
-        }
-        let name = &buf[off + HDR..off + HDR + len];
-        let name = name.split(|&b| b == 0).next().unwrap_or(&[]);
-        out.push((mask, String::from_utf8_lossy(name).into_owned()));
-        off += HDR + len;
-    }
-    out
 }
 
 /// Which compositor events warrant a recompute: anything that can change
@@ -497,110 +476,9 @@ impl EventSock {
     }
 }
 
-/// Thin RAII wrapper over ONE inotify fd watching every given directory
-/// (one watch descriptor per dir; [`parse_events`] reads only mask + name,
-/// so the shared [`name_triggers`] filter serves all of them).
-struct Inotify {
-    fd: RawFd,
-}
-
-impl Inotify {
-    fn new(dirs: &[&Path]) -> io::Result<Self> {
-        let fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let ino = Inotify { fd }; // Drop closes the fd on the error paths below
-        let mask = libc::IN_CREATE
-            | libc::IN_MOVED_TO
-            | libc::IN_DELETE
-            | libc::IN_ATTRIB
-            | libc::IN_MODIFY
-            | libc::IN_CLOSE_WRITE;
-        for dir in dirs {
-            let cpath = CString::new(dir.as_os_str().as_bytes()).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "NUL in state dir path")
-            })?;
-            if unsafe { libc::inotify_add_watch(ino.fd, cpath.as_ptr(), mask) } < 0 {
-                return Err(io::Error::last_os_error());
-            }
-        }
-        Ok(ino)
-    }
-
-    /// One read(2)'s worth of queued events (call only after `wait` said
-    /// readable); Ok(true) when any of them warrants a recompute. Watch
-    /// invalidation (dir deleted/unmounted) and queue overflow surface as
-    /// errors so the caller re-initializes rather than trusting a blind spot.
-    fn drain(&self) -> io::Result<bool> {
-        let mut buf = [0u8; 4096];
-        let n = loop {
-            let n = unsafe { libc::read(self.fd, buf.as_mut_ptr().cast(), buf.len()) };
-            if n >= 0 {
-                break n as usize;
-            }
-            let e = io::Error::last_os_error();
-            if e.kind() != io::ErrorKind::Interrupted {
-                return Err(e);
-            }
-        };
-        let mut triggered = false;
-        for (mask, name) in parse_events(&buf[..n]) {
-            if mask & (libc::IN_IGNORED | libc::IN_Q_OVERFLOW | libc::IN_UNMOUNT) != 0 {
-                return Err(io::Error::other("inotify watch invalidated"));
-            }
-            triggered |= name_triggers(&name);
-        }
-        Ok(triggered)
-    }
-}
-
-impl Drop for Inotify {
-    fn drop(&mut self) {
-        unsafe { libc::close(self.fd) };
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Encode one wire event the way the kernel does (name NUL-padded).
-    fn ev(mask: u32, name: &str) -> Vec<u8> {
-        let mut b = Vec::new();
-        b.extend_from_slice(&1i32.to_ne_bytes()); // wd
-        b.extend_from_slice(&mask.to_ne_bytes());
-        b.extend_from_slice(&0u32.to_ne_bytes()); // cookie
-        let padded = if name.is_empty() {
-            0
-        } else {
-            (name.len() / 4 + 1) * 4
-        };
-        b.extend_from_slice(&(padded as u32).to_ne_bytes());
-        b.extend_from_slice(name.as_bytes());
-        b.resize(16 + padded, 0);
-        b
-    }
-
-    #[test]
-    fn parses_event_stream() {
-        let mut buf = ev(libc::IN_CREATE, "sid-1");
-        buf.extend(ev(libc::IN_MOVED_TO, ".map.tmp"));
-        buf.extend(ev(libc::IN_IGNORED, "")); // dir-level event, no name
-        assert_eq!(
-            parse_events(&buf),
-            vec![
-                (libc::IN_CREATE, "sid-1".to_string()),
-                (libc::IN_MOVED_TO, ".map.tmp".to_string()),
-                (libc::IN_IGNORED, String::new()),
-            ]
-        );
-        assert_eq!(parse_events(&[]), vec![]);
-        // Truncated tail (short read can't split an event, but the parser
-        // must never panic on garbage): the partial record is dropped.
-        let cut = buf.len() - 4;
-        assert_eq!(parse_events(&buf[..cut]).len(), 2);
-    }
 
     #[test]
     fn trigger_filter_covers_all_watched_dirs() {

@@ -799,5 +799,6 @@ pub mod sessions;
 pub mod stream;
 pub mod sys;
 pub mod usage;
+pub mod watch;
 pub mod world;
 pub mod ws;

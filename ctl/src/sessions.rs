@@ -69,13 +69,13 @@ pub fn scan(now: f64, dir: &Path, proj: &Path) -> Vec<Value> {
         let rec: Option<Value> = fs::read(&p)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok());
-        // ok = the file parsed AND /proc/<int(pid)> exists; any failure on
+        // ok = the file parsed AND int(pid) is alive; any failure on
         // the way (no pid key, non-int pid, non-object record) counts as dead.
         let alive = rec
             .as_ref()
             .and_then(|r| r.get("pid"))
             .and_then(proto::py_int)
-            .is_some_and(|pid| Path::new(&format!("/proc/{pid}")).exists());
+            .is_some_and(sys::pid_alive);
         let Some(rec) = rec.filter(|_| alive) else {
             rm(&p);
             for aid in marks.remove(&sid).unwrap_or_default() {

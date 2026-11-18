@@ -1,5 +1,6 @@
-//! OS boundaries: state dir, atomic writes, mtimes, the /proc ancestor walk,
-//! flock. The compositor boundary lives in [`crate::ipc`]; everything
+//! OS boundaries: state dir, atomic writes, mtimes, the process ancestor
+//! walk and liveness, flock. Platform differences (Linux /proc vs the macOS
+//! libproc/confstr APIs) are confined to this file. The compositor boundary lives in [`crate::ipc`]; everything
 //! downstream of it takes plain values so it stays testable.
 
 use std::env;
@@ -11,22 +12,56 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 
 /// The user runtime dir every bsctl state path hangs off: XDG_RUNTIME_DIR
-/// when set and non-empty, else the systemd-standard `/run/user/<uid>` IF
-/// it exists, else `/tmp`. The middle rung is load-bearing: some harnesses
-/// spawn MCP servers with a SCRUBBED environment (seen live: Codex 0.142.5
-/// dropped XDG_RUNTIME_DIR, so the server wrote a parallel store under
-/// /tmp and read an empty session dir — asks landed where no reader
-/// looks). The uid derivation needs no env at all, so a scrubbed child
-/// still converges on the same dirs as everyone else.
+/// when set and non-empty, else a per-user dir derived WITHOUT the
+/// environment, else `/tmp`. The env-free rung is load-bearing: some
+/// harnesses spawn MCP servers with a SCRUBBED environment (seen live: Codex
+/// 0.142.5 dropped XDG_RUNTIME_DIR, so the server wrote a parallel store
+/// under /tmp and read an empty session dir — asks landed where no reader
+/// looks). An env-free derivation lets a scrubbed child still converge on
+/// the same dirs as everyone else:
+/// - Linux: the systemd-standard `/run/user/<uid>`, if it exists.
+/// - macOS: the per-user temp dir from `confstr(_CS_DARWIN_USER_TEMP_DIR)`
+///   (the `/var/folders/…/T/` that `$TMPDIR` normally names — but read
+///   from the system, so a scrubbed `$TMPDIR` changes nothing).
 pub fn runtime_dir() -> PathBuf {
     if let Some(v) = env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
         return PathBuf::from(v);
     }
-    let run = PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
-    if run.is_dir() {
-        return run;
+    if let Some(d) = os_runtime_dir() {
+        return d;
     }
     PathBuf::from("/tmp")
+}
+
+#[cfg(target_os = "linux")]
+fn os_runtime_dir() -> Option<PathBuf> {
+    let run = PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
+    run.is_dir().then_some(run)
+}
+
+#[cfg(target_os = "macos")]
+fn os_runtime_dir() -> Option<PathBuf> {
+    let mut buf = vec![0u8; 1024];
+    let n = unsafe {
+        libc::confstr(
+            libc::_CS_DARWIN_USER_TEMP_DIR,
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        )
+    };
+    if n == 0 || n > buf.len() {
+        return None;
+    }
+    buf.truncate(n - 1); // n counts the trailing NUL
+    let d = PathBuf::from(std::ffi::OsString::from(
+        String::from_utf8(buf).ok()?.trim_end_matches('/'),
+    ));
+    d.is_dir().then_some(d)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn os_runtime_dir() -> Option<PathBuf> {
+    None
 }
 
 /// `<runtime-dir>/battlestation-ws` — the agent-session state dir.
@@ -66,48 +101,108 @@ pub fn now_f64() -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Walk the /proc ancestor chain from this process: returns (all pids up to
-/// init, the nearest ancestor whose comm matches the harness `kind`). The
-/// harness process is assumed to be named after its kind — verified live for
-/// both current kinds (`claude` → comm `claude`; `codex` → comm `codex`,
-/// checked against a running `codex exec`, 2026-07-03). comm is the kernel's
-/// 15-char truncation, so a kind longer than 15 chars matches on its
-/// truncation; anything looser (prefix match) would self-match other
-/// same-named tooling (this binary's own comm is `bsctl`; the sh reference's
-/// was `claude-ws-statu`).
+/// Walk the process ancestor chain from this process: returns (all pids up
+/// to init, the nearest ancestor whose process name matches the harness
+/// `kind`). The harness process is assumed to be named after its kind —
+/// verified live for both current kinds (`claude` → comm `claude`; `codex` →
+/// comm `codex`, checked against a running `codex exec`, 2026-07-03; same
+/// names on macOS, where both ship as native binaries). The name is the
+/// kernel's 15-char truncation on both platforms (Linux `comm`, macOS
+/// `pbi_comm`), so a kind longer than 15 chars matches on its truncation;
+/// anything looser (prefix match) would self-match other same-named tooling
+/// (this binary's own name is `bsctl`; the sh reference's was
+/// `claude-ws-statu`).
 pub fn ancestor_chain(kind: &str) -> (Vec<i64>, Option<i64>) {
     let mut pids = Vec::new();
     let mut harness = None;
     let mut pid = std::process::id() as i64;
     while pid > 1 {
         pids.push(pid);
+        let info = proc_info(pid);
         if harness.is_none()
-            && fs::read_to_string(format!("/proc/{pid}/comm"))
-                .is_ok_and(|c| comm_matches_kind(c.trim_end_matches('\n'), kind))
+            && info
+                .as_ref()
+                .is_some_and(|(_, comm)| comm_matches_kind(comm, kind))
         {
             harness = Some(pid);
         }
-        match ppid_of(pid) {
-            Some(p) if p != pid => pid = p,
+        match info {
+            Some((p, _)) if p != pid => pid = p,
             _ => break,
         }
     }
     (pids, harness)
 }
 
-/// [`ancestor_chain`]'s comm rule: exact match, or — for a kind longer than
-/// comm's 15-char limit — the kernel's truncation of it (exactly 15 chars
-/// AND a prefix of the kind; shorter prefixes are different names).
+/// [`ancestor_chain`]'s name rule: exact match, or — for a kind longer than
+/// the kernel's 15-char name limit — its truncation (exactly 15 chars AND a
+/// prefix of the kind; shorter prefixes are different names).
 fn comm_matches_kind(comm: &str, kind: &str) -> bool {
     comm == kind || (comm.len() == 15 && kind.len() > 15 && kind.starts_with(comm))
 }
 
-/// PPID = field 4 of /proc/<pid>/stat. The comm field (2) is parenthesised
-/// and may contain spaces or parens, so parse from after the LAST ')'.
-fn ppid_of(pid: i64) -> Option<i64> {
+/// (ppid, process name) of a live pid; None when the pid is gone or
+/// unreadable.
+///
+/// Linux: PPID = field 4 of /proc/<pid>/stat (the comm field (2) is
+/// parenthesised and may contain spaces or parens, so parse from after the
+/// LAST ')'); the name is /proc/<pid>/comm.
+#[cfg(target_os = "linux")]
+pub fn proc_info(pid: i64) -> Option<(i64, String)> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let rest = &stat[stat.rfind(')')? + 1..];
-    rest.split_whitespace().nth(1)?.parse().ok()
+    let ppid = rest.split_whitespace().nth(1)?.parse().ok()?;
+    let comm = fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some((ppid, comm.trim_end_matches('\n').to_string()))
+}
+
+/// macOS: one `proc_pidinfo(PROC_PIDTBSDINFO)` call yields both the ppid
+/// and `pbi_comm` (the executable name, NUL-terminated, ≤ 15 chars).
+#[cfg(target_os = "macos")]
+pub fn proc_info(pid: i64) -> Option<(i64, String)> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size,
+        )
+    };
+    if n != size {
+        return None;
+    }
+    let comm: Vec<u8> = info
+        .pbi_comm
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    Some((
+        info.pbi_ppid as i64,
+        String::from_utf8_lossy(&comm).into_owned(),
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn proc_info(_pid: i64) -> Option<(i64, String)> {
+    None
+}
+
+/// Is this pid a live process? `kill(pid, 0)`: success, or EPERM (alive
+/// but owned by someone else), means alive. Portable across Linux and
+/// macOS, unlike the old `/proc/<pid>` existence test. Non-positive pids
+/// are never alive (kill(0|-n) would address process GROUPS).
+pub fn pid_alive(pid: i64) -> bool {
+    if pid <= 0 || pid > i64::from(libc::pid_t::MAX) {
+        return false;
+    }
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+        return true;
+    }
+    io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// flock(2) on an open file — the usage cache's cross-process serialization
@@ -192,10 +287,23 @@ mod tests {
         // ...while a kind that IS an ancestor's comm matches: walk our real
         // chain and reuse the first ancestor's comm as the kind.
         let parent = std::os::unix::process::parent_id() as i64;
-        let comm = std::fs::read_to_string(format!("/proc/{parent}/comm")).unwrap();
-        let comm = comm.trim_end_matches('\n');
-        let (_, found) = ancestor_chain(comm);
+        let (_, comm) = proc_info(parent).unwrap();
+        let (_, found) = ancestor_chain(&comm);
         assert_eq!(found, Some(parent));
+    }
+
+    #[test]
+    fn pid_liveness() {
+        assert!(pid_alive(std::process::id() as i64));
+        assert!(pid_alive(1)); // init/launchd: alive, EPERM for non-root
+        assert!(!pid_alive(0));
+        assert!(!pid_alive(-5));
+        assert!(!pid_alive(i64::MAX));
+    }
+
+    #[test]
+    fn runtime_dir_is_absolute() {
+        assert!(runtime_dir().is_absolute());
     }
 
     #[test]
