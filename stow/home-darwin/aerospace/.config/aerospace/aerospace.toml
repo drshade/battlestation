@@ -38,13 +38,15 @@ run = 'layout tiling'
 if = 'true'
 run = 'layout floating'
 
+# Tight tiling: agent terminals are read side by side, so screen width
+# goes to text, not gutters.
 [gaps]
-inner.horizontal = 8
-inner.vertical = 8
-outer.left = 8
-outer.bottom = 8
-outer.top = 8
-outer.right = 8
+inner.horizontal = 2
+inner.vertical = 2
+outer.left = 2
+outer.bottom = 2
+outer.top = 2
+outer.right = 2
 
 [mode.main.binding]
 # 1. Navigate · Ctrl+Option
