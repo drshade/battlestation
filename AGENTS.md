@@ -179,6 +179,9 @@ live in `setup/README.md`.
   *is* enabling, correct by construction. Runbook notes must not contain
   `systemctl --user enable` for a repo-owned unit; the only out-of-band steps
   are `systemctl --user daemon-reload` + a first `start` (or a re-login).
+  The macOS counterpart is a launchd agent plist under
+  `stow/home-darwin/<pkg>/Library/LaunchAgents/`: launchd loads that dir at
+  login, so stowing is enabling there too (`setup/deps-00-launchd-agents.md`).
   Gotcha: stow refuses absolute symlinks inside packages, so a wants link
   cannot point at a vendor unit under `/usr/lib` — bring the unit into the
   package (author it, like kdeconnect, or track a copy of the vendor unit,

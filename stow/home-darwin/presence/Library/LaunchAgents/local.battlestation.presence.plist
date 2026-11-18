@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Human presence for bsctl (the macOS counterpart of hypridle's listener).
+     Present in ~/Library/LaunchAgents = loaded at every login: stowing is
+     enabling, as with the systemd .wants links on Linux. launchd does not
+     expand $HOME, so sh resolves the script path. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.battlestation.presence</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec "$HOME/.local/share/battlestation/presence-report.sh"</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>15</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
