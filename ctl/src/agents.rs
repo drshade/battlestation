@@ -532,7 +532,7 @@ fn kitty_send_text(to: &str, matcher: Option<&str>, bytes: &[u8]) -> i32 {
         args.extend(["--match", m]);
     }
     args.push("--stdin");
-    let mut child = match Command::new("kitty")
+    let mut child = match Command::new(sys::tool("kitty"))
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

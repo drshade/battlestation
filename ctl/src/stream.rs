@@ -483,7 +483,7 @@ impl EventSock {
                 Src::Hypr(stream)
             }
             ipc::Wm::AeroSpace => {
-                let mut child = std::process::Command::new("aerospace")
+                let mut child = std::process::Command::new(sys::tool("aerospace"))
                     .args(["subscribe", "--all", "--no-send-initial"])
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::piped())

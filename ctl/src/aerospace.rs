@@ -53,7 +53,7 @@ pub struct Snap {
 static CACHE: Mutex<Option<(Instant, Snap)>> = Mutex::new(None);
 
 fn cli_json(args: &[&str]) -> Option<Value> {
-    let out = Command::new("aerospace")
+    let out = Command::new(crate::sys::tool("aerospace"))
         .args(args)
         .stderr(Stdio::null())
         .output()
@@ -67,7 +67,7 @@ fn cli_json(args: &[&str]) -> Option<Value> {
 /// Run an aerospace command for its effect; stderr passes through (the
 /// CLI's own messages are the useful diagnostics), 127 when missing.
 fn cli_run(args: &[&str]) -> i32 {
-    match Command::new("aerospace")
+    match Command::new(crate::sys::tool("aerospace"))
         .args(args)
         .stdout(Stdio::null())
         .status()
@@ -377,7 +377,7 @@ pub fn client_for_pids(pids: &[i64]) -> Option<(i64, Option<String>, Option<i64>
 fn kitty_platform_window() -> Option<String> {
     let sock = env::var("KITTY_LISTEN_ON").ok().filter(|s| !s.is_empty())?;
     let kwin: i64 = env::var("KITTY_WINDOW_ID").ok()?.parse().ok()?;
-    let out = Command::new("kitty")
+    let out = Command::new(crate::sys::tool("kitty"))
         .args(["@", "--to", &sock, "ls"])
         .stderr(Stdio::null())
         .output()

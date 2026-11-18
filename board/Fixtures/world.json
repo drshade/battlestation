@@ -1,0 +1,207 @@
+{
+ "human": {
+  "state": "active",
+  "idle_secs": 0
+ },
+ "usage": {
+  "claude": {
+   "sessionPct": 34,
+   "weeklyPct": 61
+  }
+ },
+ "displays": [
+  {
+   "id": 1,
+   "name": "Built-in Retina Display",
+   "focused": true,
+   "activeWs": 1
+  }
+ ],
+ "workspaces": [
+  {
+   "ws": 1,
+   "bs": 1,
+   "name": "api",
+   "display": "Built-in Retina Display",
+   "windows": 3,
+   "active": true
+  },
+  {
+   "ws": 2,
+   "bs": 2,
+   "name": "web",
+   "display": "Built-in Retina Display",
+   "windows": 2,
+   "active": false
+  },
+  {
+   "ws": 4,
+   "bs": 3,
+   "name": "infra",
+   "display": "LG UltraFine",
+   "windows": 1,
+   "active": true
+  },
+  {
+   "ws": 3,
+   "bs": 4,
+   "name": null,
+   "display": "LG UltraFine",
+   "windows": 0,
+   "active": false
+  }
+ ],
+ "agents": [
+  {
+   "session": "s-api",
+   "kind": "claude",
+   "status": "tooling",
+   "ws": 1,
+   "name": "api-lead",
+   "title": "api: migrate auth to the token service",
+   "subagents": [
+    {
+     "id": "a1",
+     "type": "Explore",
+     "description": "map every caller of AuthClient",
+     "started": 1794993715.680369
+    },
+    {
+     "id": "a2",
+     "type": "Plan",
+     "description": "sequence the migration in safe steps",
+     "started": 1794993813.680369
+    }
+   ]
+  },
+  {
+   "session": "s-tests",
+   "kind": "codex",
+   "status": "thinking",
+   "ws": 1,
+   "name": "api-tests",
+   "title": "api: backfill contract tests for /v2/session",
+   "subagents": []
+  },
+  {
+   "session": "s-web",
+   "kind": "claude",
+   "status": "waiting",
+   "ws": 2,
+   "name": "web-ui",
+   "title": "web: settings page redesign",
+   "subagents": []
+  },
+  {
+   "session": "s-e2e",
+   "kind": "agy",
+   "status": "thinking",
+   "ws": 2,
+   "name": null,
+   "title": "web: e2e flake hunt in checkout",
+   "subagents": []
+  },
+  {
+   "session": "s-infra",
+   "kind": "claude",
+   "status": "waiting",
+   "ws": 4,
+   "name": "infra",
+   "title": "infra: terraform plan for the new queue",
+   "subagents": []
+  }
+ ],
+ "comms": {
+  "agents": [
+   {
+    "workspace": "api",
+    "name": "api-lead",
+    "kind": "claude",
+    "status": "tooling",
+    "unread": 1
+   },
+   {
+    "workspace": "web",
+    "name": "web-ui",
+    "kind": "claude",
+    "status": "waiting",
+    "unread": 2
+   }
+  ],
+  "links": [
+   {
+    "a": {
+     "workspace": "api",
+     "name": "api-lead"
+    },
+    "b": {
+     "workspace": "web",
+     "name": "web-ui"
+    }
+   },
+   {
+    "a": {
+     "workspace": "api",
+     "name": "api-lead"
+    },
+    "b": {
+     "workspace": "infra",
+     "name": "infra"
+    }
+   }
+  ]
+ },
+ "asks": [
+  {
+   "id": 12,
+   "session": "s-web",
+   "kind": "claude",
+   "ws": 2,
+   "type": "question",
+   "urgency": "high",
+   "blocking": true,
+   "state": "open",
+   "created": 1794993455.680369,
+   "title": "Keep the legacy avatar crop, or switch to the square one?",
+   "body": "The redesign mock uses square avatars, but 14 places\nstill assume the round crop.\n\nA keeps round crops and ships today.\nB switches to square and touches every caller.",
+   "options": [
+    "A: keep round",
+    "B: switch to square"
+   ],
+   "estimate_min": 2
+  },
+  {
+   "id": 7,
+   "session": "s-infra",
+   "kind": "claude",
+   "ws": 4,
+   "type": "review",
+   "urgency": "medium",
+   "blocking": false,
+   "state": "open",
+   "created": 1794992905.680369,
+   "title": "Review the terraform plan before apply",
+   "body": "Plan: 4 to add, 1 to change, 0 to destroy.",
+   "options": [
+    "Apply",
+    "Hold"
+   ],
+   "note": "working on it"
+  },
+  {
+   "id": 15,
+   "session": "s-api",
+   "kind": "claude",
+   "ws": 1,
+   "type": "notify",
+   "urgency": "low",
+   "blocking": false,
+   "state": "open",
+   "created": 1794993785.680369,
+   "title": "Auth migration split into 3 PRs; the first is up",
+   "body": "PR 1 of 3 is open.",
+   "options": []
+  }
+ ],
+ "prefs": []
+}

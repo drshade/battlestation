@@ -203,7 +203,10 @@ pub fn proc_info(pid: i64) -> Option<(i64, String)> {
         .take_while(|&&c| c != 0)
         .map(|&c| c as u8)
         .collect();
-    Some((info.ppid as i64, String::from_utf8_lossy(&comm).into_owned()))
+    Some((
+        info.ppid as i64,
+        String::from_utf8_lossy(&comm).into_owned(),
+    ))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -223,6 +226,34 @@ pub fn pid_alive(pid: i64) -> bool {
         return true;
     }
     io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Resolve an external tool for `Command::new`: the first executable `name`
+/// on PATH, else in the standard install dirs a GUI or launchd environment
+/// leaves off PATH (a launchd agent gets /usr/bin:/bin:/usr/sbin:/sbin, so
+/// the menu-bar app's bsctl could not find Homebrew's `aerospace` or
+/// `kitty`), else the bare name (spawn then fails as before). PATH stays
+/// first so callers — and the tests' fake tools — keep control.
+pub fn tool(name: &str) -> PathBuf {
+    let on_path = env::var_os("PATH")
+        .map(|p| env::split_paths(&p).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let fallback = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/Applications/kitty.app/Contents/MacOS",
+    ];
+    on_path
+        .into_iter()
+        .chain(fallback.iter().map(PathBuf::from))
+        .map(|d| d.join(name))
+        .find(|p| is_executable(p))
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+fn is_executable(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// flock(2) on an open file — the usage cache's cross-process serialization
@@ -319,7 +350,17 @@ mod tests {
         // Reaching init means the last pid walked is a child of pid 1.
         let (pids, _) = ancestor_chain("no-such-harness-kind");
         let last = *pids.last().unwrap();
-        assert_eq!(proc_info(last).map(|(ppid, _)| ppid), Some(1), "chain {pids:?}");
+        assert_eq!(
+            proc_info(last).map(|(ppid, _)| ppid),
+            Some(1),
+            "chain {pids:?}"
+        );
+    }
+
+    #[test]
+    fn tool_lookup_prefers_path_then_falls_back_to_the_bare_name() {
+        assert!(tool("sh").is_absolute(), "sh is on every PATH");
+        assert_eq!(tool("no-such-tool-xyz"), PathBuf::from("no-such-tool-xyz"));
     }
 
     #[test]
