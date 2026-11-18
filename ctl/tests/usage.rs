@@ -39,6 +39,7 @@ impl TestEnv {
         for d in [&cache_dir, &home.join(".claude"), &fix, &fakebin] {
             fs::create_dir_all(d).unwrap();
         }
+        stub_keychain(&fakebin, Some(&fix.join("keychain")));
         fs::write(
             home.join(".claude/.credentials.json"),
             json!({"claudeAiOauth": {"accessToken": TOKEN}}).to_string(),
@@ -317,4 +318,44 @@ fn kind_filter_and_text_table() {
 /// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
 fn fixture_base() -> PathBuf {
     PathBuf::from("/tmp")
+}
+
+/// Fake macOS `security`: the usage token's Keychain fallback is reached
+/// through PATH, so every test env shadows it — no test may ever read the
+/// developer's real Keychain (or, through it, hit the network). Serves the
+/// file `serve` as the Keychain secret when given and present, else exits
+/// 44 (security(1)'s "item not found").
+fn stub_keychain(fakebin: &std::path::Path, serve: Option<&std::path::Path>) {
+    let body = match serve {
+        Some(f) => format!(
+            "#!/bin/sh\n[ -f '{f}' ] || exit 44\ncat '{f}'\n",
+            f = f.display()
+        ),
+        None => "#!/bin/sh\nexit 44\n".to_string(),
+    };
+    let stub = fakebin.join("security");
+    std::fs::write(&stub, body).unwrap();
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_falls_back_to_the_keychain_when_no_credentials_file() {
+    let env = TestEnv::new("keychain");
+    fs::remove_file(env.home.join(".claude/.credentials.json")).unwrap();
+    fs::write(
+        env.fix.join("keychain"),
+        json!({"claudeAiOauth": {"accessToken": TOKEN}}).to_string(),
+    )
+    .unwrap();
+    env.respond(&usage_body(), "200");
+    let out = env.run();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(env.curl_calls(), 1);
+    let stdin = fs::read_to_string(env.fix.join("curl-stdin.log")).unwrap();
+    assert_eq!(stdin, format!("Authorization: Bearer {TOKEN}\n"));
+    let argv = fs::read_to_string(env.fix.join("curl-argv.log")).unwrap();
+    assert!(!argv.contains(TOKEN), "and never its argv");
 }

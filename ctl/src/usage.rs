@@ -161,12 +161,46 @@ fn fresh(cache: &Path) -> bool {
     }
 }
 
-/// Token from `~/.claude/.credentials.json`; any failure (missing HOME or
-/// file, bad JSON, wrong shape, empty token) -> None -> silent exit 0.
+/// Token from `~/.claude/.credentials.json`, else (macOS) the login
+/// Keychain; any failure (missing HOME or file, no Keychain item, bad JSON,
+/// wrong shape, empty token) -> None -> silent exit 0.
 fn read_token() -> Option<String> {
-    let home = env::var_os("HOME").filter(|v| !v.is_empty())?;
-    let raw = fs::read_to_string(Path::new(&home).join(".claude/.credentials.json")).ok()?;
-    token_from(&raw)
+    let from_file = env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .and_then(|home| {
+            fs::read_to_string(Path::new(&home).join(".claude/.credentials.json")).ok()
+        })
+        .and_then(|raw| token_from(&raw));
+    from_file.or_else(keychain_credentials)
+}
+
+/// Claude Code on macOS keeps the same credentials JSON in the login
+/// Keychain (generic password, service `Claude Code-credentials`; verified
+/// on macOS 27 — no credentials file is written there). `security … -w`
+/// prints the secret on STDOUT, so the token never touches argv. Reached
+/// through PATH like curl, so tests stub it and can never read a real
+/// developer Keychain.
+#[cfg(target_os = "macos")]
+fn keychain_credentials() -> Option<String> {
+    let out = Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    token_from(String::from_utf8_lossy(&out.stdout).trim())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_credentials() -> Option<String> {
+    None
 }
 
 /// `.claudeAiOauth.accessToken`, non-empty.

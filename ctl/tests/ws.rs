@@ -34,6 +34,7 @@ impl TestEnv {
         for d in [&state, &fix, &fakebin] {
             fs::create_dir_all(d).unwrap();
         }
+        stub_keychain(&fakebin, None);
         let stub = fakebin.join("hyprctl");
         fs::write(
             &stub,
@@ -233,7 +234,10 @@ fn named_workspaces_dispatch_by_name_and_sort_last() {
     // last battlespace = the named workspace
     assert_eq!(env.ws(&["focus", "--bs-id", "3"]).status.code(), Some(0));
     // raw ws-id resolves to the same name form
-    assert_eq!(env.ws(&["focus", "--ws-id", "-1337"]).status.code(), Some(0));
+    assert_eq!(
+        env.ws(&["focus", "--ws-id", "-1337"]).status.code(),
+        Some(0)
+    );
     // send window follows the same grammar
     assert_eq!(
         env.ws(&["send", "window", "--bs-id", "3", "--focus"])
@@ -748,4 +752,24 @@ fn usage_errors_exit_2() {
 /// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
 fn fixture_base() -> PathBuf {
     PathBuf::from("/tmp")
+}
+
+/// Fake macOS `security`: the usage token's Keychain fallback is reached
+/// through PATH, so every test env shadows it — no test may ever read the
+/// developer's real Keychain (or, through it, hit the network). Serves the
+/// file `serve` as the Keychain secret when given and present, else exits
+/// 44 (security(1)'s "item not found").
+fn stub_keychain(fakebin: &std::path::Path, serve: Option<&std::path::Path>) {
+    let body = match serve {
+        Some(f) => format!(
+            "#!/bin/sh\n[ -f '{f}' ] || exit 44\ncat '{f}'\n",
+            f = f.display()
+        ),
+        None => "#!/bin/sh\nexit 44\n".to_string(),
+    };
+    let stub = fakebin.join("security");
+    std::fs::write(&stub, body).unwrap();
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
 }

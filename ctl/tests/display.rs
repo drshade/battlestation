@@ -74,6 +74,7 @@ impl TestEnv {
         for d in [&run, &fix, &config, &fakebin] {
             fs::create_dir_all(d).unwrap();
         }
+        stub_keychain(&fakebin, None);
         // Fake hyprctl: log every call, serve the monitors fixtures, record
         // dispatches. A dispatch also promotes fix/monitors.after.json to
         // fix/monitors.json when present — the "dpms toggle worked" seam the
@@ -807,4 +808,24 @@ fn discovery_without_signature_picks_newest_instance_dir() {
 /// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
 fn fixture_base() -> PathBuf {
     PathBuf::from("/tmp")
+}
+
+/// Fake macOS `security`: the usage token's Keychain fallback is reached
+/// through PATH, so every test env shadows it — no test may ever read the
+/// developer's real Keychain (or, through it, hit the network). Serves the
+/// file `serve` as the Keychain secret when given and present, else exits
+/// 44 (security(1)'s "item not found").
+fn stub_keychain(fakebin: &std::path::Path, serve: Option<&std::path::Path>) {
+    let body = match serve {
+        Some(f) => format!(
+            "#!/bin/sh\n[ -f '{f}' ] || exit 44\ncat '{f}'\n",
+            f = f.display()
+        ),
+        None => "#!/bin/sh\nexit 44\n".to_string(),
+    };
+    let stub = fakebin.join("security");
+    std::fs::write(&stub, body).unwrap();
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
 }
