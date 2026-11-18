@@ -53,7 +53,7 @@ impl TestEnv {
     }
 
     fn cmd(&self) -> Command {
-        let mut c = Command::new(BIN);
+        let mut c = wm_cmd();
         c.env("XDG_RUNTIME_DIR", &self.run)
             .env("XDG_STATE_HOME", self.root.join("state"))
             .env("HOME", self.root.join("home"))
@@ -662,4 +662,13 @@ fn stub_keychain(fakebin: &std::path::Path, serve: Option<&std::path::Path>) {
     let mut perm = std::fs::metadata(&stub).unwrap().permissions();
     std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
     std::fs::set_permissions(&stub, perm).unwrap();
+}
+
+/// The binary under test, pinned to the Hyprland backend: these tests
+/// drive a fake hyprctl/socket, and the default backend is per-OS
+/// (AeroSpace on macOS), so the pin keeps them meaningful everywhere.
+fn wm_cmd() -> Command {
+    let mut c = Command::new(BIN);
+    c.env("BSCTL_WM", "hyprland");
+    c
 }

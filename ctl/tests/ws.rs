@@ -78,7 +78,7 @@ impl TestEnv {
     }
 
     fn ws(&self, args: &[&str]) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_bsctl"))
+        wm_cmd()
             .arg("ws")
             .args(args)
             .env("XDG_STATE_HOME", &self.state)
@@ -772,4 +772,13 @@ fn stub_keychain(fakebin: &std::path::Path, serve: Option<&std::path::Path>) {
     let mut perm = std::fs::metadata(&stub).unwrap().permissions();
     std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
     std::fs::set_permissions(&stub, perm).unwrap();
+}
+
+/// The binary under test, pinned to the Hyprland backend: these tests
+/// drive a fake hyprctl/socket, and the default backend is per-OS
+/// (AeroSpace on macOS), so the pin keeps them meaningful everywhere.
+fn wm_cmd() -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_bsctl"));
+    c.env("BSCTL_WM", "hyprland");
+    c
 }

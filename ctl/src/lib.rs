@@ -762,6 +762,30 @@
 //! missing/unreadable -> nothing known). It is passed to curl on stdin,
 //! never in argv.
 //!
+//! # Window managers (`ipc.rs`, `aerospace.rs`)
+//!
+//! bsctl drives one window manager per process, picked by [`ipc::wm`]:
+//! `BSCTL_WM=hyprland|aerospace` when set, else by OS (AeroSpace on macOS,
+//! Hyprland elsewhere). Everything downstream of `ipc` consumes
+//! Hyprland-shaped JSON and mutates through [`ws::Action`] + [`ipc::act`],
+//! so the battlespace model, the world and every `ws` verb are
+//! backend-neutral.
+//!
+//! AeroSpace mapping ([`aerospace`]): a ws-id is an AeroSpace workspace
+//! whose NAME is a positive integer (declare them persistent); other
+//! workspaces are invisible to bsctl. AeroSpace has no rename, so workspace
+//! display names live in bsctl's `names` file (`<id> <name>` lines, a
+//! sibling of `map`/`prefs`, written by `ws name set|rm`). Displays are
+//! numbered by AeroSpace's left-to-right `monitor-id`; the world's
+//! `displays[].x` is that ordinal, not pixels. A session's window is the
+//! first window whose app pid is an ancestor of the hook — narrowed, when
+//! several match (kitty serves every window from one process on macOS), to
+//! the OS window kitty reports for the hook's `KITTY_WINDOW_ID`. Stream
+//! events come from a supervised `aerospace subscribe` child; when it
+//! exits (AeroSpace not running) the stream runs on files alone and
+//! retries every slow tick. Raw Lua (`ipc::dispatch`/`eval`/`reload`) and
+//! the whole `display` domain are Hyprland-only and refuse elsewhere.
+//!
 //! # Hyprland IPC (`ipc.rs`)
 //!
 //! Every compositor-facing call goes through [`ipc`]: a direct client of
@@ -799,6 +823,7 @@
 //! so its consumer (the `--stream` engine) treats connect failure as
 //! degraded mode.
 
+pub mod aerospace;
 pub mod agents;
 pub mod asks;
 pub mod comms;
