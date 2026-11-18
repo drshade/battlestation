@@ -42,7 +42,11 @@
 //! - `<session_id>` — one file per live session:
 //!   `{"ws": <int>, "win": "<addr>"|null, "status":
 //!     "waiting"|"thinking"|"tooling", "kind": "<harness>",
-//!     "title": "<aiTitle>", "pid": <int>, "term_pid": <int>|null}`.
+//!     "title": "<aiTitle>", "pid": <int>, "term_pid": <int>|null,
+//!     "kitty": {"to": "<listen addr>", "window": <int>}}` (`kitty` only
+//!   when the hook ran inside kitty with remote control listening — taken
+//!   from the `KITTY_LISTEN_ON`/`KITTY_WINDOW_ID` kitty exports into every
+//!   child; private routing data, never published).
 //!   `ws` is the Hyprland workspace id owning the session's terminal window
 //!   (found by walking the process ancestors — [`sys::proc_info`]: /proc
 //!   on Linux, libproc on macOS — against `hyprctl clients -j`), `win`
@@ -116,11 +120,14 @@
 //! `agents get [--kind K] [--session-id S] [--format text|json]` is the
 //! readable query over the same state, sweeping like every scan (dead
 //! pids, orphan and stale markers). Its published schema — `[{session,
-//! kind, status, ws, win, pid, term_pid, title, subagents: [{id, type,
-//! description, started}]}]` — deliberately respells the on-disk
+//! kind, status, ws, win, pid, term_pid, title, name, subagents: [{id,
+//! type, description, started}]}]` — deliberately respells the on-disk
 //! `sid`/`agents` keys; `pid` (harness) and `term_pid` (terminal owning
 //! the window) are JSON-only, omitted from the human text table as machine
-//! data. The `status` world feed emits the identical rows (shared code, so the
+//! data. `name` is the session's Switchboard name (null until the agent
+//! calls `set_name`) — joined in so a human surface can match the public
+//! comms identities, which carry no session id, to agent rows. The
+//! `status` world feed emits the identical rows (shared code, so the
 //! two surfaces can never drift).
 //!
 //! `agents send --session-id S [--submit] [--force]` types text (read from
@@ -128,12 +135,15 @@
 //! the return channel the read-only queue lacks. It is a `bsctl` verb ONLY,
 //! deliberately absent from the MCP tool list, so the write-path stays
 //! human-driven (bar/CLI); exposing it to agents later is one tools_json entry
-//! plus a consent ask, with no change here. Routing reuses the captured
-//! `term_pid`: each kitty window is its own process listening on
-//! `unix:/tmp/kitty-<its pid>` (kitty.conf's `listen_on`/`{kitty_pid}`), so
-//! term_pid IS the socket — no window scan, no `--match`. Unlike the `set`
-//! hook it is LOUD: unknown session, missing term_pid, absent socket (window
-//! predates remote control or isn't kitty), or a non-idle session without
+//! plus a consent ask, with no change here. Routing needs no window scan:
+//! the record's `kitty` route wins (`--to <listen addr> --match
+//! id:<window>` — exact even when ONE kitty process serves many windows,
+//! as it always does on macOS); without one (or with a stale `unix:` path)
+//! it falls back to `term_pid`, for kitty windows that are their own
+//! process listening on `unix:/tmp/kitty-<its pid>` (kitty.conf's
+//! `listen_on`/`{kitty_pid}`). Unlike the `set` hook it is LOUD: unknown
+//! session, no usable route, absent socket (window predates remote control
+//! or isn't kitty), or a non-idle session without
 //! `--force` each exit nonzero with a reason. The text is STAGED unsent by
 //! default; `--submit` appends the Enter (the conservative default until
 //! submit behaviour is proven against each harness's input box, not a shell).

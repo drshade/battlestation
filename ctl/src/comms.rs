@@ -22,6 +22,12 @@ pub fn comms_dir() -> PathBuf {
     sys::runtime_dir().join("battlestation-comms")
 }
 
+/// Session id -> Switchboard name, for the human surfaces that join names
+/// onto agent rows (`agents get`, the world). Missing store = no names.
+pub fn names_by_session() -> BTreeMap<String, String> {
+    load_from(&comms_dir()).1
+}
+
 fn load_from(dir: &Path) -> (i64, BTreeMap<String, String>, Vec<[String; 2]>, Vec<Value>) {
     let value = fs::read(dir.join("comms.json"))
         .ok()

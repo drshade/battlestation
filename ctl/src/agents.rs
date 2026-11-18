@@ -227,7 +227,7 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str, over: Option<&
     let prompt_title =
         proto::title_from_prompt(&proto::field(&d, "cwd"), &proto::field(&d, "prompt"));
     let title = proto::derive_title(&transcript_title, &prompt_title, &existing_title(dir, &sid));
-    let _ = write_session(
+    let _ = write_session_routed(
         dir,
         &sid,
         verb,
@@ -237,7 +237,22 @@ fn session_verb(dir: &Path, verb: &str, input: &[u8], kind: &str, over: Option<&
         pid,
         term_pid,
         kind,
+        kitty_route_from_env(),
     );
+}
+
+/// The kitty route for THIS process's terminal window, from the variables
+/// kitty exports into every child (inherited by the harness and its
+/// hooks): `{"to": KITTY_LISTEN_ON, "window": KITTY_WINDOW_ID}`. None
+/// outside kitty or without remote control listening. This is what makes
+/// `agents send` exact when one kitty process serves many windows (always
+/// on macOS; on Linux too with `--single-instance`).
+pub fn kitty_route_from_env() -> Option<Value> {
+    let to = std::env::var("KITTY_LISTEN_ON")
+        .ok()
+        .filter(|s| !s.is_empty())?;
+    let window: i64 = std::env::var("KITTY_WINDOW_ID").ok()?.parse().ok()?;
+    Some(json!({"to": to, "window": window}))
 }
 
 /// The sticky-title source: the session file's current title, "" when the
@@ -266,11 +281,30 @@ pub fn write_session(
     term_pid: Option<i64>,
     kind: &str,
 ) -> io::Result<()> {
-    sys::atomic_write_json(
-        dir,
-        sid,
-        &proto::session_record(ws, win, status, title, pid, term_pid, kind),
-    )
+    write_session_routed(dir, sid, status, title, ws, win, pid, term_pid, kind, None)
+}
+
+/// [`write_session`] plus the session's kitty route (see
+/// [`kitty_route_from_env`]), stored as the record's private `kitty` key —
+/// never published by `agents get`/`status`.
+#[allow(clippy::too_many_arguments)]
+pub fn write_session_routed(
+    dir: &Path,
+    sid: &str,
+    status: &str,
+    title: &str,
+    ws: i64,
+    win: Option<&str>,
+    pid: i64,
+    term_pid: Option<i64>,
+    kind: &str,
+    kitty: Option<Value>,
+) -> io::Result<()> {
+    let mut rec = proto::session_record(ws, win, status, title, pid, term_pid, kind);
+    if let (Some(k), Some(obj)) = (kitty, rec.as_object_mut()) {
+        obj.insert("kitty".into(), k);
+    }
+    sys::atomic_write_json(dir, sid, &rec)
 }
 
 /// `rm -f <dir>/<sid> <dir>/<sid>.*` — the session file and all its markers.
@@ -340,6 +374,10 @@ fn read_meta_fallback(d: &Value, sid: &str, aid: &str, desc: &mut String, atype:
 /// builds its agents section from the same rows, so the two surfaces can
 /// never drift.
 pub fn agent_rows(recs: Vec<Value>, kind: Option<&str>, session: Option<&str>) -> Vec<Value> {
+    // The Switchboard name, joined here so a human surface can match the
+    // public comms identities (`comms.agents`/`links`, which carry no
+    // session id) to agent rows — the team board draws links between them.
+    let names = crate::comms::names_by_session();
     recs.into_iter()
         .filter(|r| kind.is_none_or(|k| proto::field(r, "kind") == k))
         .filter(|r| session.is_none_or(|s| proto::field(r, "sid") == s))
@@ -355,6 +393,11 @@ pub fn agent_rows(recs: Vec<Value>, kind: Option<&str>, session: Option<&str>) -
                 "pid": r.get("pid").cloned().unwrap_or(Value::Null),
                 "term_pid": r.get("term_pid").cloned().unwrap_or(Value::Null),
                 "title": r.get("title").cloned().unwrap_or(Value::Null),
+                "name": r
+                    .get("sid")
+                    .and_then(Value::as_str)
+                    .and_then(|s| names.get(s))
+                    .map_or(Value::Null, |n| json!(n)),
                 "subagents": r.get("agents").cloned().unwrap_or_else(|| json!([])),
             })
         })
@@ -385,10 +428,13 @@ pub fn get(kind: Option<&str>, session: Option<&str>, json_out: bool) -> i32 {
 /// stdin) into a session's terminal. This is the human write-path behind the
 /// Deck: it is a `bsctl` verb only, deliberately NOT an MCP tool, so no harness
 /// can drive it — the human answers or nudges a session from the bar or the
-/// CLI. Routing needs no window scan: each kitty window is its own process
-/// listening on `unix:/tmp/kitty-<its pid>` (kitty.conf), and that pid is
-/// exactly the `term_pid` the session scan already records, so term_pid IS the
-/// socket. Unlike the `set` hook this is loud: every miss is a nonzero exit
+/// CLI. Routing needs no window scan. Preferred: the route the hook recorded
+/// from kitty's own environment — the listen address plus the kitty window
+/// id, sent with `--match id:<window>`, exact even when one kitty process
+/// serves many windows (macOS always does). Fallback (records written
+/// before routes existed, or a kitty without KITTY_LISTEN_ON): each kitty
+/// window as its own process listening on `unix:/tmp/kitty-<its pid>`
+/// (kitty.conf), so `term_pid` IS the socket. Unlike the `set` hook this is loud: every miss is a nonzero exit
 /// with a reason on stderr (fail-loud, not hook silence). The text is STAGED
 /// unsent by default; `--submit` appends the Enter that submits it — the
 /// conservative default until the paste/submit behaviour is proven against
@@ -419,18 +465,13 @@ pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i3
         );
         return 1;
     }
-    let Some(term_pid) = rec.get("term_pid").and_then(proto::py_int) else {
-        eprintln!("bsctl: session {session_id} has no terminal pid (no owning window)");
-        return 1;
+    let (to, matcher) = match kitty_route(rec) {
+        Ok(r) => r,
+        Err(msg) => {
+            eprintln!("bsctl: {msg} for session {session_id}");
+            return 1;
+        }
     };
-    let sock = format!("/tmp/kitty-{term_pid}");
-    if !Path::new(&sock).exists() {
-        eprintln!(
-            "bsctl: no kitty control socket for session {session_id} at {sock} — relaunch its \
-             window (remote control attaches per-window), or it isn't a kitty terminal"
-        );
-        return 1;
-    }
 
     // Send the text, then — when submitting — a SEPARATE Enter after a short
     // beat. A CR appended to the SAME burst is racy: Claude Code's TUI paste
@@ -438,24 +479,61 @@ pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i3
     // instead of a submit about as often as not (observed live 2026-07-05 —
     // identical bytes submitted one run, newlined the next). A lone CR arriving
     // after the burst has settled reads as Enter deterministically.
-    let to = format!("unix:{sock}");
-    if kitty_send_text(&to, text) != 0 {
+    if kitty_send_text(&to, matcher.as_deref(), text) != 0 {
         return 1; // error already reported
     }
     if submit {
         std::thread::sleep(std::time::Duration::from_millis(150));
-        return kitty_send_text(&to, b"\r");
+        return kitty_send_text(&to, matcher.as_deref(), b"\r");
     }
     0
 }
 
-/// Pipe `bytes` to `kitty @ --to <to> send-text --stdin`. `kitty @` ships with
-/// (and speaks the protocol of) the running kitty — the version-matched
-/// fallback logic ipc.rs uses for hyprctl. One window per socket, so no
-/// `--match` is needed. Nonzero + stderr on any spawn/exec failure.
-fn kitty_send_text(to: &str, bytes: &[u8]) -> i32 {
+/// Resolve a session record to (kitty `--to` address, optional `--match`).
+/// The recorded route wins; a `unix:` path that no longer exists is a stale
+/// route (kitty restarted) and falls through to the per-pid socket. Abstract
+/// (`unix:@…`) and tcp addresses can't be checked and are trusted.
+pub fn kitty_route(rec: &Value) -> Result<(String, Option<String>), String> {
+    if let Some(k) = rec.get("kitty")
+        && let (Some(to), Some(win)) = (
+            k.get("to").and_then(Value::as_str),
+            k.get("window").and_then(Value::as_i64),
+        )
+    {
+        let live = match to.strip_prefix("unix:") {
+            Some(p) if !p.starts_with('@') => Path::new(p).exists(),
+            _ => true,
+        };
+        if live {
+            return Ok((to.to_string(), Some(format!("id:{win}"))));
+        }
+    }
+    let Some(term_pid) = rec.get("term_pid").and_then(proto::py_int) else {
+        return Err("no kitty route and no terminal pid (no owning window)".into());
+    };
+    let sock = format!("/tmp/kitty-{term_pid}");
+    if !Path::new(&sock).exists() {
+        return Err(format!(
+            "no kitty control socket at {sock} — relaunch its window (remote control \
+             attaches per-window), or it isn't a kitty terminal"
+        ));
+    }
+    Ok((format!("unix:{sock}"), None))
+}
+
+/// Pipe `bytes` to `kitty @ --to <to> send-text [--match <m>] --stdin`.
+/// `kitty @` ships with (and speaks the protocol of) the running kitty — the
+/// version-matched fallback logic ipc.rs uses for hyprctl. `--match` pins
+/// the window when the socket serves several. Nonzero + stderr on any
+/// spawn/exec failure.
+fn kitty_send_text(to: &str, matcher: Option<&str>, bytes: &[u8]) -> i32 {
+    let mut args = vec!["@", "--to", to, "send-text"];
+    if let Some(m) = matcher {
+        args.extend(["--match", m]);
+    }
+    args.push("--stdin");
     let mut child = match Command::new("kitty")
-        .args(["@", "--to", to, "send-text", "--stdin"])
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -587,5 +665,33 @@ mod tests {
             p(&["--kind", "codex", "waiting", "--session-id"]),
             ("codex".into(), "".into(), Some("waiting".to_string()))
         );
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+
+    #[test]
+    fn recorded_route_wins_and_stale_unix_paths_fall_back() {
+        let live = std::env::temp_dir().join(format!("bsctl-kroute-{}", std::process::id()));
+        fs::write(&live, "").unwrap();
+        let rec = json!({"kitty": {"to": format!("unix:{}", live.display()), "window": 7}, "term_pid": 1});
+        assert_eq!(
+            kitty_route(&rec),
+            Ok((format!("unix:{}", live.display()), Some("id:7".into())))
+        );
+        // abstract socket: trusted without a filesystem check
+        let rec = json!({"kitty": {"to": "unix:@kitty-9", "window": 3}});
+        assert_eq!(
+            kitty_route(&rec),
+            Ok(("unix:@kitty-9".into(), Some("id:3".into())))
+        );
+        // stale path, no per-pid socket either -> loud error
+        let rec = json!({"kitty": {"to": "unix:/nonexistent/kitty", "window": 3}, "term_pid": 999_999_999});
+        assert!(kitty_route(&rec).is_err());
+        // no route, no term_pid
+        assert!(kitty_route(&json!({})).is_err());
+        let _ = fs::remove_file(&live);
     }
 }

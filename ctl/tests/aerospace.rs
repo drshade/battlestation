@@ -265,3 +265,43 @@ fn hyprland_only_verbs_refuse_under_aerospace() {
     assert_ne!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stderr).contains("needs Hyprland"));
 }
+
+#[test]
+fn hook_records_the_kitty_route_privately_and_rows_carry_the_switchboard_name() {
+    let env = TestEnv::new("route", two_windows());
+    let mut child = env
+        .cmd()
+        .args(["agents", "set", "--kind", "claude", "waiting"])
+        .env("KITTY_LISTEN_ON", "unix:/tmp/kitty-route-test")
+        .env("KITTY_WINDOW_ID", "5")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(json!({"session_id": "sess-k"}).to_string().as_bytes())
+        .unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    let rec: Value =
+        serde_json::from_slice(&fs::read(env.run.join("battlestation-ws/sess-k")).unwrap())
+            .unwrap();
+    assert_eq!(
+        rec["kitty"],
+        json!({"to": "unix:/tmp/kitty-route-test", "window": 5})
+    );
+    // Name the session on the Switchboard; agent rows now carry it.
+    let comms = env.run.join("battlestation-comms");
+    fs::create_dir_all(&comms).unwrap();
+    fs::write(
+        comms.join("comms.json"),
+        json!({"next_id": 1, "names": {"sess-k": "web-ui"}, "links": [], "messages": []})
+            .to_string(),
+    )
+    .unwrap();
+    let out = env.run(&["agents", "get", "--format", "json"]);
+    let rows: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(rows[0]["name"], "web-ui");
+    assert!(rows[0].get("kitty").is_none(), "the route is private");
+}
