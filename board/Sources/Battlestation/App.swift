@@ -48,22 +48,48 @@ struct MainView: View {
         }
     }
 
+    /// One row per harness with plan usage (bsctl's kind-indexed `usage`):
+    /// its brand glyph, then the session (5h) and weekly meters.
     @ViewBuilder private var usage: some View {
-        if let u = store.world.usage?["claude"] {
-            HStack(spacing: 10) {
-                meter("session", u.sessionPct)
-                meter("weekly", u.weeklyPct)
+        let kinds = (store.world.usage ?? [:]).keys.sorted()
+        if !kinds.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(kinds, id: \.self) { kind in
+                    if let u = store.world.usage?[kind] {
+                        HStack(spacing: 10) {
+                            Group {
+                                if let img = Assets.image(kind, "icon") {
+                                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                                } else {
+                                    Text(kind).font(Theme.mono)
+                                }
+                            }
+                            .frame(width: 12, height: 12)
+                            meter("session", u.sessionPct, kind, u.asOf)
+                            meter("weekly", u.weeklyPct, kind, u.asOf)
+                        }
+                        .help(usageHelp(kind, u))
+                    }
+                }
             }
         }
     }
 
-    private func meter(_ label: String, _ pct: Double?) -> some View {
+    private func usageHelp(_ kind: String, _ u: Usage) -> String {
+        var s = "\(kind.capitalized) plan usage: 5-hour session window and weekly window"
+        if let a = u.asOf, let d = ISO8601DateFormatter.lenient(a) {
+            s += " — as of \(fmtAge(Date().timeIntervalSince(d))) ago (updates with each \(kind) turn)"
+        }
+        return s
+    }
+
+    private func meter(_ label: String, _ pct: Double?, _ kind: String, _ asOf: String?) -> some View {
         HStack(spacing: 5) {
             Text(label).font(.caption).foregroundStyle(Theme.muted)
             Meter(value: pct ?? 0)
             Text("\(Int(pct ?? 0))%").font(Theme.mono).foregroundStyle(Theme.muted)
+                .frame(width: 30, alignment: .leading)
         }
-        .help("Claude plan usage (\(label))")
     }
 }
 

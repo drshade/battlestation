@@ -158,6 +158,8 @@ struct Endpoint: Decodable, Equatable, Hashable {
 struct Usage: Decodable, Equatable {
     var sessionPct: Double?
     var weeklyPct: Double?
+    /// When the reading was taken, if the provider knows (codex: its last turn).
+    var asOf: String?
 }
 
 struct Human: Decodable, Equatable {
@@ -172,4 +174,15 @@ func fmtAge(_ seconds: Double) -> String {
     let m = s / 60
     if m < 60 { return "\(m)m" }
     return "\(m / 60)h \(m % 60)m"
+}
+
+extension ISO8601DateFormatter {
+    /// RFC 3339 with or without fractional seconds.
+    static func lenient(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
+    }
 }

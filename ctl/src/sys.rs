@@ -290,6 +290,18 @@ pub fn debug_ts() -> String {
     )
 }
 
+/// Epoch seconds -> RFC 3339 UTC (`2026-11-18T23:29:59Z`).
+pub fn iso_utc(secs: i64) -> String {
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
 /// Days-since-epoch -> (year, month, day). Howard Hinnant's civil_from_days.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
@@ -314,6 +326,12 @@ mod tests {
         assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // date -ud @1704067200
         assert_eq!(civil_from_days(1_751_414_400 / 86_400), (2025, 7, 2));
         assert_eq!(civil_from_days(11_016), (2000, 2, 29)); // leap day
+    }
+
+    #[test]
+    fn iso_utc_formats_rfc3339() {
+        assert_eq!(iso_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso_utc(1_704_067_200 + 3661), "2024-01-01T01:01:01Z");
     }
 
     #[test]

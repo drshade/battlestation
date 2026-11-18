@@ -745,14 +745,17 @@
 //!
 //! # Plan usage (`bsctl agents usage`)
 //!
-//! Plan usage per harness kind, indexed for the day codex/agy grow usage
-//! endpoints: `{"<kind>": {"sessionPct": <int>, "sessionResets": "...",
-//! "weeklyPct": <int>, "weeklyResets": "..."}}` — kinds with nothing known
-//! are simply absent, so `{}` means "nothing known", never an error (text
-//! renders the house table, or nothing at all when empty). One provider
-//! exists today (claude, the OAuth usage endpoint — the same data as
-//! `/usage`); adding one is a single entry in usage.rs's provider table.
-//! `--kind` filters to one kind.
+//! Plan usage per harness kind: `{"<kind>": {"sessionPct": <int>,
+//! "sessionResets": "...", "weeklyPct": <int>, "weeklyResets": "...",
+//! "asOf"?: "..."}}` — kinds with nothing known are simply absent, so `{}`
+//! means "nothing known", never an error (text renders the house table, or
+//! nothing at all when empty). Providers: claude (the OAuth usage endpoint
+//! — the same data as `/usage`) and codex (the latest `rate_limits` record
+//! in Codex's own session logs under `$CODEX_HOME/sessions`: no network,
+//! as fresh as the last Codex turn, which `asOf` states; windows map by
+//! length, and a window whose reset time has passed reads 0%). Adding one
+//! is a single entry in usage.rs's provider table. `--kind` filters to one
+//! kind.
 //!
 //! The claude reading is cached at `${XDG_CACHE_HOME:-$HOME/.cache}/
 //! claude-usage.json` (ttl 240s; the cache stores the bare reading — kind
