@@ -13,6 +13,7 @@
 # workspace whose name is an integer (ctl/src/lib.rs, "Window managers").
 # Names live in bsctl (`bsctl ws name set`), not here.
 
+config-version = 2
 start-at-login = true
 enable-normalization-flatten-containers = true
 enable-normalization-opposite-orientation-for-nested-containers = true
@@ -20,6 +21,20 @@ default-root-container-layout = 'tiles'
 default-root-container-orientation = 'auto'
 accordion-padding = 30
 persistent-workspaces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+
+# Only terminals tile. On macOS AeroSpace exists to arrange agent terminals
+# into battlespaces; every other app floats — keeps its own size and
+# position, never rearranged — on the workspace it opened in (so a browser
+# opened in a project's workspace travels with that project). AeroSpace has
+# no "unmanaged" windows: floating ones still hide when you leave their
+# workspace. First matching callback wins.
+[[on-window-detected]]
+if.app-id = 'net.kovidgoyal.kitty'
+run = 'layout tiling'
+
+[[on-window-detected]]
+if = 'true'
+run = 'layout floating'
 
 [gaps]
 inner.horizontal = 8
