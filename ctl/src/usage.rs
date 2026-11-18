@@ -412,13 +412,82 @@ pub fn transform(body: &[u8]) -> Option<String> {
     let d: Value = serde_json::from_slice(body).ok()?;
     let fh = d.get("five_hour")?.as_object()?;
     let sd = d.get("seven_day")?.as_object()?;
-    let out = serde_json::json!({
+    let mut out = serde_json::json!({
         "sessionPct": pct(fh.get("utilization"))?,
         "sessionResets": resets(fh.get("resets_at")),
         "weeklyPct": pct(sd.get("utilization"))?,
         "weeklyResets": resets(sd.get("resets_at")),
     });
+    // Optional extras — absent unless the account has them, so consumers
+    // that only know the four core keys are unaffected.
+    let scoped = scoped_limits(&d);
+    if !scoped.is_empty() {
+        out["scoped"] = Value::Array(scoped);
+    }
+    if let Some(m) = monthly_extra(&d) {
+        for (k, v) in m {
+            out[k] = v;
+        }
+    }
     Some(out.to_string())
+}
+
+/// Per-model weekly limits: the `limits` entries of kind `weekly_scoped`,
+/// labelled by the model's display name -> `[{label, pct, resets}]`.
+fn scoped_limits(d: &Value) -> Vec<Value> {
+    d.get("limits")
+        .and_then(Value::as_array)
+        .map(|ls| {
+            ls.iter()
+                .filter(|l| l.get("kind").and_then(Value::as_str) == Some("weekly_scoped"))
+                .filter_map(|l| {
+                    let label = l
+                        .pointer("/scope/model/display_name")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())?;
+                    Some(serde_json::json!({
+                        "label": label,
+                        "pct": pct(l.get("percent"))?,
+                        "resets": resets(l.get("resets_at")),
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The monthly cap on pay-as-you-go credits beyond the plan (`extra_usage`),
+/// only while it is enabled: `monthlyPct`, plus `monthlySpent` /
+/// `monthlyLimit` as decimal strings in `monthlyCurrency` (the endpoint
+/// gives minor units with `decimal_places`).
+fn monthly_extra(d: &Value) -> Option<Vec<(&'static str, Value)>> {
+    let e = d.get("extra_usage")?;
+    if e.get("is_enabled").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let limit = e.get("monthly_limit").and_then(Value::as_f64)?;
+    let used = e.get("used_credits").and_then(Value::as_f64).unwrap_or(0.0);
+    let places = e
+        .get("decimal_places")
+        .and_then(Value::as_i64)
+        .unwrap_or(2)
+        .clamp(0, 6) as i32;
+    let scale = 10f64.powi(places);
+    let p = match e.get("utilization").and_then(Value::as_f64) {
+        Some(u) => u,
+        None if limit > 0.0 => used / limit * 100.0,
+        None => 0.0,
+    };
+    let money = |minor: f64| format!("{:.*}", places as usize, minor / scale);
+    Some(vec![
+        ("monthlyPct", Value::from(crate::proto::round_half_even(p))),
+        ("monthlySpent", Value::from(money(used))),
+        ("monthlyLimit", Value::from(money(limit))),
+        (
+            "monthlyCurrency",
+            Value::from(e.get("currency").and_then(Value::as_str).unwrap_or("USD")),
+        ),
+    ])
 }
 
 /// `round(v or 0)`: python-falsy -> 0, numbers python-3-rounded (half to
@@ -458,6 +527,42 @@ fn falsy(v: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn claude_extras_are_optional_and_parsed() {
+        let base = serde_json::json!({
+            "five_hour": {"utilization": 25.0, "resets_at": "2026-11-18T23:30:00Z"},
+            "seven_day": {"utilization": 11.0, "resets_at": "2026-11-25T00:00:00Z"},
+        });
+        let plain: Value =
+            serde_json::from_str(&transform(base.to_string().as_bytes()).unwrap()).unwrap();
+        assert!(plain.get("scoped").is_none() && plain.get("monthlyPct").is_none());
+
+        let mut rich = base.clone();
+        rich["limits"] = serde_json::json!([
+            {"kind": "session", "percent": 25},
+            {"kind": "weekly_scoped", "percent": 15, "resets_at": "2026-11-25T00:00:00Z",
+             "scope": {"model": {"display_name": "Fable"}}},
+            {"kind": "weekly_scoped", "percent": 3, "scope": {"model": {"display_name": null}}}
+        ]);
+        rich["extra_usage"] = serde_json::json!({"is_enabled": true, "monthly_limit": 5000,
+            "used_credits": 1250, "utilization": null, "currency": "USD", "decimal_places": 2});
+        let v: Value =
+            serde_json::from_str(&transform(rich.to_string().as_bytes()).unwrap()).unwrap();
+        assert_eq!(
+            v["scoped"],
+            serde_json::json!([{"label": "Fable", "pct": 15, "resets": "2026-11-25T00:00:00Z"}])
+        );
+        assert_eq!(v["monthlyPct"], 25);
+        assert_eq!(v["monthlySpent"], "12.50");
+        assert_eq!(v["monthlyLimit"], "50.00");
+
+        // disabled extra usage (the out_of_credits case) stays absent
+        rich["extra_usage"]["is_enabled"] = Value::Bool(false);
+        let off: Value =
+            serde_json::from_str(&transform(rich.to_string().as_bytes()).unwrap()).unwrap();
+        assert!(off.get("monthlyPct").is_none());
+    }
 
     fn rl(primary: (f64, i64, i64), secondary: (f64, i64, i64)) -> String {
         serde_json::json!({"timestamp": "2026-11-18T18:46:18Z", "type": "event_msg",

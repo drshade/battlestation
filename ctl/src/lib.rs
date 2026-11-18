@@ -747,7 +747,10 @@
 //!
 //! Plan usage per harness kind: `{"<kind>": {"sessionPct": <int>,
 //! "sessionResets": "...", "weeklyPct": <int>, "weeklyResets": "...",
-//! "asOf"?: "..."}}` — kinds with nothing known are simply absent, so `{}`
+//! "asOf"?: "...", "scoped"?: [{label, pct, resets}], "monthlyPct"?: <int>,
+//! "monthlySpent"?, "monthlyLimit"?, "monthlyCurrency"?}}` — the optional
+//! keys appear only when the account has them (claude: per-model weekly
+//! limits, and the pay-as-you-go monthly cap while it is enabled) — kinds with nothing known are simply absent, so `{}`
 //! means "nothing known", never an error (text renders the house table, or
 //! nothing at all when empty). Providers: claude (the OAuth usage endpoint
 //! — the same data as `/usage`) and codex (the latest `rate_limits` record

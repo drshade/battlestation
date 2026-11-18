@@ -160,6 +160,18 @@ struct Usage: Decodable, Equatable {
     var weeklyPct: Double?
     /// When the reading was taken, if the provider knows (codex: its last turn).
     var asOf: String?
+    /// Per-model weekly limits (claude, e.g. Fable).
+    var scoped: [ScopedLimit]?
+    /// The pay-as-you-go monthly cap — present only while enabled.
+    var monthlyPct: Double?
+    var monthlySpent: String?
+    var monthlyLimit: String?
+    var monthlyCurrency: String?
+}
+
+struct ScopedLimit: Decodable, Equatable, Hashable {
+    var label: String
+    var pct: Double?
 }
 
 struct Human: Decodable, Equatable {

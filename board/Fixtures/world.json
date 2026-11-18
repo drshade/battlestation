@@ -6,7 +6,17 @@
  "usage": {
   "claude": {
    "sessionPct": 34,
-   "weeklyPct": 61
+   "weeklyPct": 61,
+   "scoped": [
+    {
+     "label": "Fable",
+     "pct": 16
+    }
+   ],
+   "monthlyPct": 25,
+   "monthlySpent": "12.50",
+   "monthlyLimit": "50.00",
+   "monthlyCurrency": "USD"
   },
   "codex": {
    "sessionPct": 0,

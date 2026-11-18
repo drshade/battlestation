@@ -67,6 +67,14 @@ struct MainView: View {
                             .frame(width: 12, height: 12)
                             meter("session", u.sessionPct, kind, u.asOf)
                             meter("weekly", u.weeklyPct, kind, u.asOf)
+                            ForEach(u.scoped ?? [], id: \.self) { s in
+                                meter("\(s.label) wk", s.pct, kind, u.asOf)
+                                    .help("\(s.label): its own weekly limit, separate from the overall weekly window")
+                            }
+                            if let m = u.monthlyPct {
+                                meter("month", m, kind, u.asOf)
+                                    .help("Pay-as-you-go credits this month: \(u.monthlySpent ?? "?") of \(u.monthlyLimit ?? "?") \(u.monthlyCurrency ?? "")")
+                            }
                         }
                         .help(usageHelp(kind, u))
                     }
