@@ -71,7 +71,10 @@ ctrl-alt-f2 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 2'
 ctrl-alt-f3 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 3'
 
 # 2. Launch · Hyper
-cmd-alt-ctrl-t = 'exec-and-forget open -na kitty'
+# One kitty process for every terminal (one app in Cmd+Tab): --single-instance
+# hands the new window to the running kitty. bsctl routes per kitty window
+# id, so many windows in one process is fine (ctl/src/lib.rs, agents send).
+cmd-alt-ctrl-t = 'exec-and-forget /Applications/kitty.app/Contents/MacOS/kitty --single-instance --directory ~'
 
 # 3. Window · Hyper
 cmd-alt-ctrl-q = 'close'
