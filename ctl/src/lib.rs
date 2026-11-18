@@ -33,14 +33,19 @@
 //! battlestation-workspaces widget. Multi-harness by construction: ONE flat
 //! dir holds sessions from ANY harness, discriminated per session by
 //! `kind`. State lives as small JSON files in
-//! `${XDG_RUNTIME_DIR:-/tmp}/battlestation-ws/`:
+//! `<runtime-dir>/battlestation-ws/`, where `<runtime-dir>` is
+//! [`sys::runtime_dir`]: `$XDG_RUNTIME_DIR`, else a per-user dir derived
+//! without the environment (Linux `/run/user/<uid>`; macOS the
+//! `confstr(_CS_DARWIN_USER_TEMP_DIR)` dir), else `/tmp`. Every
+//! `${XDG_RUNTIME_DIR:-…}` path below means this resolver:
 //!
 //! - `<session_id>` — one file per live session:
 //!   `{"ws": <int>, "win": "<addr>"|null, "status":
 //!     "waiting"|"thinking"|"tooling", "kind": "<harness>",
 //!     "title": "<aiTitle>", "pid": <int>, "term_pid": <int>|null}`.
 //!   `ws` is the Hyprland workspace id owning the session's terminal window
-//!   (found by walking /proc ancestors against `hyprctl clients -j`), `win`
+//!   (found by walking the process ancestors — [`sys::proc_info`]: /proc
+//!   on Linux, libproc on macOS — against `hyprctl clients -j`), `win`
 //!   is that same clients row's window address (null when the row carried
 //!   none), and `term_pid` is that same clients row's OWN pid — the
 //!   terminal process owning the window (kitty here), as distinct from the
@@ -314,8 +319,8 @@
 //! one shared exit (answered, dismissed, timeout, cancellation, EOF). A
 //! server killed outright can't clear, so the field is internal-only:
 //! every emitting surface goes through the published form, which computes
-//! `blocking` = pid set AND `/proc/<pid>` alive (the session sweep's
-//! idiom) and strips the pid — a crashed server's stale marker reads as
+//! `blocking` = pid set AND that pid alive ([`sys::pid_alive`], the
+//! session sweep's idiom) and strips the pid — a crashed server's stale marker reads as
 //! not-blocking instead of lying forever. Queue tables carry a BLOCKING
 //! column (yes/blank); the panel's row dot is this flag (green = an agent
 //! is holding a turn open on this ask right now, grey = nobody waits
@@ -347,7 +352,7 @@
 //! this surface), else answers the newest known.
 //!
 //! SESSION IDENTITY: no harness tells an MCP server which session spawned
-//! it, so the server resolves its own — the /proc ancestor walk names the
+//! it, so the server resolves its own — the process ancestor walk names the
 //! harness process (comm == kind, the hook rule) and the session file
 //! recording that pid IS the session; its sid + ws ride every posted ask.
 //! Unresolvable (headless, hooks not yet fired) degrades to posting with
@@ -581,11 +586,16 @@
 //! is why the old single-writer flock election and its hot-standby
 //! machinery no longer exist.
 //!
-//! The engine folds three wake sources into one re-evaluation: ONE inotify
-//! fd watching the runtime agent-state dir, the persistent map/prefs dir
-//! and the asks dir (each dir's protocol files are exactly its non-dot
-//! entries), Hyprland's `.socket2.sock` event stream, and a 10s tick
-//! (session pids dying and markers aging are invisible to inotify). Bursts
+//! The engine folds three wake sources into one re-evaluation: ONE dir
+//! watcher fd ([`watch`]: inotify on Linux, kqueue on macOS) on the runtime
+//! agent-state dir, the persistent map/prefs dir, the asks dir and the
+//! comms dir (each dir's protocol files are exactly its non-dot entries;
+//! kqueue cannot name entries, so on macOS any entry change triggers and
+//! the dedupe absorbs it), Hyprland's `.socket2.sock` event stream, and a
+//! 10s tick (session pids dying and markers aging are invisible to the
+//! watcher). The FIRST emission happens only after the dirs exist and the
+//! watcher is armed, so a subscriber may act on its first line without
+//! racing the engine. Bursts
 //! coalesce ~50ms (bounded rounds so a steady stream can't starve
 //! emission); emissions dedupe on the serialized result, so a subscriber
 //! is never woken for nothing. The socket2 events that warrant
@@ -745,9 +755,12 @@
 //! or expired-token (401) request never clobbers or blanks a good value.
 //! The fetch is bounded (`curl --max-time 6`): it sits on the stream
 //! engine's tick path and must never hang a subscriber unbounded. The
-//! OAuth token comes from `~/.claude/.credentials.json`
-//! (`.claudeAiOauth.accessToken`; missing/unreadable -> nothing known) and
-//! is passed to curl on stdin, never in argv.
+//! OAuth token comes from `~/.claude/.credentials.json`, else (macOS,
+//! where Claude Code writes no such file) the login Keychain item
+//! `Claude Code-credentials` via `security find-generic-password -w` —
+//! the same JSON either way (`.claudeAiOauth.accessToken`;
+//! missing/unreadable -> nothing known). It is passed to curl on stdin,
+//! never in argv.
 //!
 //! # Hyprland IPC (`ipc.rs`)
 //!
