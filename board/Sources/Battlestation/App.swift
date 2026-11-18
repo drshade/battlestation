@@ -8,12 +8,23 @@ struct MainView: View {
     var body: some View {
         @Bindable var store = store
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 18) {
-                Text("Team Board").font(.title2.weight(.semibold))
-                presence
-                usage
-                Spacer()
-                TabSwitcher(tab: $store.tab, deckCount: store.world.openAsks.count)
+            // Wide: one line. Narrow: usage drops to its own line rather than
+            // being squeezed (meters keep their natural width either way).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 18) {
+                    title
+                    usage.fixedSize()
+                    Spacer(minLength: 12)
+                    TabSwitcher(tab: $store.tab, deckCount: store.world.openAsks.count).fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 18) {
+                        title
+                        Spacer(minLength: 12)
+                        TabSwitcher(tab: $store.tab, deckCount: store.world.openAsks.count).fixedSize()
+                    }
+                    usage.fixedSize()
+                }
             }
             if !store.connected {
                 Label("Not connected to bsctl (\(Bsctl.path)) — retrying every 5s.", systemImage: "bolt.horizontal.circle")
@@ -36,6 +47,13 @@ struct MainView: View {
         .frame(minWidth: 720, minHeight: 420, alignment: .topLeading)
         .background(Theme.bg)
         .foregroundStyle(Theme.fg)
+    }
+
+    private var title: some View {
+        HStack(spacing: 18) {
+            Text("Team Board").font(.title2.weight(.semibold)).fixedSize()
+            presence.fixedSize()
+        }
     }
 
     private var presence: some View {
@@ -93,7 +111,7 @@ struct MainView: View {
 
     private func meter(_ label: String, _ pct: Double?, _ kind: String, _ asOf: String?) -> some View {
         HStack(spacing: 5) {
-            Text(label).font(.caption).foregroundStyle(Theme.muted)
+            Text(label).font(.caption).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
             Meter(value: pct ?? 0)
             Text("\(Int(pct ?? 0))%").font(Theme.mono).foregroundStyle(Theme.muted)
                 .frame(width: 30, alignment: .leading)
@@ -257,12 +275,13 @@ func snapshot(_ args: [String]) -> Int32 {
     store.world = world
     store.connected = true
     let which = args.count > 2 ? args[2] : "board"
+    let width = args.first(where: { $0.hasPrefix("width=") }).flatMap { Double($0.dropFirst(6)) } ?? 1240
     store.tab = Store.Tab(rawValue: which.capitalized) ?? .board
     if which == "deck" { store.expandedAsk = world.openAsks.first?.id }
     let dark = args.contains("dark")
     let root: AnyView = which == "menu"
         ? AnyView(MenuPanel(open: { _ in }).background(Theme.bg))
-        : AnyView(MainView().frame(width: 1240))
+        : AnyView(MainView().frame(width: width))
     let r = ImageRenderer(content: root.environment(store).environment(\.isSnapshot, true)
         .environment(\.colorScheme, dark ? .dark : .light))
     r.scale = 2
