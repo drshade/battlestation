@@ -140,8 +140,13 @@ private struct AskCard: View {
                 Button { onMove(1) } label: { Image(systemName: "chevron.down") }
                     .buttonStyle(.bsIcon).disabled(!canDown).help("Move down")
             }
-            Button("Jump ↵") { store.run(["ws", "focus", "--session", ask.session ?? ""]) }
-                .buttonStyle(.bs).disabled(ask.session == nil)
+            // Jump needs a LIVE tracked asker: an ask can outlive its session,
+            // or carry an empty session when the poster's identity didn't
+            // resolve (bsctl still accepts it) — there is no window to go to.
+            Button("Jump ↵") { if let s = asker?.session { store.run(["ws", "focus", "--session", s]) } }
+                .buttonStyle(.bs).disabled(asker == nil)
+                .help(asker == nil ? "The asking session has ended or was never tracked, so there is no window to jump to."
+                                   : "Jump to the asking agent's window")
             Button(expanded ? "Collapse" : "Open") { store.expandedAsk = expanded ? nil : ask.id }
                 .buttonStyle(.bs)
             Button { store.run(["asks", "dismiss", String(ask.id)]) } label: { Image(systemName: "xmark") }
