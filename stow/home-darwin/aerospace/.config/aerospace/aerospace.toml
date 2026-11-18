@@ -81,10 +81,12 @@ cmd-alt-ctrl-q = 'close'
 cmd-alt-ctrl-f = 'fullscreen'
 cmd-alt-ctrl-o = 'layout floating tiling'
 cmd-alt-ctrl-j = 'layout tiles horizontal vertical'
-cmd-alt-ctrl-left = 'move left'
-cmd-alt-ctrl-right = 'move right'
-cmd-alt-ctrl-up = 'move up'
-cmd-alt-ctrl-down = 'move down'
+# Moving past the screen edge continues onto the neighbouring monitor
+# (all-monitors-outer-frame), so the same keys carry a window across displays.
+cmd-alt-ctrl-left = 'move --boundaries all-monitors-outer-frame left'
+cmd-alt-ctrl-right = 'move --boundaries all-monitors-outer-frame right'
+cmd-alt-ctrl-up = 'move --boundaries all-monitors-outer-frame up'
+cmd-alt-ctrl-down = 'move --boundaries all-monitors-outer-frame down'
 
 # 4. Workspace · Hyper (plain = send & follow, SHIFT = send & stay)
 cmd-alt-ctrl-1 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 1 --focus'
