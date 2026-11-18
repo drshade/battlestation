@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Battlestation menu-bar app (board/, installed by `make build`), started
+     at login. Restarted only after a crash: quitting from the menu exits 0
+     and stays quit until the next login. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.battlestation.board</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec "$HOME/Applications/Battlestation.app/Contents/MacOS/Battlestation"</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+</dict>
+</plist>

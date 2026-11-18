@@ -21,6 +21,7 @@ battlestation/
 │   └── stow-root.sh       #   stow root groups into /     (run with sudo)
 ├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + *-ignore.txt (per-machine hardware to exclude) + aur/flatpak; brew.txt + brew-cask.txt on macOS
 ├── ctl/                   # bsctl (Rust): the desktop's stateful protocols — `make build` → ~/.local/bin/bsctl
+├── board/                 # macOS menu-bar app (Swift): Team Board, Deck, Links — `make build` → ~/Applications
 ├── setup/                 # reproducible per-topic setup notes (never stowed)
 ├── AGENTS.md              # how to work in this repo (read this first)
 └── README.md
@@ -92,7 +93,7 @@ make install-packages   # packages/brew.txt + brew-cask.txt
 rustup default stable   # toolchain for bsctl
 make stow        # shared configs + stow/home-darwin -> $HOME
 make fix         # git clean filters + hooksPath (the two one-time lines above)
-make build       # build + install bsctl
+make build       # build + install bsctl and the menu-bar app (board/)
 make check
 ```
 

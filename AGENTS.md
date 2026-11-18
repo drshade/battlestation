@@ -204,7 +204,15 @@ The repo serves two kinds of machine; neither is the "port" of the other.
   under `stow/home/`, `stow/home-linux/` and `stow/root-linux/`.
 - **macOS (AeroSpace + kitty)** runs the agent-coordination layer: the shared
   `stow/home/` packages plus `stow/home-darwin/`. There is no Noctalia; the
-  window manager is AeroSpace and Caps-as-Hyper comes from Karabiner.
+  window manager is AeroSpace and Caps-as-Hyper comes from Karabiner. The
+  bar's role is played by `board/`, a Swift menu-bar app (Team Board, Deck,
+  Links) built by `make build` — like the Noctalia plugin it holds no state:
+  it follows `bsctl status --stream` and every gesture is a bsctl verb, so
+  bsctl stays the only owner of the protocols. It is the second built
+  artifact; doctor checks its freshness the same way as bsctl's.
+- **Tools are resolved, not assumed on PATH.** GUI and launchd environments
+  run with a bare PATH, so bsctl finds `aerospace`/`kitty` via `sys::tool`
+  (PATH first, then the standard install dirs).
 - **bsctl is one codebase for both.** Platform differences stay inside a few
   seams, each with a reason in its module header: `sys.rs` (runtime dir,
   process ancestry, liveness), `watch.rs` (inotify / kqueue), `ipc.rs` +

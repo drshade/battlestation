@@ -81,16 +81,21 @@ if [ "$FIX" -eq 1 ]; then
     git config core.hooksPath .githooks
     info "installed git config core.hooksPath = .githooks"
   fi
-  # Rebuild bsctl if the deployed binary is missing/stale (check 10). Skipped
-  # without cargo — the check below will still fail and name the remedy.
+  # Rebuild if a built artifact is missing/stale (checks 10, 11): bsctl from
+  # ctl/, and on macOS the app from board/. Skipped without cargo — the
+  # checks below still fail and name the remedy.
   if [ -n "$(git ls-files -- 'ctl/')" ] && have cargo; then
-    bsctl_bin="$HOME/.local/bin/bsctl"
     rebuild=0
-    if [ ! -x "$bsctl_bin" ]; then rebuild=1; else
-      while IFS= read -r -d '' f; do
-        [ "$f" -nt "$bsctl_bin" ] && { rebuild=1; break; }
-      done < <(git ls-files -z -- 'ctl/')
-    fi
+    for pair in "ctl/:$HOME/.local/bin/bsctl" "board/:$HOME/Applications/Battlestation.app/Contents/MacOS/Battlestation"; do
+      src=${pair%%:*}; art=${pair#*:}
+      [ "$src" = board/ ] && [ "$(uname -s)" != Darwin ] && continue
+      [ -n "$(git ls-files -- "$src")" ] || continue
+      if [ ! -x "$art" ]; then rebuild=1; else
+        while IFS= read -r -d '' f; do
+          [ "$f" -nt "$art" ] && { rebuild=1; break; }
+        done < <(git ls-files -z -- "$src")
+      fi
+    done
     if [ "$rebuild" -eq 1 ]; then ./bin/build; fi
   fi
 fi
@@ -361,6 +366,26 @@ else
       bad "$bsctl_bin is stale ($bsctl_stale is newer) — run 'make build'"
     else
       ok "$bsctl_bin up to date vs tracked ctl/ sources"
+    fi
+  fi
+fi
+
+# --- 11. Battlestation.app (board/, macOS) ----------------------------------
+# The second built artifact: same staleness rule as bsctl above.
+if [ "$(uname -s)" = Darwin ] && [ -n "$(git ls-files -- 'board/')" ]; then
+  hdr "Battlestation.app (board/)"
+  app_bin="$HOME/Applications/Battlestation.app/Contents/MacOS/Battlestation"
+  if [ ! -x "$app_bin" ]; then
+    bad "$app_bin missing — run 'make build'"
+  else
+    app_stale=""
+    while IFS= read -r -d '' f; do
+      [ "$f" -nt "$app_bin" ] && { app_stale=$f; break; }
+    done < <(git ls-files -z -- 'board/')
+    if [ -n "$app_stale" ]; then
+      bad "Battlestation.app is stale ($app_stale is newer) — run 'make build'"
+    else
+      ok "Battlestation.app up to date vs tracked board/ sources"
     fi
   fi
 fi

@@ -75,6 +75,7 @@ stow/home-linux/noctalia/.config/noctalia/plugins/*
 
 # Rust build output (ctl/): cargo-generated, never tracked
 ctl/target/
+board/.build/
 
 # Local scratch space — not shipped in a published repo
 scratch/
