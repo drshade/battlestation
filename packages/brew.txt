@@ -1,0 +1,12 @@
+# packages/brew.txt — Homebrew FORMULAE installed on purpose (macOS).
+#
+# Same format and rules as pacman.txt: one name per line, `#` starts a
+# comment, every entry carries a why. bin/drift diffs this against
+# `brew leaves --installed-on-request` (so dependencies are never listed);
+# `make install-packages` applies it with `brew install`. Tapped formulae
+# use their full `tap/name`, which is how brew reports them.
+stow                           # deploys stow/ (make stow)
+bash                           # bin/* need bash >= 4; macOS ships 3.2 (bin/lib.sh re-execs into this)
+rustup                         # builds bsctl (make build) — then: rustup default stable
+shellcheck                     # make check lints shell
+gitleaks                       # .githooks/pre-commit secret scan

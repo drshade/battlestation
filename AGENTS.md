@@ -37,7 +37,9 @@ now, even if it costs a little more today.
 Personal dotfiles, published as a reference for others, for a **CachyOS**
 machine running **Hyprland** (Wayland compositor) + **Noctalia** (a
 Quickshell-based desktop shell). Configs are version-controlled here and
-symlinked into place with **GNU Stow**.
+symlinked into place with **GNU Stow**. The agent-coordination layer
+(`bsctl`, the harness configs, kitty) also runs on **macOS** under the
+**AeroSpace** tiling window manager — see "Platforms" below.
 
 ## The Stow model
 
@@ -49,7 +51,7 @@ symlinked into place with **GNU Stow**.
   `~/.config/<pkg>/`.
 - **Scripts follow their consumers.** A helper used by a single package lives
   inside that package (e.g. a hypr-only script under
-  `stow/home/hypr/.config/hypr/scripts/`). A script consumed by more than one
+  `stow/home-linux/hypr/.config/hypr/scripts/`). A script consumed by more than one
   package goes in the `bin` package — `stow/home/bin/.local/bin/` →
   `~/.local/bin/` (on `PATH`) — so no package reaches into another's tree.
   Callers still reference it as `$HOME/.local/bin/<name>` rather than a bare
@@ -87,6 +89,19 @@ symlinked into place with **GNU Stow**.
 - Adding a target group = create `stow/<group>/` **and** a matching
   `stow/stow-<group>.sh`; the script name mirrors the dir name, so the pairing
   is self-evident.
+- **OS-specific groups.** A group may carry an OS suffix — `<group>-linux`,
+  `<group>-darwin` — and the same driver stows it, but only on that OS
+  (`stow/lib.sh`, mirrored by `stow_groups` in `bin/lib.sh` so doctor checks
+  exactly what stowing deploys). A package that works everywhere lives in the
+  bare group; one that only makes sense on one OS lives in that OS's group.
+  The directory a package sits in is its platform declaration — no list, by
+  construction, same as packages themselves.
+- **Moving a package between groups is safe.** Stow refuses to replace the
+  now-dangling links the old location left ("existing target is not owned by
+  stow") and aborts the package, so the drivers first prune exactly those:
+  dangling links whose text ends in `/stow/<any group>/<same pkg>/<same
+  path>`. Live links, real files and any other dangling link are left alone
+  and surface as a normal stow conflict.
 - After stowing, `~/.config/<app>` is a **real directory** whose *files* are
   symlinks into this repo. Editing the file in `~/.config` and editing it here
   are the same file — there is no copy step and no sync to run.
@@ -160,7 +175,7 @@ live in `setup/README.md`.
 - **Repo-owned systemd *user* services are enabled by stow, never by runbook.**
   A package that owns a user unit also carries the enablement as a relative
   `.wants` symlink beside it — `.config/systemd/user/<target>.wants/<unit> ->
-  ../<unit>` (see `stow/home/kdeconnect`, `stow/home/ssh-agent`) — so stowing
+  ../<unit>` (see `stow/home-linux/kdeconnect`, `stow/home-linux/ssh-agent`) — so stowing
   *is* enabling, correct by construction. Runbook notes must not contain
   `systemctl --user enable` for a repo-owned unit; the only out-of-band steps
   are `systemctl --user daemon-reload` + a first `start` (or a re-login).
@@ -177,6 +192,33 @@ live in `setup/README.md`.
   Likewise no history/origin stories in notes — how the previous state came
   to be belongs in commit messages and PLAN.md outcomes, not in front of
   someone mid-rebuild (see setup/README.md style).
+
+## Platforms
+
+The repo serves two kinds of machine; neither is the "port" of the other.
+
+- **Linux (CachyOS + Hyprland + Noctalia)** is the full desktop: everything
+  under `stow/home/`, `stow/home-linux/` and `stow/root-linux/`.
+- **macOS (AeroSpace + kitty)** runs the agent-coordination layer: the shared
+  `stow/home/` packages plus `stow/home-darwin/`. There is no Noctalia; the
+  window manager is AeroSpace and Caps-as-Hyper comes from Karabiner.
+- **bsctl is one codebase for both.** Platform differences stay inside a few
+  seams, each with a reason in its module header: `sys.rs` (runtime dir,
+  process ancestry, liveness), `watch.rs` (inotify / kqueue), `ipc.rs` +
+  `aerospace.rs` (the window-manager backend; contract in `ctl/src/lib.rs`,
+  "Window managers"), `usage.rs` (credentials file / Keychain). Everything
+  above the seams consumes one Hyprland-shaped JSON model and mutates through
+  `ws::Action`, so the battlespace model, the asks queue, the Switchboard and
+  the stream behave identically. The `display` domain (dpms, scale, lid) is
+  Hyprland-only and refuses elsewhere.
+- **Tests run on both.** The Hyprland suites pin `BSCTL_WM=hyprland` against
+  their fake `hyprctl`; `ctl/tests/aerospace.rs` drives a fake `aerospace`.
+  A change to a seam is not done until `cargo test` passes on each OS it
+  touches.
+- **Tooling.** `bin/*` need bash ≥ 4; `bin/lib.sh` re-execs into Homebrew's
+  bash when macOS's 3.2 is first on PATH. Package manifests are per manager
+  (`packages/pacman*.txt`, `packages/brew*.txt`), and `make
+  install-packages` / `make drift` use whichever managers the machine has.
 
 ## Known gotchas
 
@@ -200,7 +242,7 @@ live in `setup/README.md`.
   an output stuck disabled or at a bad mode. Runtime `hl.monitor` mode/scale evals
   only apply to an *enabled* output — on a disabled one they return "ok" but
   no-op; re-enable via `hyprctl reload` first.
-- **Noctalia rewrites its own config.** `stow/home/noctalia/.config/noctalia/settings.json`
+- **Noctalia rewrites its own config.** `stow/home-linux/noctalia/.config/noctalia/settings.json`
   is written by the running shell. Editing it on disk works, but if Noctalia is
   running it may overwrite your edit on its next settings-write. After editing,
   reload Noctalia (or log out/in) and re-verify with `grep`.
@@ -241,13 +283,13 @@ live in `setup/README.md`.
   `qs -c noctalia-shell`, not hyprlock. The script does the Lua-native equivalent
   (set `misc:allow_session_lock_restore`, ensure the shell is up, re-present the
   lock); you then type your password to unlock normally.
-- **`stow/home/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme
+- **`stow/home-linux/noctalia/.config/noctalia/colors.json`** is regenerated on wallpaper/theme
   changes (matugen-style output). It is derived output, not config — the
   wallpaper/color settings in `settings.json` are the source of truth — so it
   is gitignored, untracked, and must stay that way (see "Runtime-rewritten
   tracked files" under working habits).
 - **Two-terminal trap (resolved).** Hyprland's terminal is set in
-  `stow/home/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
+  `stow/home-linux/hypr/.config/hypr/config/defaults.lua` (`TERMINAL = "kitty"`); Noctalia's
   launcher uses `appLauncher.terminalCommand` in its `settings.json`. These are
   independent — changing one does not change the other. We standardized on
   **kitty** in both (see `setup/debloat-00-removing-alacritty.md`).

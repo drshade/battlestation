@@ -2,19 +2,24 @@
 
 My **battlestation** — the CachyOS + Hyprland + Noctalia (Quickshell) desktop
 configuration and personal customisations for this machine, managed as dotfiles
-with [GNU Stow](https://www.gnu.org/software/stow/).
+with [GNU Stow](https://www.gnu.org/software/stow/). The agent-coordination
+layer (`bsctl`, the agent harness configs, kitty) also runs on macOS under
+[AeroSpace](https://github.com/nikitabobko/AeroSpace) — see AGENTS.md,
+"Platforms".
 
 ## Layout
 
 ```
 battlestation/
 ├── stow/                  # the stow module: trees grouped by target + drivers
-│   ├── home/              #   packages stowed into $HOME
+│   ├── home/              #   packages stowed into $HOME on every OS
 │   │   └── <package>/.config/<package>/
-│   ├── root/              #   packages stowed into /     (system configs, e.g. /etc)
-│   ├── stow-home.sh       #   stow home/ into $HOME      (run as you)
-│   └── stow-root.sh       #   stow root/ into /          (run with sudo)
-├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + *-ignore.txt (per-machine hardware to exclude) + aur/flatpak
+│   ├── home-<os>/         #   ...only on that OS (home-linux, home-darwin)
+│   ├── root[-<os>]/       #   packages stowed into /     (system configs, e.g. /etc)
+│   ├── lib.sh             #   shared driver logic (OS groups, moved-package cleanup)
+│   ├── stow-home.sh       #   stow home groups into $HOME (run as you)
+│   └── stow-root.sh       #   stow root groups into /     (run with sudo)
+├── packages/              # package manifests: pacman-base.txt (installer baseline) + pacman.txt (deliberate installs) + *-ignore.txt (per-machine hardware to exclude) + aur/flatpak; brew.txt + brew-cask.txt on macOS
 ├── ctl/                   # bsctl (Rust): the desktop's stateful protocols — `make build` → ~/.local/bin/bsctl
 ├── setup/                 # reproducible per-topic setup notes (never stowed)
 ├── AGENTS.md              # how to work in this repo (read this first)
@@ -22,7 +27,9 @@ battlestation/
 ```
 
 Packages are organized by **target root**: `stow/<target-group>/<package>/`, and
-each group has its own driver script `stow/stow-<group>.sh`. A package's internal
+each group has its own driver script `stow/stow-<group>.sh`. A group may carry an
+OS suffix (`home-linux`, `home-darwin`); the same driver stows it only on that OS,
+so where a package sits is its platform declaration. A package's internal
 layout mirrors its target, e.g. `stow/home/<pkg>/.config/<pkg>/` → `~/.config/<pkg>/`.
 
 Scripts consumed by more than one package live in the `bin` package
@@ -74,6 +81,23 @@ churn in app-rewritten configs — see AGENTS.md); the hooksPath line activates
 the tracked hooks in `.githooks/` (a pre-commit secret scan over staged
 content). Git config is repo-local, so neither can ship with the clone;
 `make fix` performs both registrations.
+
+### On macOS
+
+```sh
+brew install stow bash make
+git clone git@github.com:drshade/battlestation.git ~/dev/battlestation
+cd ~/dev/battlestation
+make install-packages   # packages/brew.txt + brew-cask.txt
+rustup default stable   # toolchain for bsctl
+make stow        # shared configs + stow/home-darwin -> $HOME
+make fix         # git clean filters + hooksPath (the two one-time lines above)
+make build       # build + install bsctl
+make check
+```
+
+Then the out-of-band steps in `setup/deps-00-aerospace.md` and
+`setup/deps-00-karabiner.md` (permissions macOS only grants by hand).
 
 ## Tasks
 

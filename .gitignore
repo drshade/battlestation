@@ -1,7 +1,7 @@
 # Secrets / machine-local state — never commit these
 stow/home/fish/.config/fish/fish_variables
 # Per-machine Hyprland monitor tuning (resolution/refresh); see setup/displays-00-*
-stow/home/hypr/.config/hypr/config/monitors_local.lua
+stow/home-linux/hypr/.config/hypr/config/monitors_local.lua
 **/*.token
 **/secrets*
 
@@ -39,16 +39,16 @@ stow/home/claude/.claude/**
 # Code-OSS (~/.config/Code - OSS): default-deny — track user settings only.
 # globalStorage/workspaceStorage/History hold tokens, state and churn; only
 # settings.json is config. Never add an ! rule that exposes the rest.
-stow/home/code/.config/Code - OSS/**
-!stow/home/code/.config/Code - OSS/
-!stow/home/code/.config/Code - OSS/User/
-!stow/home/code/.config/Code - OSS/User/settings.json
+stow/home-linux/code/.config/Code - OSS/**
+!stow/home-linux/code/.config/Code - OSS/
+!stow/home-linux/code/.config/Code - OSS/User/
+!stow/home-linux/code/.config/Code - OSS/User/settings.json
 
 # Noctalia colors (~/.config/noctalia/colors.json): derived output, not config —
 # regenerated (matugen-style) on every wallpaper/theme change. The wallpaper +
 # color settings in settings.json are the source of truth; tracking the output
 # would only churn.
-stow/home/noctalia/.config/noctalia/colors.json
+stow/home-linux/noctalia/.config/noctalia/colors.json
 
 # Noctalia TEMPLATE outputs (same derived-output class as colors.json): the
 # enabled templates in settings.json regenerate these into ~/.config on every
@@ -65,13 +65,13 @@ stow/home/btop/.config/btop/themes/
 # already records the source + enabled set; tracking third-party code here
 # duplicates upstream and churns on every update. Opt-ins are only for plugins
 # whose source of truth IS this repo.
-stow/home/noctalia/.config/noctalia/plugins/*
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/**
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-dictation/
-!stow/home/noctalia/.config/noctalia/plugins/battlestation-dictation/**
-!stow/home/noctalia/.config/noctalia/plugins/kde-connect/
-!stow/home/noctalia/.config/noctalia/plugins/kde-connect/**
+stow/home-linux/noctalia/.config/noctalia/plugins/*
+!stow/home-linux/noctalia/.config/noctalia/plugins/battlestation-workspaces/
+!stow/home-linux/noctalia/.config/noctalia/plugins/battlestation-workspaces/**
+!stow/home-linux/noctalia/.config/noctalia/plugins/battlestation-dictation/
+!stow/home-linux/noctalia/.config/noctalia/plugins/battlestation-dictation/**
+!stow/home-linux/noctalia/.config/noctalia/plugins/kde-connect/
+!stow/home-linux/noctalia/.config/noctalia/plugins/kde-connect/**
 
 # Rust build output (ctl/): cargo-generated, never tracked
 ctl/target/

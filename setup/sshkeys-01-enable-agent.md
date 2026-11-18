@@ -3,7 +3,7 @@
 **Goal:** one ssh-agent available in every session, so a key is loaded once with
 `ssh-add` and stays cached until logout.
 
-There is no enable step: `stow/home/ssh-agent` owns the socket unit *and* its
+There is no enable step: `stow/home-linux/ssh-agent` owns the socket unit *and* its
 `sockets.target.wants/` symlink, so stowing the repo is the enablement (see
 AGENTS.md on repo-owned user services). On a fresh machine, after the first
 stow, tell the running user manager about it:

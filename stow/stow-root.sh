@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
+# Stow the root groups into /: stow/root/ (every OS) plus stow/root-<os>/
+# for the running OS (see stow/lib.sh).
 set -eu
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -6,16 +8,15 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-dir="$(dirname "$0")/root"
-if [ ! -d "$dir" ]; then
-  echo "stow-root: no stow/root/ yet — nothing to stow."
+STOW_DIR=$(cd "$(dirname "$0")" && pwd -P)
+# shellcheck source=stow/lib.sh
+. "$STOW_DIR/lib.sh"
+
+groups=$(stow_groups_for root)
+if [ -z "$groups" ]; then
+  echo "stow-root: no root group for $(stow_os) — nothing to stow."
   exit 0
 fi
-cd "$dir"
-
-for pkg in */; do
-  [ -d "$pkg" ] || continue
-  name="${pkg%/}"
-  stow --no-folding --restow --target="/" "$name"
-  echo "stowed: root/$name -> /"
+for group in $groups; do
+  stow_group "$group" /
 done

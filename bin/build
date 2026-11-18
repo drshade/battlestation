@@ -32,7 +32,8 @@ ok "built ctl/target/release/bsctl"
 
 hdr "install"
 dest="$HOME/.local/bin/bsctl"
-install -Dm755 ctl/target/release/bsctl "$dest"
+mkdir -p "$(dirname "$dest")"   # BSD install(1) has no -D
+install -m755 ctl/target/release/bsctl "$dest"
 ok "installed $dest ($(du -h "$dest" | cut -f1))"
 
 hdr "fish completions"

@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
+# Stow the home groups into $HOME: stow/home/ (every OS) plus
+# stow/home-<os>/ for the running OS (see stow/lib.sh).
 set -eu
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -7,11 +9,10 @@ if [ "$(id -u)" -eq 0 ]; then
   exit 1
 fi
 
-cd "$(dirname "$0")/home"
+STOW_DIR=$(cd "$(dirname "$0")" && pwd -P)
+# shellcheck source=stow/lib.sh
+. "$STOW_DIR/lib.sh"
 
-for pkg in */; do
-  [ -d "$pkg" ] || continue
-  name="${pkg%/}"
-  stow --no-folding --restow --target="$HOME" "$name"
-  echo "stowed: home/$name -> $HOME"
+for group in $(stow_groups_for home); do
+  stow_group "$group" "$HOME"
 done

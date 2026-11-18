@@ -25,9 +25,10 @@ description: >-
 It is a single git repository — the source of truth for how the system is set up.
 
 - **Repo:** `~/dev/battlestation` (remote: `git@github.com:drshade/battlestation.git`)
-- **OS:** CachyOS (Arch-based)
-- **Compositor:** Hyprland (Wayland)
-- **Shell/UI:** Noctalia — a Quickshell-based desktop shell
+- **OS:** CachyOS (Arch-based) — or macOS (check `uname`), where only the
+  agent-coordination layer applies (AGENTS.md, "Platforms")
+- **Compositor:** Hyprland (Wayland); AeroSpace on macOS
+- **Shell/UI:** Noctalia — a Quickshell-based desktop shell (Linux only)
 - **Login shell:** fish
 - **Dotfile management:** GNU Stow, grouped by target root: `stow/<group>/<pkg>/`
   (`home/` → `$HOME`, `root/` → `/` for system configs like `/etc`)
@@ -48,7 +49,9 @@ source of truth — read it rather than answering from memory:
 
 Each tool or app configured on this machine is one stow package — a directory
 under a target group: `stow/home/` (stowed into `$HOME`) or `stow/root/` (stowed
-into `/`, for system configs like `/etc`). This set **grows as the machine is
+into `/`, for system configs like `/etc`), or an OS-specific variant of either
+(`stow/home-linux/`, `stow/home-darwin/`, …) that is stowed only on that OS.
+This set **grows as the machine is
 customised**, and groups come and go, so never assume a fixed list: check what
 exists now with
 

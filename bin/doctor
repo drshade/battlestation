@@ -48,8 +48,8 @@ printf '%sbattlestation doctor%s  [%s]\n' "$C_BLD" "$C_RST" "$MODE"
 if [ "$FIX" -eq 1 ]; then
   hdr "Repair: restowing home packages"
   ./stow/stow-home.sh
-  if [ -d stow/root ] && [ -n "$(ls -A stow/root 2>/dev/null)" ]; then
-    warn "root packages exist — rerun as root to repair them: sudo ./stow/stow-root.sh"
+  if stow_groups | cut -f2 | grep -qx /; then
+    warn "root packages exist for this OS — rerun as root to repair them: sudo ./stow/stow-root.sh"
   fi
   # Register clean filters: repo-local git config is not clonable, so a fresh
   # clone lacks it until this (or README's one-liner) runs. Repo-local only —
@@ -106,10 +106,7 @@ while IFS=$'\t' read -r group troot; do
     pkg_problems=0 pkg_files=0
     while IFS= read -r -d '' file; do
       rel=${file#"$pkgdir"/}
-      case "$group" in
-        root) target="/$rel" ;;
-        *)    target="$troot/$rel" ;;
-      esac
+      target="${troot%/}/$rel"
       expected=$(readlink -f "$file")
       pkg_files=$((pkg_files + 1))
       if [ -L "$target" ]; then
@@ -181,18 +178,22 @@ done < <(git ls-files -z -- '*.json')
 
 # --- 5. Lua parse -----------------------------------------------------------
 hdr "Lua parse"
-if have luacheck; then lua_tool="luacheck"; else lua_tool="luac -p (install luacheck for real linting)"; fi
-info "using: $lua_tool"
+if have luacheck; then lua_tool="luacheck"; elif have luac; then lua_tool="luac -p (install luacheck for real linting)"; else lua_tool=""; fi
 lua_bad=0 lua_n=0
-while IFS= read -r -d '' f; do
-  lua_n=$((lua_n + 1))
-  if have luacheck; then
-    if out=$(luacheck --no-color -q "$f" 2>&1); then :; else bad "$f"; while IFS= read -r l; do note "$l"; done <<<"$out"; lua_bad=$((lua_bad + 1)); fi
-  else
-    if ! err=$(luac -p "$f" 2>&1); then bad "$f"; note "$err"; lua_bad=$((lua_bad + 1)); fi
-  fi
-done < <(git ls-files -z -- '*.lua')
-[ "$lua_bad" -eq 0 ] && ok "all $lua_n tracked *.lua parse"
+if [ -z "$lua_tool" ]; then
+  warn "no luacheck or luac installed — Lua files not checked"
+else
+  info "using: $lua_tool"
+  while IFS= read -r -d '' f; do
+    lua_n=$((lua_n + 1))
+    if have luacheck; then
+      if out=$(luacheck --no-color -q "$f" 2>&1); then :; else bad "$f"; while IFS= read -r l; do note "$l"; done <<<"$out"; lua_bad=$((lua_bad + 1)); fi
+    else
+      if ! err=$(luac -p "$f" 2>&1); then bad "$f"; note "$err"; lua_bad=$((lua_bad + 1)); fi
+    fi
+  done < <(git ls-files -z -- '*.lua')
+  [ "$lua_bad" -eq 0 ] && ok "all $lua_n tracked *.lua parse"
+fi
 
 # --- 6. runtime-churn dirty report ------------------------------------------
 # Files apps rewrite at runtime (settings/colors/state json, codex's
@@ -291,7 +292,7 @@ else
     fi
   done
   if ! have gitleaks; then
-    warn "gitleaks not installed — .githooks/pre-commit falls back to a weaker grep (declared in packages/pacman.txt)"
+    warn "gitleaks not installed — .githooks/pre-commit falls back to a weaker grep (declared in packages/)"
   fi
 fi
 
@@ -320,13 +321,13 @@ while IFS= read -r -d '' ex; do
       rel=${rest#*/}                # <rel>.example
       rel=${rel%.example}
       if [ -z "${ex_troot[$exg]:-}" ]; then
+        case "$exg" in
+          *-linux|*-darwin) continue ;;  # another OS's group: not deployed here
+        esac
         warn "cannot map to a target (unknown stow group '$exg'): $ex"
         continue
       fi
-      case "$exg" in
-        root) ex_target="/$rel" ;;
-        *)    ex_target="${ex_troot[$exg]}/$rel" ;;
-      esac
+      ex_target="${ex_troot[$exg]%/}/$rel"
       ;;
     *) ex_target="$REPO/${ex%.example}" ;;
   esac

@@ -1,0 +1,7 @@
+# packages/brew-cask.txt — Homebrew CASKS (apps) installed on purpose (macOS).
+#
+# Format as brew.txt. bin/drift diffs this against `brew list --cask
+# --full-name`; `make install-packages` applies it with `brew install --cask`.
+kitty                          # terminal; remote control is the Deck's write-path (stow/home/kitty)
+nikitabobko/tap/aerospace      # tiling window manager — bsctl's workspaces on macOS (setup/deps-00-aerospace.md)
+karabiner-elements             # Caps Lock -> Hyper (setup/deps-00-karabiner.md)
