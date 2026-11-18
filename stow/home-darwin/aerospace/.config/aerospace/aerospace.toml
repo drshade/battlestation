@@ -1,13 +1,15 @@
 # AeroSpace — the macOS counterpart of the Hyprland setup
 # (stow/home-linux/hypr). The keybind model mirrors keybinds.lua, one verb per
 # modifier, adapted to macOS, where Cmd belongs to apps (copy, paste, tabs):
-#   ALT   (Option) = GO — change where you're looking; never moves a window.
+#   CTRL+OPTION = GO — change where you're looking; never moves a window.
+#         (Not Option alone: Option+arrows is word movement and Option+digit
+#         types characters in every macOS text field.)
 #   HYPER (Caps Lock = Cmd+Alt+Ctrl, via the Karabiner rule in
 #         stow/home-darwin/karabiner) = DO — act on the focused window/system.
 #   SHIFT = the "…and stay" suffix, exactly as on Linux.
 # Number row = workspaces, F-row = displays. Workspace verbs go through bsctl,
 # which addresses workspaces by battlespace id (the order and names the team
-# board shows), so ALT+N means "the Nth battlespace", not AeroSpace's "N".
+# board shows), so CTRL+OPTION+N means "the Nth battlespace", not AeroSpace's "N".
 #
 # Workspaces are numbered 1-10 and persistent: bsctl's ws-id is an AeroSpace
 # workspace whose name is an integer (ctl/src/lib.rs, "Window managers").
@@ -45,24 +47,24 @@ outer.top = 8
 outer.right = 8
 
 [mode.main.binding]
-# 1. Navigate · Alt
-alt-1 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 1'
-alt-2 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 2'
-alt-3 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 3'
-alt-4 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 4'
-alt-5 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 5'
-alt-6 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 6'
-alt-7 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 7'
-alt-8 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 8'
-alt-9 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 9'
-alt-0 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 10'
-alt-left = 'focus left'
-alt-right = 'focus right'
-alt-up = 'focus up'
-alt-down = 'focus down'
-alt-f1 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 1'
-alt-f2 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 2'
-alt-f3 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 3'
+# 1. Navigate · Ctrl+Option
+ctrl-alt-1 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 1'
+ctrl-alt-2 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 2'
+ctrl-alt-3 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 3'
+ctrl-alt-4 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 4'
+ctrl-alt-5 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 5'
+ctrl-alt-6 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 6'
+ctrl-alt-7 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 7'
+ctrl-alt-8 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 8'
+ctrl-alt-9 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 9'
+ctrl-alt-0 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 10'
+ctrl-alt-left = 'focus left'
+ctrl-alt-right = 'focus right'
+ctrl-alt-up = 'focus up'
+ctrl-alt-down = 'focus down'
+ctrl-alt-f1 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 1'
+ctrl-alt-f2 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 2'
+ctrl-alt-f3 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 3'
 
 # 2. Launch · Hyper
 cmd-alt-ctrl-t = 'exec-and-forget open -na kitty'
