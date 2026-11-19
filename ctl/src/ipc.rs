@@ -1,5 +1,13 @@
-//! Hyprland IPC boundary — a direct `.socket.sock` client with a hyprctl
-//! fallback. Every compositor-facing call in this crate goes through here;
+//! The window-manager boundary. Every compositor-facing call in this crate
+//! goes through here, and [`wm`] picks the backend: Hyprland (a direct
+//! `.socket.sock` client with a hyprctl fallback — everything below this
+//! paragraph) or AeroSpace on macOS ([`crate::aerospace`], which answers the
+//! same queries in Hyprland's JSON shape and translates [`Action`]s).
+//! Selection: `BSCTL_WM=hyprland|aerospace` when set, else by OS —
+//! AeroSpace on macOS, Hyprland everywhere else. Raw Lua (`dispatch`,
+//! `eval`, `reload`) is Hyprland-only; under AeroSpace those refuse loudly.
+//!
+//! Hyprland: every compositor call goes through here;
 //! the contract is summarized in lib.rs ("Hyprland IPC") and the wire notes
 //! below are what was verified empirically.
 //!
@@ -55,7 +63,46 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
+use crate::aerospace;
 use crate::sys;
+use crate::ws::Action;
+
+/// The window manager bsctl drives.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Wm {
+    Hyprland,
+    AeroSpace,
+}
+
+/// [`Wm`] for this process: `BSCTL_WM` wins (tests pin it; a Linux box
+/// could in principle run something else), else the OS default.
+pub fn wm() -> Wm {
+    match env::var("BSCTL_WM").ok().as_deref() {
+        Some("hyprland") => Wm::Hyprland,
+        Some("aerospace") => Wm::AeroSpace,
+        _ if cfg!(target_os = "macos") => Wm::AeroSpace,
+        _ => Wm::Hyprland,
+    }
+}
+
+/// Perform a backend-neutral compositor mutation: Hyprland dispatches the
+/// action's pinned Lua string, AeroSpace runs the translated command.
+pub fn act(a: &Action) -> i32 {
+    match wm() {
+        Wm::Hyprland => dispatch(&a.lua()),
+        Wm::AeroSpace => aerospace::act(a),
+    }
+}
+
+fn hyprland_only(what: &str) -> Option<i32> {
+    (wm() != Wm::Hyprland).then(|| {
+        eprintln!(
+            "bsctl: {what} needs Hyprland (the running window manager is {:?})",
+            wm()
+        );
+        1
+    })
+}
 
 /// The shared resolver ([`sys::runtime_dir`]): env, then /run/user/<uid> —
 /// the uid rung was born here as restart_crashed_lock.sh's VT-shell walk
@@ -112,6 +159,9 @@ fn socket_path() -> Option<PathBuf> {
 /// consumer; there is no hyprctl fallback for a *stream*, so None (or a
 /// failed connect) means running without compositor events.
 pub fn event_socket_path() -> Option<PathBuf> {
+    if wm() != Wm::Hyprland {
+        return None;
+    }
     Some(instance_dir()?.join(".socket2.sock"))
 }
 
@@ -131,6 +181,9 @@ fn socket_request(cmd: &str) -> io::Result<Vec<u8>> {
 /// None on total failure (both paths); like the old sys::hyprctl_json, hook
 /// callers stay silent on None while CLI callers report and exit non-zero.
 pub fn json(query: &str) -> Option<Value> {
+    if wm() == Wm::AeroSpace {
+        return aerospace::json(query);
+    }
     if let Ok(buf) = socket_request(&format!("j/{query}"))
         && let Ok(v) = serde_json::from_slice(&buf)
     {
@@ -146,11 +199,17 @@ pub fn json(query: &str) -> Option<Value> {
 
 /// `hyprctl dispatch <cmd>` equivalent (the Lua `hl.dsp.*` strings).
 pub fn dispatch(cmd: &str) -> i32 {
+    if let Some(c) = hyprland_only("a Lua dispatch") {
+        return c;
+    }
     ok_command(&["dispatch", cmd])
 }
 
 /// `hyprctl reload` equivalent — `bsctl display reset`'s first step.
 pub fn reload() -> i32 {
+    if let Some(c) = hyprland_only("reload") {
+        return c;
+    }
     ok_command(&["reload"])
 }
 
@@ -158,6 +217,9 @@ pub fn reload() -> i32 {
 /// (`hl.monitor` and friends). Ok/error replies like dispatch; see the
 /// header for why the fallback re-send cannot double-apply.
 pub fn eval(lua: &str) -> i32 {
+    if let Some(c) = hyprland_only("a Lua eval") {
+        return c;
+    }
     ok_command(&["eval", lua])
 }
 
@@ -201,6 +263,9 @@ fn ok_command(words: &[&str]) -> i32 {
 /// which is the harness. Integration tests fake this with a stub hyprctl
 /// on PATH (their XDG_RUNTIME_DIR holds no socket, so the fallback runs).
 pub fn client_for_pids(pids: &[i64]) -> Option<(i64, Option<String>, Option<i64>)> {
+    if wm() == Wm::AeroSpace {
+        return aerospace::client_for_pids(pids);
+    }
     client_of(&json("clients")?, pids)
 }
 

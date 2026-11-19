@@ -181,5 +181,9 @@ fi
 if have flatpak; then
   pkg_diff "flatpak" "flatpak list --app --columns=application" packages/flatpak-ignore.txt packages/flatpak.txt
 fi
+if have brew; then
+  pkg_diff "Homebrew formulae" "brew leaves --installed-on-request" packages/brew-ignore.txt packages/brew.txt
+  pkg_diff "Homebrew casks"    "brew list --cask --full-name"       packages/brew-cask-ignore.txt packages/brew-cask.txt
+fi
 
 printf '\n%s——%s drift is informational; adopt configs / update manifests deliberately.\n' "$C_DIM" "$C_RST"

@@ -607,14 +607,14 @@ fn set_waiting(id: i64, pid: Value) {
 }
 
 /// Is an agent parked on this ask RIGHT NOW? `waiting_pid` set AND that
-/// pid alive (`/proc/<pid>` — local by construction, the session sweep's
-/// idiom). The liveness check is the read-time sanitize: a server that
+/// pid alive ([`sys::pid_alive`] — local by construction, the session
+/// sweep's idiom). The liveness check is the read-time sanitize: a server that
 /// crashed mid-block leaves a stale pid, and a dead pid must read as
 /// not-blocking rather than lie forever.
 pub fn blocking(r: &Value) -> bool {
     r.get("waiting_pid")
         .and_then(Value::as_i64)
-        .is_some_and(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists())
+        .is_some_and(crate::sys::pid_alive)
 }
 
 /// The published form of a record: the computed `blocking` flag in, the

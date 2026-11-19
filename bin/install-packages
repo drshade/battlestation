@@ -2,10 +2,11 @@
 # install-packages — apply the packages/*.txt manifests to this machine.
 #
 # The mutating counterpart to bin/drift's package diff: installs everything
-# the manifests declare. Idempotent — pacman/flatpak get --needed/or-update
-# semantics, so already-installed packages are skipped, never reinstalled.
-# It only ever installs; removing something is a deliberate manual step
-# (pacman -Rns), same philosophy as drift being read-only.
+# the manifests declare, for whichever package managers this machine has
+# (pacman/AUR/flatpak on Linux, Homebrew on macOS). Idempotent — --needed /
+# --or-update / brew's skip-if-installed, so nothing is reinstalled. It only
+# ever installs; removing something is a deliberate manual step (pacman
+# -Rns, brew uninstall), same philosophy as drift being read-only.
 #
 # Manifest format (shared with bin/drift): one name per line, `#` starts a
 # comment (full-line or trailing), first whitespace-separated field is the
@@ -78,6 +79,22 @@ if have flatpak && [ -f packages/flatpak.txt ]; then
   fi
 else
   info "flatpak or packages/flatpak.txt missing — skipping"
+fi
+
+# --- Homebrew (macOS): formulae + casks --------------------------------------
+hdr "Homebrew (packages/brew.txt + brew-cask.txt)"
+if have brew; then
+  for spec in "brew.txt:" "brew-cask.txt:--cask"; do
+    f="packages/${spec%%:*}"; flag="${spec#*:}"
+    [ -f "$f" ] || { info "no $f — skipping"; continue; }
+    mapfile -t bpk < <(pkgs "$f")
+    if [ "${#bpk[@]}" -eq 0 ]; then ok "$f declares nothing"; continue; fi
+    info "brew install ${flag:+$flag }(${#bpk[@]} declared in $f)"
+    # shellcheck disable=SC2086  # $flag is empty or one word, by construction
+    brew install $flag "${bpk[@]}"
+  done
+else
+  info "brew not found — skipping"
 fi
 
 printf '\n%s——%s idempotent (--needed); removals stay manual. Run "make drift" to see what remains undeclared.\n' "$C_DIM" "$C_RST"

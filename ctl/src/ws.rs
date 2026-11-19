@@ -206,16 +206,21 @@ pub fn focus_window_cmd(addr: &str) -> String {
 /// fallback means focus-by-session never does less than the old
 /// jump-to-workspace. None = the record names neither (malformed).
 pub fn session_focus_cmd(rec: &Value) -> Option<String> {
+    session_focus(rec).map(|a| a.lua())
+}
+
+/// [`session_focus_cmd`] as a backend-neutral [`Action`].
+pub fn session_focus(rec: &Value) -> Option<Action> {
     if let Some(addr) = rec
         .get("win")
         .and_then(Value::as_str)
         .filter(|a| !a.is_empty())
     {
-        return Some(focus_window_cmd(addr));
+        return Some(Action::FocusWindow(addr.to_string()));
     }
     rec.get("ws")
         .and_then(Value::as_i64)
-        .map(|id| focus_cmd(&WsToken::Id(id)))
+        .map(|id| Action::Focus(WsToken::Id(id)))
 }
 
 /// `hl.dsp.workspace.move({ workspace = N, monitor = "NAME" })` — the Lua
@@ -298,6 +303,34 @@ pub fn rename_cmd(id: i64, name: Option<&str>) -> String {
     format!(r#"hl.dsp.workspace.rename({{ workspace = {id}, name = "{name}" }})"#)
 }
 
+/// A compositor mutation, backend-neutral. Every `ws` verb mutates through
+/// one of these and [`ipc::act`]: the Hyprland backend renders it with the
+/// byte-pinned Lua builders above ([`Action::lua`] — unchanged dispatch
+/// strings), the AeroSpace backend translates it to `aerospace` commands
+/// (crate::aerospace).
+pub enum Action {
+    Focus(WsToken),
+    FocusMonitor(String),
+    FocusWindow(String),
+    MoveWindow(WsToken, bool),
+    MoveWorkspace(i64, String),
+    Rename(i64, Option<String>),
+}
+
+impl Action {
+    /// The Hyprland dispatch string for this action.
+    pub fn lua(&self) -> String {
+        match self {
+            Action::Focus(t) => focus_cmd(t),
+            Action::FocusMonitor(m) => focus_monitor_cmd(m),
+            Action::FocusWindow(a) => focus_window_cmd(a),
+            Action::MoveWindow(t, follow) => move_cmd(t, *follow),
+            Action::MoveWorkspace(id, m) => move_workspace_cmd(*id, m),
+            Action::Rename(id, n) => rename_cmd(*id, n.as_deref()),
+        }
+    }
+}
+
 /// The `order` listing's name lookup — the script's
 /// `jq -r '.[] | select(.id==ID) | .name'`: first matching workspace's name;
 /// a present entry with a null/missing name prints "null" (jq -r's
@@ -325,6 +358,61 @@ pub fn name_of(workspaces: &Value, id: i64) -> String {
 /// stable habits under global numbering).
 pub fn prefs_file() -> PathBuf {
     map_file().with_file_name("prefs")
+}
+
+/// `…/battlestation-workspaces/names` — workspace display names for
+/// window managers that have no rename of their own (AeroSpace: a
+/// workspace's name IS its id). One `<id> <name>` line per named
+/// workspace, sorted by id; the name is the rest of the line (spaces
+/// allowed). A sibling of map/prefs, so the stream engine's dir watcher
+/// re-emits on every rename, and persistent like them: a name is intent.
+/// Hyprland never reads it — Hyprland owns its own names.
+pub fn names_file() -> PathBuf {
+    map_file().with_file_name("names")
+}
+
+/// Names-file parse: `<id> <name...>`; malformed lines and empty names are
+/// skipped, a duplicated id keeps the last line.
+pub fn parse_names(content: &str) -> BTreeMap<i64, String> {
+    let mut out = BTreeMap::new();
+    for line in content.lines() {
+        if let Some((id, name)) = line.trim().split_once(char::is_whitespace)
+            && let Ok(id) = id.parse::<i64>()
+            && !name.trim().is_empty()
+        {
+            out.insert(id, name.trim().to_string());
+        }
+    }
+    out
+}
+
+/// Workspace names, missing/unreadable file = none.
+pub fn load_names() -> BTreeMap<i64, String> {
+    parse_names(&fs::read_to_string(names_file()).unwrap_or_default())
+}
+
+/// Set (Some, non-empty) or clear (None/empty) one workspace's name —
+/// locked read-modify-write, atomic publish. Returns the exit code.
+pub fn set_name(id: i64, name: Option<&str>) -> i32 {
+    with_state_lock(|| {
+        let mut names = load_names();
+        match name.map(str::trim).filter(|n| !n.is_empty()) {
+            Some(n) => names.insert(id, n.replace('\n', " ")),
+            None => names.remove(&id),
+        };
+        let path = names_file();
+        let Some(dir) = path.parent() else { return 1 };
+        let _ = fs::create_dir_all(dir);
+        let tmp = dir.join(".names.tmp");
+        let body: String = names.iter().map(|(i, n)| format!("{i} {n}\n")).collect();
+        match fs::write(&tmp, body).and_then(|_| fs::rename(&tmp, &path)) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("bsctl ws name: cannot write {}: {e}", path.display());
+                1
+            }
+        }
+    })
 }
 
 /// Preference-file parse. Lines that aren't exactly `<id> <output>` are
@@ -414,13 +502,13 @@ pub fn restore_strays(
         let Some(after) = ipc::json("workspaces").map(|w| monitor_map(&w)) else {
             break;
         };
-        let plan = restore_plan(before, &after);
+        let plan = restore_moves(before, &after);
         if plan.is_empty() {
             break;
         }
         restored_any = true;
-        for cmd in plan {
-            let _ = ipc::dispatch(&cmd);
+        for a in plan {
+            let _ = ipc::act(&a);
         }
     }
     if !restored_any {
@@ -434,14 +522,14 @@ pub fn restore_strays(
         if let Some(id) = active
             && let Ok(tok) = token_of(*id)
         {
-            let _ = ipc::dispatch(&focus_cmd(&tok));
+            let _ = ipc::act(&Action::Focus(tok));
         }
         let _ = mon;
     }
     if let Some((_, Some(id))) = before_actives.iter().find(|(m, _)| m == focused_mon)
         && let Ok(tok) = token_of(*id)
     {
-        let _ = ipc::dispatch(&focus_cmd(&tok));
+        let _ = ipc::act(&Action::Focus(tok));
     }
 }
 
@@ -646,7 +734,7 @@ fn focused_index(verb: &str, ds: &[Display]) -> Result<usize, i32> {
 pub fn focus(target: &Target) -> i32 {
     match target {
         Target::Ws(sel) => match resolve_ws_sel(sel).and_then(|id| token_of(id)) {
-            Ok(tok) => ipc::dispatch(&focus_cmd(&tok)),
+            Ok(tok) => ipc::act(&Action::Focus(tok)),
             Err(c) => c,
         },
         Target::Display(sel) => {
@@ -656,7 +744,7 @@ pub fn focus(target: &Target) -> i32 {
             };
             let ds = displays_from(&mons);
             match resolve_display_sel("focus", sel, &ds) {
-                Ok(i) => ipc::dispatch(&focus_monitor_cmd(&ds[i].name)),
+                Ok(i) => ipc::act(&Action::FocusMonitor(ds[i].name.clone())),
                 Err(c) => c,
             }
         }
@@ -679,8 +767,8 @@ pub fn focus_session(sid: &str) -> i32 {
     let rec = fs::read(sys::state_dir().join(sid))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-    match rec.as_ref().and_then(session_focus_cmd) {
-        Some(cmd) => ipc::dispatch(&cmd),
+    match rec.as_ref().and_then(session_focus) {
+        Some(a) => ipc::act(&a),
         None => {
             eprintln!("bsctl ws focus: no session {sid} (agents get lists the live ones)");
             1
@@ -718,7 +806,7 @@ pub fn send_window(target: &Target, focus: bool) -> i32 {
         }
     };
     match token_of(id) {
-        Ok(tok) => ipc::dispatch(&move_cmd(&tok, focus)),
+        Ok(tok) => ipc::act(&Action::MoveWindow(tok, focus)),
         Err(c) => c,
     }
 }
@@ -751,7 +839,7 @@ pub fn send_workspace(sel: &DisplaySel, focus: bool) -> i32 {
         );
         return 1;
     };
-    let code = ipc::dispatch(&move_workspace_cmd(ws_id, &ds[tgt].name));
+    let code = ipc::act(&Action::MoveWorkspace(ws_id, ds[tgt].name.clone()));
     if code != 0 {
         return code;
     }
@@ -763,11 +851,11 @@ pub fn send_workspace(sel: &DisplaySel, focus: bool) -> i32 {
     // stay re-focuses the source display — both no-op when already true.
     if focus {
         match token_of(ws_id) {
-            Ok(tok) => ipc::dispatch(&focus_cmd(&tok)),
+            Ok(tok) => ipc::act(&Action::Focus(tok)),
             Err(c) => c,
         }
     } else {
-        ipc::dispatch(&focus_monitor_cmd(&ds[cur].name))
+        ipc::act(&Action::FocusMonitor(ds[cur].name.clone()))
     }
 }
 
@@ -803,11 +891,19 @@ pub fn monitor_map(workspaces: &Value) -> Vec<(i64, String)> {
 /// cycle a neighbor), and never moves them back — this plan does. Workspaces
 /// that appeared or vanished between snapshots are left alone.
 pub fn restore_plan(before: &[(i64, String)], after: &[(i64, String)]) -> Vec<String> {
+    restore_moves(before, after)
+        .iter()
+        .map(|a| a.lua())
+        .collect()
+}
+
+/// [`restore_plan`] as backend-neutral [`Action`]s.
+pub fn restore_moves(before: &[(i64, String)], after: &[(i64, String)]) -> Vec<Action> {
     after
         .iter()
         .filter_map(|(id, mon)| {
             let (_, want) = before.iter().find(|(bid, _)| bid == id)?;
-            (want != mon).then(|| move_workspace_cmd(*id, want))
+            (want != mon).then(|| Action::MoveWorkspace(*id, want.clone()))
         })
         .collect()
 }
@@ -925,7 +1021,7 @@ pub fn name_get(filter: &RowFilter) -> i32 {
 /// Lua config parser rejects `hyprctl dispatch renameworkspace`).
 pub fn name_set(sel: &WsSel, name: &str) -> i32 {
     match resolve_ws_sel(sel) {
-        Ok(id) => ipc::dispatch(&rename_cmd(id, Some(name))),
+        Ok(id) => ipc::act(&Action::Rename(id, Some(name.to_string()))),
         Err(c) => c,
     }
 }
@@ -940,7 +1036,7 @@ pub fn name_rm(filter: &RowFilter) -> i32 {
     };
     let mut code = 0;
     for r in rows {
-        let c = ipc::dispatch(&rename_cmd(r.ws, None));
+        let c = ipc::act(&Action::Rename(r.ws, None));
         if code == 0 {
             code = c;
         }
@@ -1439,6 +1535,35 @@ mod tests {
         // neither -> None (malformed record)
         assert_eq!(session_focus_cmd(&json!({"pid": 1})), None);
         assert_eq!(session_focus_cmd(&json!("junk")), None);
+    }
+
+    #[test]
+    fn names_file_parse_allows_spaces_and_skips_junk() {
+        let n = parse_names("1 api\n2   web ui \nx bad\n3\n4 \n2 final web\n");
+        assert_eq!(n.get(&1).map(String::as_str), Some("api"));
+        assert_eq!(n.get(&2).map(String::as_str), Some("final web"));
+        assert_eq!(n.len(), 2);
+    }
+
+    #[test]
+    fn action_lua_is_the_pinned_builder_output() {
+        assert_eq!(
+            Action::Focus(WsToken::Id(3)).lua(),
+            focus_cmd(&WsToken::Id(3))
+        );
+        assert_eq!(
+            Action::MoveWindow(WsToken::Id(2), true).lua(),
+            move_cmd(&WsToken::Id(2), true)
+        );
+        assert_eq!(
+            Action::MoveWorkspace(4, "DP-1".into()).lua(),
+            move_workspace_cmd(4, "DP-1")
+        );
+        assert_eq!(Action::Rename(3, None).lua(), rename_cmd(3, None));
+        assert_eq!(
+            Action::FocusWindow("0xabc".into()).lua(),
+            focus_window_cmd("0xabc")
+        );
     }
 
     #[test]

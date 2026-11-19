@@ -29,7 +29,7 @@ struct TestEnv {
 impl TestEnv {
     fn new(name: &str) -> Self {
         static N: AtomicUsize = AtomicUsize::new(0);
-        let root = std::env::temp_dir().join(format!(
+        let root = fixture_base().join(format!(
             "bsctl-it-{}-{}-{}",
             std::process::id(),
             name,
@@ -42,6 +42,7 @@ impl TestEnv {
         for d in [&run, &home, &fakebin] {
             fs::create_dir_all(d).unwrap();
         }
+        stub_keychain(&fakebin, None);
         // Fake hyprctl: one client per ancestor pid of the caller, all on
         // ws 42, each with a pid-derived window address (0xaddr<pid>) so
         // the win capture is assertable. Any OTHER query fails (exit 1, no
@@ -75,7 +76,7 @@ impl TestEnv {
     }
 
     fn cmd(&self) -> Command {
-        let mut c = Command::new(BIN);
+        let mut c = wm_cmd();
         c.env("XDG_RUNTIME_DIR", &self.run)
             .env("HOME", &self.home)
             .env("XDG_STATE_HOME", self.root.join("state"))
@@ -188,10 +189,7 @@ fn session_write_with_title_and_injected_ws() {
     assert_eq!(rec["kind"], json!("claude"));
     assert_eq!(rec["title"], json!("Fix the widget poller")); // last line, collapsed
     let pid = rec["pid"].as_i64().expect("pid must be an int");
-    assert!(
-        Path::new(&format!("/proc/{pid}")).exists(),
-        "pid must be a live ancestor"
-    );
+    assert!(bsctl::sys::pid_alive(pid), "pid must be a live ancestor");
     // The matched clients row's address is captured alongside ws — the stub
     // derives it from the client pid, which is NOT the harness pid the
     // record carries (the first matching ANCESTOR wins the clients pass).
@@ -400,7 +398,7 @@ fn transcript_title_beats_prompt_title() {
 fn session_write_without_hyprctl_writes_nothing() {
     let env = TestEnv::new("no-hyprctl");
     // PATH with no hyprctl at all: spawning it fails -> silent exit 0.
-    let mut child = Command::new(BIN)
+    let mut child = wm_cmd()
         .args(["agents", "set", "--kind", "claude", "thinking"])
         .env("XDG_RUNTIME_DIR", &env.run)
         .env("PATH", env.root.join("nowhere").display().to_string())
@@ -898,7 +896,12 @@ fn comms_history_stream_follows_arrival_and_delivery() {
 
     let mut store: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     store["messages"][0]["delivered_at"] = json!(11.0);
-    fs::write(&path, store.to_string()).unwrap();
+    // Publish like every bsctl writer does — temp + rename (lib.rs
+    // contract). An in-place rewrite is not a protocol write: the macOS
+    // dir watcher (kqueue) only sees entries added/removed/renamed.
+    let tmp = dir.join(".comms.json.tmp");
+    fs::write(&tmp, store.to_string()).unwrap();
+    fs::rename(&tmp, &path).unwrap();
     let delivered = s.converge("delivery-state change", |value| {
         value[0]["delivered_at"] == json!(11.0)
     });
@@ -1202,4 +1205,40 @@ fn tool_verb_heals_empty_marker_fields_from_meta() {
         env.read_json("s9.h1"),
         json!({"type": "general-purpose", "description": "Late meta"})
     );
+}
+
+/// Fixture roots live under `/tmp` rather than `std::env::temp_dir()`: the
+/// fakes bind unix sockets inside them, macOS caps socket paths at 104
+/// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
+fn fixture_base() -> PathBuf {
+    PathBuf::from("/tmp")
+}
+
+/// Fake macOS `security`: the usage token's Keychain fallback is reached
+/// through PATH, so every test env shadows it — no test may ever read the
+/// developer's real Keychain (or, through it, hit the network). Serves the
+/// file `serve` as the Keychain secret when given and present, else exits
+/// 44 (security(1)'s "item not found").
+fn stub_keychain(fakebin: &std::path::Path, serve: Option<&std::path::Path>) {
+    let body = match serve {
+        Some(f) => format!(
+            "#!/bin/sh\n[ -f '{f}' ] || exit 44\ncat '{f}'\n",
+            f = f.display()
+        ),
+        None => "#!/bin/sh\nexit 44\n".to_string(),
+    };
+    let stub = fakebin.join("security");
+    std::fs::write(&stub, body).unwrap();
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
+}
+
+/// The binary under test, pinned to the Hyprland backend: these tests
+/// drive a fake hyprctl/socket, and the default backend is per-OS
+/// (AeroSpace on macOS), so the pin keeps them meaningful everywhere.
+fn wm_cmd() -> Command {
+    let mut c = Command::new(BIN);
+    c.env("BSCTL_WM", "hyprland");
+    c
 }

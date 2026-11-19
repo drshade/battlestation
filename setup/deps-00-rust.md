@@ -2,7 +2,8 @@
 
 `ctl/` (the bsctl binary — see AGENTS.md "bsctl owns stateful protocols") is
 the one part of this repo that needs a compiler. `rustup` is declared in
-`packages/pacman.txt`; it ships no default toolchain, so pick one once:
+`packages/pacman.txt` (Linux) and `packages/brew.txt` (macOS); it ships no
+default toolchain, so pick one once:
 
 ```sh
 rustup default stable

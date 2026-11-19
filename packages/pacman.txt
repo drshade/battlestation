@@ -23,10 +23,10 @@ yay                            # AUR helper — make install-packages applies pa
 
 # --- documented in setup/ notes ------------------------------------------
 code                           # setup/deps-00-vscode.md
-keyd                           # setup/deps-00-keyd.md (config: stow/root/keyd)
+keyd                           # setup/deps-00-keyd.md (config: stow/root-linux/keyd)
 hyprlock                       # setup/deps-00-hyprlock-hypridle.md
 hypridle                       # setup/deps-00-hyprlock-hypridle.md
-kdeconnect                     # setup/deps-00-kdeconnect.md (config: stow/home/kdeconnect)
+kdeconnect                     # setup/deps-00-kdeconnect.md (config: stow/home-linux/kdeconnect)
 zenity                         # setup/deps-00-zenity.md
 whisper-cpp                    # setup/dictation-00-setup.md (local speech-to-text; iGPU backend via foreign ggml-vulkan — dropped from repos, a future ggml bump may silently swap in CPU-only ggml)
 wtype                          # setup/dictation-00-setup.md (types transcript into focused window)

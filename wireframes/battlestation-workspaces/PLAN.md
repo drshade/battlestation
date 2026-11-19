@@ -1,7 +1,7 @@
 # The Deck — Queue-view redesign plan
 
 Implementation plan for reworking the **Queue view** of `Panel.qml`
-(`stow/home/noctalia/.config/noctalia/plugins/battlestation-workspaces/Panel.qml`)
+(`stow/home-linux/noctalia/.config/noctalia/plugins/battlestation-workspaces/Panel.qml`)
 toward the wireframes in this directory. Board view is **deferred** (not yet
 well thought through). This tracks the Queue only.
 

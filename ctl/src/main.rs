@@ -953,6 +953,16 @@ fn main() {
                 PrefsCmd::Reconcile => bsctl::ws::reconcile(),
             },
         },
+        // Display management (dpms, scale, reset) is built on Hyprland's
+        // monitor model and Lua config; other window managers get a clear
+        // refusal instead of half-meaningful output.
+        Cmd::Display { .. } if bsctl::ipc::wm() != bsctl::ipc::Wm::Hyprland => {
+            eprintln!(
+                "bsctl display: needs Hyprland (the running window manager is {:?})",
+                bsctl::ipc::wm()
+            );
+            1
+        }
         Cmd::Display { cmd } => match cmd {
             DisplayCmd::Get {
                 filter,

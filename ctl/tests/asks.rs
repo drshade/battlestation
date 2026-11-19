@@ -26,7 +26,7 @@ struct TestEnv {
 impl TestEnv {
     fn new(name: &str) -> Self {
         static N: AtomicUsize = AtomicUsize::new(0);
-        let root = std::env::temp_dir().join(format!(
+        let root = fixture_base().join(format!(
             "bsctl-asks-{}-{}-{}",
             std::process::id(),
             name,
@@ -38,6 +38,7 @@ impl TestEnv {
         for d in [&run, &root.join("state"), &root.join("home"), &fakebin] {
             fs::create_dir_all(d).unwrap();
         }
+        stub_keychain(&fakebin, None);
         let stub = fakebin.join("hyprctl");
         fs::write(&stub, "#!/bin/sh\nexit 1\n").unwrap();
         let mut perm = fs::metadata(&stub).unwrap().permissions();
@@ -52,7 +53,7 @@ impl TestEnv {
     }
 
     fn cmd(&self) -> Command {
-        let mut c = Command::new(BIN);
+        let mut c = wm_cmd();
         c.env("XDG_RUNTIME_DIR", &self.run)
             .env("XDG_STATE_HOME", self.root.join("state"))
             .env("HOME", self.root.join("home"))
@@ -634,4 +635,40 @@ fn inbox_delivers_once_and_stamps() {
     assert_eq!(env.run(&["asks", "complete", &ack.to_string()]).0, 0);
     let (_, out) = env.run_stdin(&["asks", "inbox"], payload);
     assert!(out.contains("completed without reply text"), "{out}");
+}
+
+/// Fixture roots live under `/tmp` rather than `std::env::temp_dir()`: the
+/// fakes bind unix sockets inside them, macOS caps socket paths at 104
+/// bytes, and its temp_dir() is a long `/var/folders/…/T/` path.
+fn fixture_base() -> PathBuf {
+    PathBuf::from("/tmp")
+}
+
+/// Fake macOS `security`: the usage token's Keychain fallback is reached
+/// through PATH, so every test env shadows it — no test may ever read the
+/// developer's real Keychain (or, through it, hit the network). Serves the
+/// file `serve` as the Keychain secret when given and present, else exits
+/// 44 (security(1)'s "item not found").
+fn stub_keychain(fakebin: &std::path::Path, serve: Option<&std::path::Path>) {
+    let body = match serve {
+        Some(f) => format!(
+            "#!/bin/sh\n[ -f '{f}' ] || exit 44\ncat '{f}'\n",
+            f = f.display()
+        ),
+        None => "#!/bin/sh\nexit 44\n".to_string(),
+    };
+    let stub = fakebin.join("security");
+    std::fs::write(&stub, body).unwrap();
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
+}
+
+/// The binary under test, pinned to the Hyprland backend: these tests
+/// drive a fake hyprctl/socket, and the default backend is per-OS
+/// (AeroSpace on macOS), so the pin keeps them meaningful everywhere.
+fn wm_cmd() -> Command {
+    let mut c = Command::new(BIN);
+    c.env("BSCTL_WM", "hyprland");
+    c
 }

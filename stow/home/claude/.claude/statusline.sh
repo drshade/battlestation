@@ -20,7 +20,10 @@ pct_color() { # $1 = numeric percent
 }
 
 # --- pull fields (newline-separated so empty fields are preserved) ----------
-mapfile -t f < <(
+# A read loop, not mapfile: this runs under whatever `bash` is first on PATH,
+# which on macOS is the system bash 3.2 (no mapfile).
+f=()
+while IFS= read -r line; do f+=("$line"); done < <(
   printf '%s' "$input" | jq -r '
     ((.workspace.current_dir // .cwd // "") | split("/") | last // ""),
     (.workspace.git_worktree // ""),

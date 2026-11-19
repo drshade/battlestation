@@ -33,19 +33,32 @@
 //! battlestation-workspaces widget. Multi-harness by construction: ONE flat
 //! dir holds sessions from ANY harness, discriminated per session by
 //! `kind`. State lives as small JSON files in
-//! `${XDG_RUNTIME_DIR:-/tmp}/battlestation-ws/`:
+//! `<runtime-dir>/battlestation-ws/`, where `<runtime-dir>` is
+//! [`sys::runtime_dir`]: `$XDG_RUNTIME_DIR`, else a per-user dir derived
+//! without the environment (Linux `/run/user/<uid>`; macOS the
+//! `confstr(_CS_DARWIN_USER_TEMP_DIR)` dir), else `/tmp`. Every
+//! `${XDG_RUNTIME_DIR:-…}` path below means this resolver:
 //!
 //! - `<session_id>` — one file per live session:
 //!   `{"ws": <int>, "win": "<addr>"|null, "status":
 //!     "waiting"|"thinking"|"tooling", "kind": "<harness>",
-//!     "title": "<aiTitle>", "pid": <int>, "term_pid": <int>|null}`.
+//!     "title": "<aiTitle>", "pid": <int>, "term_pid": <int>|null,
+//!     "kitty": {"to": "<listen addr>", "window": <int>}}` (`kitty` only
+//!   when the hook ran inside kitty with remote control listening — taken
+//!   from the `KITTY_LISTEN_ON`/`KITTY_WINDOW_ID` kitty exports into every
+//!   child; private routing data, never published).
 //!   `ws` is the Hyprland workspace id owning the session's terminal window
-//!   (found by walking /proc ancestors against `hyprctl clients -j`), `win`
+//!   (found by walking the process ancestors — [`sys::proc_info`]: /proc
+//!   on Linux, libproc on macOS — against `hyprctl clients -j`), `win`
 //!   is that same clients row's window address (null when the row carried
 //!   none), and `term_pid` is that same clients row's OWN pid — the
 //!   terminal process owning the window (kitty here), as distinct from the
 //!   harness `pid` below (its descendant). All three refresh on every hook
-//!   event, so a moved terminal heals; `win` is what upgrades
+//!   event, so a moved terminal heals on disk; readers don't wait for that —
+//!   every live surface (`agents get`, `status`, the Switchboard) reads
+//!   through [`sessions::scan_live`], which re-reads `ws` from the window
+//!   manager's clients by `win`, so an idle agent's moved terminal shows on
+//!   its new workspace at once. `win` is what upgrades
 //!   `ws focus --session` from jump-to-workspace to jump-to-window. `pid`
 //!   is the HARNESS process — the nearest ancestor whose comm matches the
 //!   kind (harness binaries are named after their kind: comm `claude` /
@@ -111,11 +124,14 @@
 //! `agents get [--kind K] [--session-id S] [--format text|json]` is the
 //! readable query over the same state, sweeping like every scan (dead
 //! pids, orphan and stale markers). Its published schema — `[{session,
-//! kind, status, ws, win, pid, term_pid, title, subagents: [{id, type,
-//! description, started}]}]` — deliberately respells the on-disk
+//! kind, status, ws, win, pid, term_pid, title, name, subagents: [{id,
+//! type, description, started}]}]` — deliberately respells the on-disk
 //! `sid`/`agents` keys; `pid` (harness) and `term_pid` (terminal owning
 //! the window) are JSON-only, omitted from the human text table as machine
-//! data. The `status` world feed emits the identical rows (shared code, so the
+//! data. `name` is the session's Switchboard name (null until the agent
+//! calls `set_name`) — joined in so a human surface can match the public
+//! comms identities, which carry no session id, to agent rows. The
+//! `status` world feed emits the identical rows (shared code, so the
 //! two surfaces can never drift).
 //!
 //! `agents send --session-id S [--submit] [--force]` types text (read from
@@ -123,12 +139,15 @@
 //! the return channel the read-only queue lacks. It is a `bsctl` verb ONLY,
 //! deliberately absent from the MCP tool list, so the write-path stays
 //! human-driven (bar/CLI); exposing it to agents later is one tools_json entry
-//! plus a consent ask, with no change here. Routing reuses the captured
-//! `term_pid`: each kitty window is its own process listening on
-//! `unix:/tmp/kitty-<its pid>` (kitty.conf's `listen_on`/`{kitty_pid}`), so
-//! term_pid IS the socket — no window scan, no `--match`. Unlike the `set`
-//! hook it is LOUD: unknown session, missing term_pid, absent socket (window
-//! predates remote control or isn't kitty), or a non-idle session without
+//! plus a consent ask, with no change here. Routing needs no window scan:
+//! the record's `kitty` route wins (`--to <listen addr> --match
+//! id:<window>` — exact even when ONE kitty process serves many windows,
+//! as it always does on macOS); without one (or with a stale `unix:` path)
+//! it falls back to `term_pid`, for kitty windows that are their own
+//! process listening on `unix:/tmp/kitty-<its pid>` (kitty.conf's
+//! `listen_on`/`{kitty_pid}`). Unlike the `set` hook it is LOUD: unknown
+//! session, no usable route, absent socket (window predates remote control
+//! or isn't kitty), or a non-idle session without
 //! `--force` each exit nonzero with a reason. The text is STAGED unsent by
 //! default; `--submit` appends the Enter (the conservative default until
 //! submit behaviour is proven against each harness's input box, not a shell).
@@ -314,8 +333,8 @@
 //! one shared exit (answered, dismissed, timeout, cancellation, EOF). A
 //! server killed outright can't clear, so the field is internal-only:
 //! every emitting surface goes through the published form, which computes
-//! `blocking` = pid set AND `/proc/<pid>` alive (the session sweep's
-//! idiom) and strips the pid — a crashed server's stale marker reads as
+//! `blocking` = pid set AND that pid alive ([`sys::pid_alive`], the
+//! session sweep's idiom) and strips the pid — a crashed server's stale marker reads as
 //! not-blocking instead of lying forever. Queue tables carry a BLOCKING
 //! column (yes/blank); the panel's row dot is this flag (green = an agent
 //! is holding a turn open on this ask right now, grey = nobody waits
@@ -347,7 +366,7 @@
 //! this surface), else answers the newest known.
 //!
 //! SESSION IDENTITY: no harness tells an MCP server which session spawned
-//! it, so the server resolves its own — the /proc ancestor walk names the
+//! it, so the server resolves its own — the process ancestor walk names the
 //! harness process (comm == kind, the hook rule) and the session file
 //! recording that pid IS the session; its sid + ws ride every posted ask.
 //! Unresolvable (headless, hooks not yet fired) degrades to posting with
@@ -581,11 +600,16 @@
 //! is why the old single-writer flock election and its hot-standby
 //! machinery no longer exist.
 //!
-//! The engine folds three wake sources into one re-evaluation: ONE inotify
-//! fd watching the runtime agent-state dir, the persistent map/prefs dir
-//! and the asks dir (each dir's protocol files are exactly its non-dot
-//! entries), Hyprland's `.socket2.sock` event stream, and a 10s tick
-//! (session pids dying and markers aging are invisible to inotify). Bursts
+//! The engine folds three wake sources into one re-evaluation: ONE dir
+//! watcher fd ([`watch`]: inotify on Linux, kqueue on macOS) on the runtime
+//! agent-state dir, the persistent map/prefs dir, the asks dir and the
+//! comms dir (each dir's protocol files are exactly its non-dot entries;
+//! kqueue cannot name entries, so on macOS any entry change triggers and
+//! the dedupe absorbs it), Hyprland's `.socket2.sock` event stream, and a
+//! 10s tick (session pids dying and markers aging are invisible to the
+//! watcher). The FIRST emission happens only after the dirs exist and the
+//! watcher is armed, so a subscriber may act on its first line without
+//! racing the engine. Bursts
 //! coalesce ~50ms (bounded rounds so a steady stream can't starve
 //! emission); emissions dedupe on the serialized result, so a subscriber
 //! is never woken for nothing. The socket2 events that warrant
@@ -725,14 +749,20 @@
 //!
 //! # Plan usage (`bsctl agents usage`)
 //!
-//! Plan usage per harness kind, indexed for the day codex/agy grow usage
-//! endpoints: `{"<kind>": {"sessionPct": <int>, "sessionResets": "...",
-//! "weeklyPct": <int>, "weeklyResets": "..."}}` — kinds with nothing known
-//! are simply absent, so `{}` means "nothing known", never an error (text
-//! renders the house table, or nothing at all when empty). One provider
-//! exists today (claude, the OAuth usage endpoint — the same data as
-//! `/usage`); adding one is a single entry in usage.rs's provider table.
-//! `--kind` filters to one kind.
+//! Plan usage per harness kind: `{"<kind>": {"sessionPct": <int>,
+//! "sessionResets": "...", "weeklyPct": <int>, "weeklyResets": "...",
+//! "asOf"?: "...", "scoped"?: [{label, pct, resets}], "monthlyPct"?: <int>,
+//! "monthlySpent"?, "monthlyLimit"?, "monthlyCurrency"?}}` — the optional
+//! keys appear only when the account has them (claude: per-model weekly
+//! limits, and the pay-as-you-go monthly cap while it is enabled) — kinds with nothing known are simply absent, so `{}`
+//! means "nothing known", never an error (text renders the house table, or
+//! nothing at all when empty). Providers: claude (the OAuth usage endpoint
+//! — the same data as `/usage`) and codex (the latest `rate_limits` record
+//! in Codex's own session logs under `$CODEX_HOME/sessions`: no network,
+//! as fresh as the last Codex turn, which `asOf` states; windows map by
+//! length, and a window whose reset time has passed reads 0%). Adding one
+//! is a single entry in usage.rs's provider table. `--kind` filters to one
+//! kind.
 //!
 //! The claude reading is cached at `${XDG_CACHE_HOME:-$HOME/.cache}/
 //! claude-usage.json` (ttl 240s; the cache stores the bare reading — kind
@@ -745,9 +775,36 @@
 //! or expired-token (401) request never clobbers or blanks a good value.
 //! The fetch is bounded (`curl --max-time 6`): it sits on the stream
 //! engine's tick path and must never hang a subscriber unbounded. The
-//! OAuth token comes from `~/.claude/.credentials.json`
-//! (`.claudeAiOauth.accessToken`; missing/unreadable -> nothing known) and
-//! is passed to curl on stdin, never in argv.
+//! OAuth token comes from `~/.claude/.credentials.json`, else (macOS,
+//! where Claude Code writes no such file) the login Keychain item
+//! `Claude Code-credentials` via `security find-generic-password -w` —
+//! the same JSON either way (`.claudeAiOauth.accessToken`;
+//! missing/unreadable -> nothing known). It is passed to curl on stdin,
+//! never in argv.
+//!
+//! # Window managers (`ipc.rs`, `aerospace.rs`)
+//!
+//! bsctl drives one window manager per process, picked by [`ipc::wm`]:
+//! `BSCTL_WM=hyprland|aerospace` when set, else by OS (AeroSpace on macOS,
+//! Hyprland elsewhere). Everything downstream of `ipc` consumes
+//! Hyprland-shaped JSON and mutates through [`ws::Action`] + [`ipc::act`],
+//! so the battlespace model, the world and every `ws` verb are
+//! backend-neutral.
+//!
+//! AeroSpace mapping ([`aerospace`]): a ws-id is an AeroSpace workspace
+//! whose NAME is a positive integer (declare them persistent); other
+//! workspaces are invisible to bsctl. AeroSpace has no rename, so workspace
+//! display names live in bsctl's `names` file (`<id> <name>` lines, a
+//! sibling of `map`/`prefs`, written by `ws name set|rm`). Displays are
+//! numbered by AeroSpace's left-to-right `monitor-id`; the world's
+//! `displays[].x` is that ordinal, not pixels. A session's window is the
+//! first window whose app pid is an ancestor of the hook — narrowed, when
+//! several match (kitty serves every window from one process on macOS), to
+//! the OS window kitty reports for the hook's `KITTY_WINDOW_ID`. Stream
+//! events come from a supervised `aerospace subscribe` child; when it
+//! exits (AeroSpace not running) the stream runs on files alone and
+//! retries every slow tick. Raw Lua (`ipc::dispatch`/`eval`/`reload`) and
+//! the whole `display` domain are Hyprland-only and refuse elsewhere.
 //!
 //! # Hyprland IPC (`ipc.rs`)
 //!
@@ -786,6 +843,7 @@
 //! so its consumer (the `--stream` engine) treats connect failure as
 //! degraded mode.
 
+pub mod aerospace;
 pub mod agents;
 pub mod asks;
 pub mod comms;
@@ -799,5 +857,6 @@ pub mod sessions;
 pub mod stream;
 pub mod sys;
 pub mod usage;
+pub mod watch;
 pub mod world;
 pub mod ws;

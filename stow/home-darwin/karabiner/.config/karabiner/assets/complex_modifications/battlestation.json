@@ -1,0 +1,30 @@
+{
+  "title": "battlestation",
+  "rules": [
+    {
+      "description": "Caps Lock → Hyper (Cmd+Alt+Ctrl), the macOS counterpart of xkb caps:hyper",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "caps_lock",
+            "modifiers": {
+              "optional": [
+                "any"
+              ]
+            }
+          },
+          "to": [
+            {
+              "key_code": "left_command",
+              "modifiers": [
+                "left_option",
+                "left_control"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

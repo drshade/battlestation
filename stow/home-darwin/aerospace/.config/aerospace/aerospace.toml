@@ -1,0 +1,120 @@
+# AeroSpace — the macOS counterpart of the Hyprland setup
+# (stow/home-linux/hypr). The keybind model mirrors keybinds.lua, one verb per
+# modifier, adapted to macOS, where Cmd belongs to apps (copy, paste, tabs):
+#   CTRL+OPTION = GO — change where you're looking; never moves a window.
+#         (Not Option alone: Option+arrows is word movement and Option+digit
+#         types characters in every macOS text field.)
+#   HYPER (Caps Lock = Cmd+Alt+Ctrl, via the Karabiner rule in
+#         stow/home-darwin/karabiner) = DO — act on the focused window/system.
+#   SHIFT = the "…and stay" suffix, exactly as on Linux.
+# Number row = workspaces, F-row = displays. Workspace verbs go through bsctl,
+# which addresses workspaces by battlespace id (the order and names the team
+# board shows), so CTRL+OPTION+N means "the Nth battlespace", not AeroSpace's "N".
+#
+# Workspaces are numbered 1-10 and persistent: bsctl's ws-id is an AeroSpace
+# workspace whose name is an integer (ctl/src/lib.rs, "Window managers").
+# Names live in bsctl (`bsctl ws name set`), not here.
+
+config-version = 2
+start-at-login = true
+enable-normalization-flatten-containers = true
+enable-normalization-opposite-orientation-for-nested-containers = true
+default-root-container-layout = 'tiles'
+default-root-container-orientation = 'auto'
+accordion-padding = 30
+persistent-workspaces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+
+# Only terminals tile. On macOS AeroSpace exists to arrange agent terminals
+# into battlespaces; every other app floats — keeps its own size and
+# position, never rearranged — on the workspace it opened in (so a browser
+# opened in a project's workspace travels with that project). AeroSpace has
+# no "unmanaged" windows: floating ones still hide when you leave their
+# workspace. First matching callback wins.
+[[on-window-detected]]
+if.app-id = 'net.kovidgoyal.kitty'
+run = 'layout tiling'
+
+[[on-window-detected]]
+if = 'true'
+run = 'layout floating'
+
+# No gaps: agent terminals are read side by side, so screen width goes to
+# text, not gutters.
+[gaps]
+inner.horizontal = 0
+inner.vertical = 0
+outer.left = 0
+outer.bottom = 0
+outer.top = 0
+outer.right = 0
+
+[mode.main.binding]
+# 1. Navigate · Ctrl+Option
+ctrl-alt-1 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 1'
+ctrl-alt-2 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 2'
+ctrl-alt-3 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 3'
+ctrl-alt-4 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 4'
+ctrl-alt-5 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 5'
+ctrl-alt-6 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 6'
+ctrl-alt-7 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 7'
+ctrl-alt-8 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 8'
+ctrl-alt-9 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 9'
+ctrl-alt-0 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --bs-id 10'
+ctrl-alt-b = 'exec-and-forget open battlestation://board'
+ctrl-alt-a = 'exec-and-forget open battlestation://deck'
+ctrl-alt-left = 'focus left'
+ctrl-alt-right = 'focus right'
+ctrl-alt-up = 'focus up'
+ctrl-alt-down = 'focus down'
+ctrl-alt-f1 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 1'
+ctrl-alt-f2 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 2'
+ctrl-alt-f3 = 'exec-and-forget $HOME/.local/bin/bsctl ws focus --display-id 3'
+
+# 2. Launch · Hyper
+# One kitty process for every terminal (one app in Cmd+Tab): --single-instance
+# hands the new window to the running kitty. bsctl routes per kitty window
+# id, so many windows in one process is fine (ctl/src/lib.rs, agents send).
+cmd-alt-ctrl-t = 'exec-and-forget /Applications/kitty.app/Contents/MacOS/kitty --single-instance --directory ~'
+
+# 3. Window · Hyper
+cmd-alt-ctrl-q = 'close'
+cmd-alt-ctrl-f = 'fullscreen'
+cmd-alt-ctrl-o = 'layout floating tiling'
+cmd-alt-ctrl-j = 'layout tiles horizontal vertical'
+# Moving past the screen edge continues onto the neighbouring monitor
+# (all-monitors-outer-frame), so the same keys carry a window across displays.
+cmd-alt-ctrl-left = 'move --boundaries all-monitors-outer-frame left'
+cmd-alt-ctrl-right = 'move --boundaries all-monitors-outer-frame right'
+cmd-alt-ctrl-up = 'move --boundaries all-monitors-outer-frame up'
+cmd-alt-ctrl-down = 'move --boundaries all-monitors-outer-frame down'
+
+# 4. Workspace · Hyper (plain = send & follow, SHIFT = send & stay)
+cmd-alt-ctrl-1 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 1 --focus'
+cmd-alt-ctrl-2 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 2 --focus'
+cmd-alt-ctrl-3 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 3 --focus'
+cmd-alt-ctrl-4 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 4 --focus'
+cmd-alt-ctrl-5 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 5 --focus'
+cmd-alt-ctrl-6 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 6 --focus'
+cmd-alt-ctrl-7 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 7 --focus'
+cmd-alt-ctrl-8 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 8 --focus'
+cmd-alt-ctrl-9 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 9 --focus'
+cmd-alt-ctrl-0 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 10 --focus'
+cmd-alt-ctrl-shift-1 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 1'
+cmd-alt-ctrl-shift-2 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 2'
+cmd-alt-ctrl-shift-3 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 3'
+cmd-alt-ctrl-shift-4 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 4'
+cmd-alt-ctrl-shift-5 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 5'
+cmd-alt-ctrl-shift-6 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 6'
+cmd-alt-ctrl-shift-7 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 7'
+cmd-alt-ctrl-shift-8 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 8'
+cmd-alt-ctrl-shift-9 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 9'
+cmd-alt-ctrl-shift-0 = 'exec-and-forget $HOME/.local/bin/bsctl ws send window --bs-id 10'
+cmd-alt-ctrl-shift-backspace = 'exec-and-forget $HOME/.local/bin/bsctl ws map reset'
+
+# 5. Displays · Hyper
+cmd-alt-ctrl-f1 = 'exec-and-forget $HOME/.local/bin/bsctl ws send workspace --display-id 1 --focus'
+cmd-alt-ctrl-f2 = 'exec-and-forget $HOME/.local/bin/bsctl ws send workspace --display-id 2 --focus'
+cmd-alt-ctrl-f3 = 'exec-and-forget $HOME/.local/bin/bsctl ws send workspace --display-id 3 --focus'
+cmd-alt-ctrl-shift-f1 = 'exec-and-forget $HOME/.local/bin/bsctl ws send workspace --display-id 1'
+cmd-alt-ctrl-shift-f2 = 'exec-and-forget $HOME/.local/bin/bsctl ws send workspace --display-id 2'
+cmd-alt-ctrl-shift-f3 = 'exec-and-forget $HOME/.local/bin/bsctl ws send workspace --display-id 3'
