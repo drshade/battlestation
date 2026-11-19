@@ -83,6 +83,24 @@ final class Store {
         if wake { run(["asks", "wake", String(ask.id)]) }
     }
 
+    /// Jump to the asker's window and take the item off the queue: the human
+    /// is handling it at the terminal now. An FYI (notify/review) is simply
+    /// dismissed. A question is answered with a handover line instead —
+    /// dismissal would release a blocked asker with "proceed on judgment",
+    /// the opposite of what jumping to it means.
+    func jump(_ ask: Ask) {
+        guard let s = world.agent(session: ask.session)?.session else { return }
+        run(["ws", "focus", "--session", s])
+        guard ask.isOpen else { return }
+        if ask.type == "notify" || ask.type == "review" {
+            run(["asks", "dismiss", String(ask.id)])
+        } else {
+            run(["asks", "answer", String(ask.id),
+                 "The human jumped to your terminal from the Deck to handle this — ask them there directly."])
+        }
+        if expandedAsk == ask.id { expandedAsk = nil }
+    }
+
     func refreshDeckSwitch() {
         Task {
             if let out = await Bsctl.read(["asks", "deck", "status"]) {
