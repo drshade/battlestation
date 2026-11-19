@@ -199,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var window: NSWindow?
+    private var notifier: Notifier?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSAppleEventManager.shared().setEventHandler(
@@ -213,7 +214,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
             rootView: MenuPanel(open: { [weak self] tab in self?.show(tab) }).environment(store))
-        store.onWorldChange = { [weak self] in self?.renderStatusItem() }
+        let notifier = Notifier(store: store) { [weak self] id in
+            self?.store.expandedAsk = id
+            self?.show(.deck)
+        }
+        self.notifier = notifier
+        store.onWorldChange = { [weak self] in
+            guard let self else { return }
+            renderStatusItem()
+            notifier.update(store.world)
+        }
         renderStatusItem()
         store.refreshDeckSwitch()
         store.startStream()

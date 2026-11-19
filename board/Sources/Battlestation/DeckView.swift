@@ -107,9 +107,7 @@ private struct AskCard: View {
 
     private var asker: Agent? { store.world.agent(session: ask.session) }
 
-    /// Panel.qml's willWake: the asker is idle at its prompt and not parked in
-    /// the blocking RPC, so answering should also type the wake line.
-    private var willWake: Bool { !ask.isBlocking && asker?.state == .waiting }
+    private var willWake: Bool { store.willWake(ask) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -260,13 +258,9 @@ private struct AskCard: View {
         }
     }
 
-    /// Panel.qml's submitAnswer: store the answer (answer, or complete when
-    /// empty); when the asker is idle, also fire the wake trigger.
     private func submit(_ text: String) {
         saveTask?.cancel()
-        let wake = willWake
-        store.run(text.isEmpty ? ["asks", "complete", String(ask.id)] : ["asks", "answer", String(ask.id), text])
-        if wake { store.run(["asks", "wake", String(ask.id)]) }
+        store.submit(ask, text)
         store.expandedAsk = nil
     }
 }

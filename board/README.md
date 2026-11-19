@@ -14,6 +14,14 @@ live agent, the open-asks count) and a window with three tabs:
   Enqueue, note tags, dismiss, reopen, the Deck switch.
 - **Links** — the Switchboard as a matrix.
 
+Each ask that lands on the Deck also posts a macOS notification banner,
+with Reply (and one button per option) answering it in place through the
+same verbs as the Deck tab, and a click opening it there. The banner is
+withdrawn once the ask is answered anywhere. Asks already queued when the
+app starts are not announced. macOS asks once whether to allow
+notifications; they are managed under System Settings → Notifications →
+Battlestation.
+
 It holds no state: it follows `bsctl status --format json --stream` and every
 gesture is a bsctl verb, so it can never disagree with the bar on Linux.
 `battlestation://board|deck|links` opens a tab (the AeroSpace keybinds use it).

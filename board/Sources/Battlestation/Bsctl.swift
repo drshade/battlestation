@@ -68,6 +68,21 @@ final class Store {
         Bsctl.run(args) { [weak self] msg in self?.lastError = msg }
     }
 
+    /// Panel.qml's willWake: the asker is idle at its prompt and not parked
+    /// in the blocking RPC, so answering should also type the wake line.
+    func willWake(_ ask: Ask) -> Bool {
+        !ask.isBlocking && world.agent(session: ask.session)?.state == .waiting
+    }
+
+    /// Panel.qml's submitAnswer: store the answer (answer, or complete when
+    /// empty); when the asker is idle, also fire the wake trigger. One path
+    /// for the Deck tab and the notification banner.
+    func submit(_ ask: Ask, _ text: String) {
+        let wake = willWake(ask)
+        run(text.isEmpty ? ["asks", "complete", String(ask.id)] : ["asks", "answer", String(ask.id), text])
+        if wake { run(["asks", "wake", String(ask.id)]) }
+    }
+
     func refreshDeckSwitch() {
         Task {
             if let out = await Bsctl.read(["asks", "deck", "status"]) {
