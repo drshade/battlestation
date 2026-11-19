@@ -54,7 +54,11 @@
 //!   none), and `term_pid` is that same clients row's OWN pid — the
 //!   terminal process owning the window (kitty here), as distinct from the
 //!   harness `pid` below (its descendant). All three refresh on every hook
-//!   event, so a moved terminal heals; `win` is what upgrades
+//!   event, so a moved terminal heals on disk; readers don't wait for that —
+//!   every live surface (`agents get`, `status`, the Switchboard) reads
+//!   through [`sessions::scan_live`], which re-reads `ws` from the window
+//!   manager's clients by `win`, so an idle agent's moved terminal shows on
+//!   its new workspace at once. `win` is what upgrades
 //!   `ws focus --session` from jump-to-workspace to jump-to-window. `pid`
 //!   is the HARNESS process — the nearest ancestor whose comm matches the
 //!   kind (harness binaries are named after their kind: comm `claude` /

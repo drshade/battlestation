@@ -20,7 +20,7 @@ use crate::{agents, asks, comms, ipc, presence, proto, sessions, sys, usage, ws}
 /// cache, so every streamer and poller combined pays at most one fetch per
 /// TTL — and the stream's tick is what picks a TTL expiry up.
 pub fn snapshot() -> Value {
-    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let recs = sessions::scan_live();
     let wsj = ipc::json("workspaces");
     let mons = ipc::json("monitors");
     let comms = comms::public_snapshot_from(&recs, wsj.as_ref());

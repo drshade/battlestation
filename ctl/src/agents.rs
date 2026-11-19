@@ -407,7 +407,7 @@ pub fn agent_rows(recs: Vec<Value>, kind: Option<&str>, session: Option<&str>) -
 /// One `agents get` result as its JSON line — the streaming form re-runs
 /// exactly this (an empty state dir is an honest `[]`, so it never fails).
 pub fn get_json(kind: Option<&str>, session: Option<&str>) -> String {
-    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let recs = sessions::scan_live();
     Value::Array(agent_rows(recs, kind, session)).to_string()
 }
 
@@ -453,7 +453,7 @@ pub fn send(session_id: &str, submit: bool, force: bool) -> i32 {
 /// spawn without round-tripping through a pipe. `submit` sends the Enter as a
 /// SEPARATE, delayed keystroke (a CR in the same burst is racy — see below).
 pub fn send_text(session_id: &str, text: &[u8], submit: bool, force: bool) -> i32 {
-    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let recs = sessions::scan_live();
     let Some(rec) = recs.iter().find(|r| proto::field(r, "sid") == session_id) else {
         eprintln!("bsctl: no live session {session_id}");
         return 1;
@@ -568,7 +568,7 @@ fn kitty_send_text(to: &str, matcher: Option<&str>, bytes: &[u8]) -> i32 {
 /// for no sessions. Shared by the one-shot form and its `--stream` text
 /// framing; like [`get_json`], it never fails.
 pub fn get_text(kind: Option<&str>, session: Option<&str>) -> String {
-    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let recs = sessions::scan_live();
     let rows = agent_rows(recs, kind, session);
     if rows.is_empty() {
         return String::new();

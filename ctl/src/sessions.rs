@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::{proto, sys};
+use crate::{ipc, proto, sys};
 
 /// `os.path.expanduser("~/.claude/projects")` — via $HOME. ($HOME is always
 /// set under a session; if it somehow isn't, the glob just never matches and
@@ -31,6 +31,46 @@ pub fn projects_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".claude/projects")
+}
+
+/// The scan every live surface reads: [`scan`] over the real roots, then
+/// [`heal_ws`] against the window manager's current clients. A session's
+/// `ws` is stamped by its hooks, so a terminal moved while its agent sits
+/// idle would keep reporting the old workspace until the next prompt; the
+/// window id (`win`) survives the move, so the live clients row is the
+/// fresher truth. Read-only — the record on disk heals at the next hook as
+/// before. No window manager reachable = the hook-time `ws` stands.
+pub fn scan_live() -> Vec<Value> {
+    let mut recs = scan(sys::now_f64(), &sys::state_dir(), &projects_dir());
+    if let Some(clients) = ipc::json("clients") {
+        heal_ws(&mut recs, &clients);
+    }
+    recs
+}
+
+/// Overwrite each record's `ws` with the workspace its `win` sits on now,
+/// per a Hyprland-shaped `clients` array (`[{address, workspace: {id}}]`).
+/// Records without a `win`, or whose window isn't listed, keep their `ws`.
+pub fn heal_ws(recs: &mut [Value], clients: &Value) {
+    let live: HashMap<&str, i64> = clients
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let addr = c.get("address")?.as_str().filter(|a| !a.is_empty())?;
+            let ws = proto::py_int(c.get("workspace")?.get("id")?)?;
+            Some((addr, ws))
+        })
+        .collect();
+    for r in recs {
+        let ws = r
+            .get("win")
+            .and_then(Value::as_str)
+            .and_then(|w| live.get(w).copied());
+        if let Some(ws) = ws {
+            r["ws"] = json!(ws);
+        }
+    }
 }
 
 /// The whole scan pass, with `now` and both roots injected for tests.
@@ -196,4 +236,29 @@ fn transcript_mtime(proj: &Path, sid: &str, aid: &str) -> Option<f64> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heal_ws_follows_the_window() {
+        let mut recs = vec![
+            json!({"sid": "a", "ws": 2, "win": "0xaaa"}), // moved 2 -> 5
+            json!({"sid": "b", "ws": 3, "win": "0xbbb"}), // window gone: keep
+            json!({"sid": "c", "ws": 4, "win": null}),    // no win: keep
+            json!({"sid": "d", "ws": 1, "win": "0xddd"}), // unmoved
+        ];
+        let clients = json!([
+            {"pid": 1, "address": "0xaaa", "workspace": {"id": 5}},
+            {"pid": 2, "address": "0xddd", "workspace": {"id": "1"}},
+            {"pid": 3, "address": "", "workspace": {"id": 9}},
+        ]);
+        heal_ws(&mut recs, &clients);
+        let ws: Vec<i64> = recs.iter().map(|r| r["ws"].as_i64().unwrap()).collect();
+        assert_eq!(ws, [5, 3, 4, 1]);
+        heal_ws(&mut recs, &json!("not an array")); // no clients: untouched
+        assert_eq!(recs[0]["ws"], 5);
+    }
 }

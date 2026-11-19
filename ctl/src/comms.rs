@@ -132,7 +132,7 @@ pub fn set_name(session: &str, raw: &str) -> Result<Value, String> {
         return Err("session identity is not available yet".into());
     }
     let name = normalize_name(raw)?;
-    let live = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let live = sessions::scan_live();
     let Some(own) = live.iter().find(|r| proto::field(r, "sid") == session) else {
         return Err("session is not live (see `bsctl agents get`)".into());
     };
@@ -162,11 +162,10 @@ pub fn set_name(session: &str, raw: &str) -> Result<Value, String> {
 
 pub fn link(a: &str, b: &str) -> Result<(), String> {
     let pair = canonical_link(a, b).ok_or("two different non-empty sessions are required")?;
-    let live: BTreeSet<String> =
-        sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir())
-            .into_iter()
-            .map(|r| proto::field(&r, "sid"))
-            .collect();
+    let live: BTreeSet<String> = sessions::scan_live()
+        .into_iter()
+        .map(|r| proto::field(&r, "sid"))
+        .collect();
     if !live.contains(&pair[0]) || !live.contains(&pair[1]) {
         return Err("both sessions must be live (see `bsctl agents get`)".into());
     }
@@ -196,16 +195,15 @@ fn resolve_named(workspace: &str, name: &str) -> Result<String, String> {
         return Err("workspace and name are required".into());
     }
     let (_, names, _, _) = load_from(&comms_dir());
-    let matches: Vec<String> =
-        sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir())
-            .into_iter()
-            .filter_map(|r| {
-                let sid = proto::field(&r, "sid");
-                (names.get(&sid).is_some_and(|n| n == name)
-                    && workspace_label(r.get("ws").and_then(proto::py_int)) == workspace)
-                    .then_some(sid)
-            })
-            .collect();
+    let matches: Vec<String> = sessions::scan_live()
+        .into_iter()
+        .filter_map(|r| {
+            let sid = proto::field(&r, "sid");
+            (names.get(&sid).is_some_and(|n| n == name)
+                && workspace_label(r.get("ws").and_then(proto::py_int)) == workspace)
+                .then_some(sid)
+        })
+        .collect();
     match matches.as_slice() {
         [session] => Ok(session.clone()),
         [] => Err(format!("no live agent named {workspace} / {name}")),
@@ -245,7 +243,7 @@ fn linked(links: &[[String; 2]], a: &str, b: &str) -> bool {
 /// same `(workspace, name)` identity agents use; unnamed sessions cannot be
 /// linked and therefore appear only as unnamed agent rows.
 pub fn public_snapshot() -> Value {
-    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let recs = sessions::scan_live();
     let workspaces = ipc::json("workspaces");
     public_snapshot_from(&recs, workspaces.as_ref())
 }
@@ -299,7 +297,7 @@ pub fn public_snapshot_from(recs: &[Value], workspaces: Option<&Value>) -> Value
 /// the CLI boundary. A tail selects the newest N records without reversing
 /// their chronological order.
 pub fn public_history(tail: Option<usize>) -> Value {
-    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let recs = sessions::scan_live();
     let workspaces = ipc::json("workspaces");
     public_history_from(&recs, workspaces.as_ref(), tail)
 }
@@ -425,7 +423,7 @@ pub fn peers(session: &str) -> Result<Vec<Value>, String> {
         return Err("session identity is not available yet".into());
     }
     let (_, names, links, _) = load_from(&comms_dir());
-    let recs = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let recs = sessions::scan_live();
     Ok(recs
         .into_iter()
         .filter(|r| linked(&links, session, &proto::field(r, "sid")))
@@ -451,7 +449,7 @@ pub fn send_named(from: &str, workspace: &str, name: &str, body: &str) -> Result
         return Err("workspace and name are required".into());
     }
     let (_, names, links, _) = load_from(&comms_dir());
-    let live = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let live = sessions::scan_live();
     let matches: Vec<String> = live
         .iter()
         .filter_map(|r| {
@@ -505,7 +503,7 @@ pub fn send(from: &str, to: &str, body: &str) -> Result<Sent, String> {
             "message must be at most {MAX_BODY_CHARS} characters"
         ));
     }
-    let live = sessions::scan(sys::now_f64(), &sys::state_dir(), &sessions::projects_dir());
+    let live = sessions::scan_live();
     let Some(sender) = live.iter().find(|r| proto::field(r, "sid") == from) else {
         return Err("sender session is not live".into());
     };
