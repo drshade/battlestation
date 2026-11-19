@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Battlestation app icon: a team of agents (status colours: thinking,
+       waiting, tooling) wired by Switchboard links, standing on the Deck.
+       bin/build renders it to the bundle's AppIcon.icns. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2B241B"/>
+      <stop offset="1" stop-color="#110E0A"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.55">
+      <stop offset="0" stop-color="#D9A04A" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#D9A04A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#glow)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#D9A04A" stroke-opacity="0.22" stroke-width="3"/>
+  <g fill="none" stroke="#D9A04A" stroke-width="16" stroke-linecap="round">
+    <path d="M262 484 C262 318 512 264 512 430"/>
+    <path d="M512 430 C512 264 762 318 762 484"/>
+  </g>
+  <path fill="#3FB950" d="M244 488h36v19h-36zM244 506h36v19h-36zM172 524h180v19h-180zM172 542h180v18h-180zM172 560h36v19h-36zM244 560h36v19h-36zM316 560h36v19h-36zM172 578h36v19h-36zM244 578h36v19h-36zM316 578h36v19h-36zM172 596h180v18h-180zM190 614h36v19h-36zM298 614h36v19h-36zM190 632h36v18h-36zM298 632h36v18h-36z"/>
+  <path fill="#A371F7" d="M744 488h36v19h-36zM744 506h36v19h-36zM672 524h180v19h-180zM672 542h180v18h-180zM672 560h36v19h-36zM744 560h36v19h-36zM816 560h36v19h-36zM672 578h36v19h-36zM744 578h36v19h-36zM816 578h36v19h-36zM672 596h180v18h-180zM690 614h36v19h-36zM798 614h36v19h-36zM690 632h36v18h-36zM798 632h36v18h-36z"/>
+  <path fill="#D97757" d="M488 434h48v25h-48zM488 458h48v25h-48zM392 482h240v25h-240zM392 506h240v24h-240zM392 530h48v25h-48zM488 530h48v25h-48zM584 530h48v25h-48zM392 554h48v25h-48zM488 554h48v25h-48zM584 554h48v25h-48zM392 578h240v24h-240zM416 602h48v25h-48zM560 602h48v25h-48zM416 626h48v24h-48zM560 626h48v24h-48z"/>
+  <rect x="172" y="678" width="680" height="34" rx="17" fill="#D9A04A"/>
+  <rect x="172" y="734" width="680" height="20" rx="10" fill="#D9A04A" fill-opacity="0.35"/>
+</svg>

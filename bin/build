@@ -55,6 +55,15 @@ else
   install -m755 "$bin_dir/Battlestation" "$stage/Contents/MacOS/Battlestation"
   cp board/Info.plist "$stage/Contents/Info.plist"
   cp -R "$assets" "$stage/Contents/Resources/assets"
+  # The icon's source is board/Icon/icon.svg; the icns is a cached render
+  # (gitignored under board/.build), redone whenever the svg changes.
+  icns=board/.build/AppIcon.icns
+  if [ ! -f "$icns" ] || [ board/Icon/icon.svg -nt "$icns" ] || [ board/Icon/render.swift -nt "$icns" ]; then
+    rm -rf board/.build/AppIcon.iconset
+    swift board/Icon/render.swift board/Icon/icon.svg board/.build/AppIcon.iconset
+    iconutil -c icns -o "$icns" board/.build/AppIcon.iconset
+  fi
+  cp "$icns" "$stage/Contents/Resources/AppIcon.icns"
   codesign --force --sign - "$stage" >/dev/null 2>&1   # ad-hoc: local use only
   rm -rf "$app" && mv "$stage" "$app"
   # Register the battlestation:// URL scheme with LaunchServices.
